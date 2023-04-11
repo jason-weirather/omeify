@@ -1,0 +1,10 @@
+name: omeify
+channels:
+  - defaults
+dependencies:
+  - python >=3.9
+  - numpy
+  - pandas
+  - gradle =7.4.2
+  - openjdk >=8
+
