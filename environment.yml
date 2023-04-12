@@ -1,0 +1,10 @@
+# environment.yml
+name: omeify
+channels:
+  - defaults
+  - vacation
+dependencies:
+  - python
+  - bioformats2raw=0.6.1
+  - raw2ometiff=0.4.1
+
