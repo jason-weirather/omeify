@@ -1,4 +1,4 @@
-import os
+import os, re
 import tempfile
 import subprocess
 import logging
@@ -6,11 +6,29 @@ import shutil
 import zarr
 
 class Bioformats2RawConverter:
+    # make a class level logger
+    logger = logging.getLogger(__name__)
+
     def __init__(self, input_image):
         self.input_image = input_image
         self.raw = None
         self.raw_path = None
         self.logger = logging.getLogger(__name__)
+    @classmethod
+    def get_version(cls):
+        cls.logger.info(f"Getting bioformats2raw version")
+        try:
+            result = subprocess.run(['bioformats2raw','--version'],
+                capture_output=True,text=True,check=True)
+            m = re.search('Version = (\S+)',result.stdout.strip())
+            if not m:
+                cls.logger.warning(f"Failed to extract version from bioformats2raw")
+                return None
+            else:
+                return m.group(1)
+        except subprocess.CalledProcessError as e:
+            cls.logger.warning(f"Error occured while trying to get the version of bioformats2raw: {e}")
+            return None
     def print_raw_path(self,prefix = " "):
         print_directory_tree(self.raw_path,prefix)
     def get_ome_xml(self):
@@ -77,7 +95,3 @@ class Bioformats2RawConverter:
         if self.logger.isEnabledFor(logging.WARNING) and process.stderr:
             self.logger.error(process.stderr.decode("utf-8"))
 
-        # You can check the output or handle errors here, if necessary
-        # For example:
-        # if process.returncode != 0:
-        #     raise Exception(f"Error during bioformats2raw conversion: {process.stderr.decode('utf-8')}")

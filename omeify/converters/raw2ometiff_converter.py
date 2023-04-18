@@ -1,4 +1,4 @@
-import os
+import os, re
 import tempfile
 import subprocess
 import logging
@@ -8,6 +8,9 @@ from os import PathLike
 from zarr.hierarchy import Group
 
 class Raw2OmeTiffConverter:
+    # make a class level logger
+    logger = logging.getLogger(__name__)
+
     def __init__(self, input_raw):
         self.input_raw = None
         self.logger = logging.getLogger(__name__)
@@ -18,6 +21,22 @@ class Raw2OmeTiffConverter:
             self.input_raw = input_raw
         else:
             raise ValueError("input_raw must be a directory path or a zarr.hierarchy.Group object.")
+
+    @classmethod
+    def get_version(cls):
+        cls.logger.info(f"Getting raw2ometiff version")
+        try:
+            result = subprocess.run(['raw2ometiff','--version'],
+                capture_output=True,text=True,check=True)
+            m = re.search('Version = (\S+)',result.stdout.strip())
+            if not m:
+                cls.logger.warning(f"Failed to extract version from raw2ometiff")
+                return None
+            else:
+                return m.group(1)
+        except subprocess.CalledProcessError as e:
+            cls.logger.warning(f"Error occured while trying to get the version of raw2ometiff: {e}")
+            return None
 
     def convert(self, output_path, rgb = False):
         conversion = self._run_raw2ometiff(output_path,rgb)
@@ -47,8 +66,4 @@ class Raw2OmeTiffConverter:
         if self.logger.isEnabledFor(logging.WARNING) and process.stderr:
             self.logger.error(process.stderr.decode("utf-8"))
 
-        # You can check the output or handle errors here, if necessary
-        # For example:
-        # if process.returncode != 0:
-        #     raise Exception(f"Error during raw2ometiff conversion: {process.stderr.decode('utf-8')}")
         return output_path

@@ -4,6 +4,7 @@ from omeify.utils.generate_ome_xml import generate_ome_xml
 
 import os
 import logging
+import hashlib
 
 class GenericConversion:
     def __init__(self, input_file_path, series=None):
@@ -24,6 +25,8 @@ class GenericConversion:
     def convert(self, output_path, display_uuid = True):
         from omeify.utils import OMESchemaValidator
         from omeschema import get_ome_schema_path
+        from omeify import __version__ as my_omeify_version
+        from tiffinspector import __version__ as my_tiffinspector_version
 
         # Convert the currently selected series
         if self.logger.isEnabledFor(logging.INFO):
@@ -45,10 +48,26 @@ class GenericConversion:
         b2r_converter.cleanup()
         osv = OMESchemaValidator(schema_location = get_ome_schema_path())
         return {
+            'input_path':self.input_file_path,
+            'input_md5_checksum': md5_checksum(self.input_file_path),
+            'input_series':self.series,
             'output_path':output_path,
+            'output_md5_checksum': md5_checksum(output_path),
+            'output_uuid':myuuid,
             'ome_xml':omexml,
             'ome_schema_location':osv.schema_location,
             'ome_xml_is_valid':osv.validate(omexml),
-            'uuid':myuuid
+            'versions':{
+                'omeify':my_omeify_version,
+                'bioformats2raw':Bioformats2RawConverter.get_version(),
+                'raw2ometiff':Raw2OmeTiffConverter.get_version(),
+                'tiff-inspector':my_tiffinspector_version,
+            }
         }
 
+def md5_checksum(file_path):
+    md5_hash = hashlib.md5()
+    with open(file_path, 'rb') as file:
+        for chunk in iter(lambda: file.read(4096), b''):
+            md5_hash.update(chunk)
+    return md5_hash.hexdigest()

@@ -18,7 +18,7 @@ def generate_ome_xml(tiff_features,zarr_object,display_uuid=True):
 
     # Add optional attributes to the root element
     if display_uuid: root.set("UUID", f"urn:uuid:{myuuid}")
-    root.set("Creator", f'omeify v{omeify.__version__}')
+    #root.set("Creator", f'omeify v{omeify.__version__}')
 
 
     # Create an Image element
