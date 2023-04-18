@@ -12,6 +12,7 @@ def main():
                                   required=True, 
                                   help='Input image type (qptiff_mif: Akoya mIF qptiff, qptiff_he: Akoya H&E qptiff)')
     parser.add_argument('--series', type=int, default=0, help='Series number (integer)')
+    parser.add_argument('--omit_uuid', action='store_true', help='Omit UUID in OME tag')
     parser.add_argument('-v','--verbose', action='store_true', help='Enable verbose logging')
     args = parser.parse_args()
 
