@@ -1,6 +1,6 @@
 # omeify
 
-`omeify` is a Python package designed to streamline the conversion of TIFF files into the OME-TIFF format, which has been deidentified using the MITI standard. This package relies on two Java tools: [bioformats2raw](https://github.com/glencoesoftware/bioformats2raw) and [raw2ometiff](https://github.com/glencoesoftware/raw2ometiff).
+`omeify` is a Python package designed to streamline the conversion of various image files, such as TIFF files, into the OME-TIFF format. The generated OME-TIFF files are deidentified following the MITI standard. This package relies on two Java tools: [bioformats2raw](https://github.com/glencoesoftware/bioformats2raw) and [raw2ometiff](https://github.com/glencoesoftware/raw2ometiff).
 
 ## Dependencies
 
@@ -15,11 +15,45 @@
 
 ## Installation
 
-*Instructions on how to install `omeify` and its dependencies will be added here.*
+1. Install the `omeify` package:
+
+```bash
+pip install omeify
+```
 
 ## Usage
 
-*Instructions on how to use `omeify` will be added here.*
+### Command Line Interface (CLI)
+
+You can use `omeify` through the command line interface by running the following command:
+
+```bash
+omeify input output --type TYPE --series SERIES --rename_channels_json RENAME_CHANNELS_JSON --omit_uuid --output_json OUTPUT_JSON -v
+```
+
+* `input`: Input image file path.
+* `output`: Output OME-TIFF file path.
+* `--type`: Input image type (qptiff_mif: Akoya mIF qptiff, qptiff_he: Akoya H&E qptiff).
+* `--series`: Series number (integer).
+* `--rename_channels_json`: JSON file that contains a channel renaming dictionary.
+* `--omit_uuid`: Omit UUID in OME tag (optional).
+* `--output_json`: Output file for run info (optional).
+* `-v` `--verbose`: Enable verbose logging (optional).
+
+## Python API
+
+You can also use `omeify` within your Python scripts:
+
+```py
+from omeify.inputs import AkoyaMIFQptiff, AkoyaHEQptiff
+
+input_processor = AkoyaMIFQptiff(input_file_path, series=series_number)
+input_processor.rename_channels = rename_channels_dict
+
+output_info = input_processor.convert(output_file_path, display_uuid=True)
+```
+
+Replace `AkoyaMIFQptiff` with `AkoyaHEQptiff` if you are working with H&E qptiff files.
 
 ## License
 
