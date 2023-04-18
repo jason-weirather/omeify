@@ -129,7 +129,7 @@ class TiffImageFeatures:
     def type(self):
         return self.report['series'][self.series]\
             ['levels'][0]['pages'][0]['metadata']['dtype']
-
+    
     @property
     def channels(self):
         # Needs to be overriden

@@ -4,7 +4,7 @@ import omeify
 import uuid
 import xmltodict
 
-def generate_ome_xml(tiff_features,zarr_object):
+def generate_ome_xml(tiff_features,zarr_object,display_uuid=True):
 
     # Create the root element with the specified namespace and attributes
     namespaces = {
@@ -16,7 +16,7 @@ def generate_ome_xml(tiff_features,zarr_object):
     }, nsmap=namespaces)
 
     # Add optional attributes to the root element
-    root.set("UUID", f"urn:uuid:{uuid.uuid4()}")
+    if display_uuid: root.set("UUID", f"urn:uuid:{uuid.uuid4()}")
     root.set("Creator", f'omeify v{omeify.__version__}')
 
 
@@ -53,7 +53,6 @@ def generate_ome_xml(tiff_features,zarr_object):
         etree.SubElement(channel, "LightPath")
     
     etree.SubElement(pixels, "MetadataOnly")
-
     
     # Get the build OME tiff
     preomexml = None

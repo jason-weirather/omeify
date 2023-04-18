@@ -21,9 +21,9 @@ class GenericConversion:
         # This may involve using the specific ImageFeatures class to parse the input
         raise NotImplementedError("Needs to be implemented for the specific input type.")
 
-    def convert(self, output_path):
+    def convert(self, output_path, display_uuid = True):
         from omeify.utils import OMESchemaValidator
-        
+
         # Convert the currently selected series
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info(f"Converting Series [{self.series}] into OME-TIFF")
@@ -32,7 +32,7 @@ class GenericConversion:
         tf = self.generate_original_tiff_features()
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info("Constructing OME metadata...")
-        omexml = generate_ome_xml(tf, zarr)
+        omexml = generate_ome_xml(tf, zarr, display_uuid = True)
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info(f"Constructed OME metadata:\n{omexml}")
         # now replace the METADATA.ome.xml
