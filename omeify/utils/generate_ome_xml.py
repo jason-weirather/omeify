@@ -4,7 +4,7 @@ import omeify
 import uuid
 import xmltodict
 
-def generate_ome_xml(tiff_features,zarr_object,display_uuid=True):
+def generate_ome_xml(tiff_features,zarr_object,display_uuid=True, rename_channels = {}):
     myuuid = None
     if display_uuid: myuuid = str(uuid.uuid4())
     # Create the root element with the specified namespace and attributes
@@ -49,9 +49,9 @@ def generate_ome_xml(tiff_features,zarr_object,display_uuid=True):
     for c in tiff_features.channels:
         channel = etree.SubElement(pixels, "Channel", 
             ID=f"{c['ID']}", 
-            Name=f"{c['Name']}", 
+            Name=f"{c['Name'] if c['Name'] not in rename_channels else rename_channels[c['Name']]}", 
             SamplesPerPixel=f"{c['SamplesPerPixel']}")
-        etree.SubElement(channel, "LightPath")
+        #etree.SubElement(channel, "LightPath")
     
     #etree.SubElement(pixels, "MetadataOnly")
 

@@ -5,8 +5,8 @@ from omeify.converters import Raw2OmeTiffConverter
 
 
 class AkoyaHEQptiff(GenericConversion):
-    def __init__(self, input_file_path, series=0):
-        super().__init__(input_file_path, series=series)
+    def __init__(self, input_file_path, series=0, rename_channels = {}):
+        super().__init__(input_file_path, series=series, rename_channels = rename_channels)
 
     def generate_original_tiff_features(self):
         # Add code here to update the OME-TIFF metadata based on AkoyaHeTiffImageFeatures

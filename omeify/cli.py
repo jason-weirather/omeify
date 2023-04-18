@@ -11,6 +11,7 @@ def main():
                                   required=True, 
                                   help='Input image type (qptiff_mif: Akoya mIF qptiff, qptiff_he: Akoya H&E qptiff)')
     parser.add_argument('--series', type=int, default=0, help='Series number (integer)')
+    parser.add_argument('--rename_channels_json', type=str, help='JSON file that contains channel renaming dictionary')
     parser.add_argument('--omit_uuid', action='store_true', help='Omit UUID in OME tag')
     parser.add_argument('--output_json', type=str, help='Output file for run info')
     parser.add_argument('-v','--verbose', action='store_true', help='Enable verbose logging')
@@ -25,6 +26,14 @@ def main():
     elif args.type == 'qptiff_he':
         input_processor = AkoyaHEQptiff(args.input,series=args.series)
 
+    if args.rename_channels_json:
+        _d = {}
+        with open(args.rename_channels_json,'rt') as inf:
+            _d = json.loads(inf.read())
+        input_processor.rename_channels = _d
+
+
+
     output_info = input_processor.convert(args.output,display_uuid = False if args.omit_uuid else True)
 
     if args.output_json:
@@ -32,6 +41,8 @@ def main():
             f.write(json.dumps(output_info,indent=2))
     else:
         print(json.dumps(output_info,indent=2))
+    
+
 
 if __name__ == '__main__':
     main()

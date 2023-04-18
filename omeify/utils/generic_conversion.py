@@ -7,10 +7,26 @@ import logging
 import hashlib
 
 class GenericConversion:
-    def __init__(self, input_file_path, series=None):
+    def __init__(self, input_file_path, series = 0, rename_channels = {}):
         self.input_file_path = input_file_path
-        self.series = series
+        self._rename_channels = rename_channels
+        self._series = series
         self.logger = logging.getLogger(__name__)
+
+    @property
+    def series(self):
+        return self._series
+    @series.setter
+    def series(self, value):
+        self._series = value
+    
+    @property
+    def rename_channels(self):
+        return self._rename_channels    
+    @rename_channels.setter
+    def rename_channels(self, value):
+        self._rename_channels = value
+
 
     def raw2ometiff(self,zarr,output_path):
         #Raw2OmeTiffConverter(zarr.store.path).convert(output_path)
@@ -36,7 +52,7 @@ class GenericConversion:
         tf = self.generate_original_tiff_features()
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info("Constructing OME metadata...")
-        _d = generate_ome_xml(tf, zarr, display_uuid = display_uuid)
+        _d = generate_ome_xml(tf, zarr, display_uuid = display_uuid, rename_channels = self.rename_channels)
         omexml = _d['xml_string']
         myuuid = _d['uuid']
         if self.logger.isEnabledFor(logging.INFO):
@@ -51,6 +67,7 @@ class GenericConversion:
             'input_path':self.input_file_path,
             'input_md5_checksum': md5_checksum(self.input_file_path),
             'input_series':self.series,
+            'rename_channels':self.rename_channels,
             'output_path':output_path,
             'output_md5_checksum': md5_checksum(output_path),
             'output_uuid':myuuid,
