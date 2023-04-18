@@ -56,7 +56,7 @@ def generate_ome_xml(tiff_features,zarr_object,display_uuid=True):
     #etree.SubElement(pixels, "MetadataOnly")
 
     # Create a MapAnnotation element and add it to the StructuredAnnotations
-    etree.SubElement(pixels, "TiffData", IFD="0", PlaneCount=f"{len(tiff_features.channels)}")
+    etree.SubElement(pixels, "TiffData", IFD="0", PlaneCount=f"{tiff_features.plane_count}")
 
     
     # Get the build OME tiff

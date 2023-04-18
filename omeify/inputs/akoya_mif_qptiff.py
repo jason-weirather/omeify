@@ -32,7 +32,11 @@ class AkoyaMIFQptiffImageFeatures(TiffImageFeatures):
     def size_c(self):
         # Implement the platform-specific logic for retrieving the size_c here
         return len(self.report['series'][self.series]['levels'][0]['pages'])
-        
+
+    @property
+    def plane_count(self):
+        return len(self.report['series'][self.series]['levels'][0]['pages'])    
+
     # Override the channels property
     @property
     def channels(self):

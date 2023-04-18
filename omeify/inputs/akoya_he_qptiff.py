@@ -30,6 +30,10 @@ class AkoyaHEQptiffImageFeatures(TiffImageFeatures):
     def size_c(self):
         # Implement the platform-specific logic for retrieving the size_c here
         return 3
+
+    @property
+    def plane_count(self):
+        return 1
         
     # Override the channels property
     @property

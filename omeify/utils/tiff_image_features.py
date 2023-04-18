@@ -129,6 +129,11 @@ class TiffImageFeatures:
     def type(self):
         return self.report['series'][self.series]\
             ['levels'][0]['pages'][0]['metadata']['dtype']
+
+    @property
+    def plane_count(self):
+        # Needs to be overriden
+        raise NotImplementedError("Needs to be overriden by specific image type.")
     
     @property
     def channels(self):
