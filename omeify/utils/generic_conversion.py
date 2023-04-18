@@ -11,7 +11,15 @@ class GenericConversion:
         self.input_file_path = input_file_path
         self._rename_channels = rename_channels
         self._series = series
+        self._cache_directory = None
         self.logger = logging.getLogger(__name__)
+
+    @property
+    def cache_directory(self):
+        return self._cache_directory
+    @cache_directory.setter
+    def cache_directory(self, value):
+        self._cache_directory = value
 
     @property
     def series(self):
@@ -48,7 +56,7 @@ class GenericConversion:
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info(f"Converting Series [{self.series}] into OME-TIFF")
         b2r_converter = Bioformats2RawConverter(self.input_file_path)
-        zarr = b2r_converter.convert(series=self.series)
+        zarr = b2r_converter.convert(series = self.series, cache_directory = self.cache_directory)
         tf = self.generate_original_tiff_features()
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info("Constructing OME metadata...")

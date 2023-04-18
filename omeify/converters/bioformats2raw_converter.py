@@ -38,13 +38,14 @@ class Bioformats2RawConverter:
         with open(os.path.join(self.raw.store.path,'OME','METADATA.ome.xml'),'r') as inf:
             ome_xml = inf.read()
         return ome_xml
-    def convert(self,series, output_zarr_directory=None):
+    def convert(self,series, cache_directory=None):
         # Create a temporary directory for the intermediate raw files
         tmp_dir = None
-        if output_zarr_directory is not None:
-            if not os.path.exists(self.raw_path):
-                os.makedirs(self.raw_path)
-        elif self.raw_path is None:
+        if cache_directory is not None:
+            if not os.path.exists(cache_directory):
+                os.makedirs(cache_directory)
+            tmp_dir = tempfile.mkdtemp(suffix=".zarr", dir=cache_directory)
+        elif cache_directory is None:
             tmp_dir = tempfile.mkdtemp(suffix = ".zarr")
 
         try:
