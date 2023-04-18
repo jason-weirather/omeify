@@ -77,6 +77,6 @@ def generate_ome_xml(tiff_features,zarr_object):
         etree.SubElement(value_element, "M", K=f"{item['@K']}").text = item['#text']
 
     # To view the XML tree as a string, use the following code:
-    xml_string = etree.tostring(root, pretty_print=True, encoding="utf-8", xml_declaration=True).decode("utf-8")
+    xml_string = etree.tostring(root, pretty_print=False, encoding="utf-8", xml_declaration=True).decode("utf-8")
     
     return xml_string

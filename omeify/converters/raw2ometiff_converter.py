@@ -20,7 +20,8 @@ class Raw2OmeTiffConverter:
             raise ValueError("input_raw must be a directory path or a zarr.hierarchy.Group object.")
 
     def convert(self, output_path, rgb = False):
-        output_path = self._run_raw2ometiff(output_path,rgb)
+        conversion = self._run_raw2ometiff(output_path,rgb)
+        return conversion
 
     def _run_raw2ometiff(self,output_path,rgb):
         cmd = [

@@ -57,7 +57,7 @@ class TiffImageFeatures:
     @property
     def big_endian(self):
         # Set according to conversion scripts
-        return True
+        return "true"
         #return False if self.report['metadata']['byteorder'] == '<' else True
 
     @property
@@ -73,7 +73,7 @@ class TiffImageFeatures:
     @property
     def interleaved(self):
         # Set according to conversion scripts
-        return False
+        return "false"
 
     @property
     def physical_size_x(self):

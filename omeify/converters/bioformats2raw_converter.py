@@ -13,6 +13,13 @@ class Bioformats2RawConverter:
         self.logger = logging.getLogger(__name__)
     def print_raw_path(self,prefix = " "):
         print_directory_tree(self.raw_path,prefix)
+    def get_ome_xml(self):
+        if self.raw is None:
+            raise ValueError("Need to convert first.")
+        ome_xml = None
+        with open(os.path.join(self.raw.store.path,'OME','METADATA.ome.xml'),'r') as inf:
+            ome_xml = inf.read()
+        return ome_xml
     def convert(self,series, output_zarr_directory=None):
         # Create a temporary directory for the intermediate raw files
         tmp_dir = None

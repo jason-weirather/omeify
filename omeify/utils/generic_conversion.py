@@ -1,6 +1,7 @@
 from omeify.converters import Bioformats2RawConverter
 from omeify.converters import Raw2OmeTiffConverter
 from omeify.utils.generate_ome_xml import generate_ome_xml
+
 import os
 import logging
 
@@ -21,6 +22,8 @@ class GenericConversion:
         raise NotImplementedError("Needs to be implemented for the specific input type.")
 
     def convert(self, output_path):
+        from omeify.utils import OMESchemaValidator
+        
         # Convert the currently selected series
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info(f"Converting Series [{self.series}] into OME-TIFF")
@@ -37,4 +40,11 @@ class GenericConversion:
             output_file.write(omexml)
         self.raw2ometiff(zarr,output_path)
         b2r_converter.cleanup()
+        osv = OMESchemaValidator()
+        return {
+            'output_path':output_path,
+            'ome_xml':omexml,
+            'ome_schema_location':osv.schema_location,
+            'ome_xml_is_valid':osv.validate(omexml)
+        }
 
