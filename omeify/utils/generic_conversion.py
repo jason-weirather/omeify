@@ -33,7 +33,7 @@ class GenericConversion:
         tf = self.generate_original_tiff_features()
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info("Constructing OME metadata...")
-        omexml = generate_ome_xml(tf, zarr, display_uuid = True)
+        omexml = generate_ome_xml(tf, zarr, display_uuid = display_uuid)
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info(f"Constructed OME metadata:\n{omexml}")
         # now replace the METADATA.ome.xml

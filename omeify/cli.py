@@ -25,7 +25,7 @@ def main():
     elif args.type == 'qptiff_he':
         input_processor = AkoyaHEQptiff(args.input,series=args.series)
 
-    input_processor.convert(args.output)
+    input_processor.convert(args.output,display_uuid = False if args.omit_uuid else True)
 
 if __name__ == '__main__':
     main()
