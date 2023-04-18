@@ -33,7 +33,9 @@ class GenericConversion:
         tf = self.generate_original_tiff_features()
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info("Constructing OME metadata...")
-        omexml = generate_ome_xml(tf, zarr, display_uuid = display_uuid)
+        _d = generate_ome_xml(tf, zarr, display_uuid = display_uuid)
+        omexml = _d['xml_string']
+        myuuid = _d['uuid']
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info(f"Constructed OME metadata:\n{omexml}")
         # now replace the METADATA.ome.xml
@@ -46,6 +48,7 @@ class GenericConversion:
             'output_path':output_path,
             'ome_xml':omexml,
             'ome_schema_location':osv.schema_location,
-            'ome_xml_is_valid':osv.validate(omexml)
+            'ome_xml_is_valid':osv.validate(omexml),
+            'uuid':myuuid
         }
 

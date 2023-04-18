@@ -13,6 +13,7 @@ def main():
                                   help='Input image type (qptiff_mif: Akoya mIF qptiff, qptiff_he: Akoya H&E qptiff)')
     parser.add_argument('--series', type=int, default=0, help='Series number (integer)')
     parser.add_argument('--omit_uuid', action='store_true', help='Omit UUID in OME tag')
+    parser.add_argument('--uuid_output', type=str, help='Output file for UUID')
     parser.add_argument('-v','--verbose', action='store_true', help='Enable verbose logging')
     args = parser.parse_args()
 
@@ -25,7 +26,14 @@ def main():
     elif args.type == 'qptiff_he':
         input_processor = AkoyaHEQptiff(args.input,series=args.series)
 
-    input_processor.convert(args.output,display_uuid = False if args.omit_uuid else True)
+    _d = input_processor.convert(args.output,display_uuid = False if args.omit_uuid else True)
+    myuuid = _d['uuid']
+
+    if args.uuid_output and not args.omit_uuid:
+        with open(args.uuid_output, 'w') as f:
+            f.write(myuuid)
+    elif not args.omit_uuid:
+        print(myuuid)
 
 if __name__ == '__main__':
     main()

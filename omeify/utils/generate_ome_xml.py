@@ -5,7 +5,8 @@ import uuid
 import xmltodict
 
 def generate_ome_xml(tiff_features,zarr_object,display_uuid=True):
-
+    myuuid = None
+    if display_uuid: myuuid = str(uuid.uuid4())
     # Create the root element with the specified namespace and attributes
     namespaces = {
         None: "http://www.openmicroscopy.org/Schemas/OME/2016-06",
@@ -16,7 +17,7 @@ def generate_ome_xml(tiff_features,zarr_object,display_uuid=True):
     }, nsmap=namespaces)
 
     # Add optional attributes to the root element
-    if display_uuid: root.set("UUID", f"urn:uuid:{uuid.uuid4()}")
+    if display_uuid: root.set("UUID", f"urn:uuid:{myuuid}")
     root.set("Creator", f'omeify v{omeify.__version__}')
 
 
@@ -78,4 +79,4 @@ def generate_ome_xml(tiff_features,zarr_object,display_uuid=True):
     # To view the XML tree as a string, use the following code:
     xml_string = etree.tostring(root, pretty_print=False, encoding="utf-8", xml_declaration=True).decode("utf-8")
     
-    return xml_string
+    return {'xml_string':xml_string, 'uuid':myuuid}
