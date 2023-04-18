@@ -23,6 +23,7 @@ class GenericConversion:
 
     def convert(self, output_path, display_uuid = True):
         from omeify.utils import OMESchemaValidator
+        from omeschema import get_ome_schema_path
 
         # Convert the currently selected series
         if self.logger.isEnabledFor(logging.INFO):
@@ -40,7 +41,7 @@ class GenericConversion:
             output_file.write(omexml)
         self.raw2ometiff(zarr,output_path)
         b2r_converter.cleanup()
-        osv = OMESchemaValidator()
+        osv = OMESchemaValidator(schema_location = get_ome_schema_path())
         return {
             'output_path':output_path,
             'ome_xml':omexml,

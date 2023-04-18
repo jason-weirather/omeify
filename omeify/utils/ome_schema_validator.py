@@ -20,7 +20,7 @@ class OMESchemaValidator:
                 raise Exception(f"Error downloading schema: {response.status_code} {resonse.text}")
             self.schema_lxml = etree.XMLSchema(etree.fromstring(response.content))
         else:
-            with open(schema_location) as inf:
+            with open(schema_location,'rb') as inf:
                 self.schema_lxml = etree.XMLSchema(etree.fromstring(inf.read()))
         self.schema_location = schema_location
 
