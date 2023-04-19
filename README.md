@@ -4,7 +4,7 @@
 
 ## Docker quickstart
 
-```bash
+```
 $ docker pull vacation/omeify:latest
 $ docker run --rm -v $(pwd):$(pwd) -u $(id -u):$(id -g) vacation/omeify:latest omeify -h
 usage: omeify [-h] --type {qptiff_mif,qptiff_he} [--series SERIES]
