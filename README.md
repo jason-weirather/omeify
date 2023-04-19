@@ -1,6 +1,6 @@
 # omeify
 
-`omeify` is a Python package designed to streamline the conversion of various image files, such as TIFF files, into the OME-TIFF format. The generated OME-TIFF files are deidentified following the MITI standard. This package relies on two Java tools: [bioformats2raw](https://github.com/glencoesoftware/bioformats2raw) and [raw2ometiff](https://github.com/glencoesoftware/raw2ometiff).
+`omeify` is a Python package designed to streamline the conversion of various image files, such as TIFF files, into the OME-TIFF format. The generated OME-TIFF files are deidentified following the MITI standard. This package relies on two Java tools: [bioformats2raw](https://github.com/glencoesoftware/bioformats2raw) `0.6.1` and [raw2ometiff](https://github.com/glencoesoftware/raw2ometiff) `0.4.1`.
 
 ## Docker quickstart
 
