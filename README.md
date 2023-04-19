@@ -33,7 +33,7 @@ options:
                         Output file for run info (default: None)
   --cache_directory CACHE_DIRECTORY
                         Path to a directory for storing temporary Zarr
-                        directories. Defaults to the system's temporary
+                        directories. Defaults to the system temporary
                         folder. (default: None)
   -v, --verbose         Enable verbose logging (default: False)
 ```

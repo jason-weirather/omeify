@@ -7,7 +7,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name='omeify',
-    version='0.1.0',
+    version='0.1.1',
     author='Jason L Weirather',
     author_email='jason.weirather@gmail.com',
     license='MIT',
