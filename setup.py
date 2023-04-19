@@ -21,7 +21,8 @@ setup(
         'ipytree',
         'zarr',
         'tiff-inspector',
-        'ome-schema'
+        'ome-schema',
+        'lxml'
     ],
     entry_points={
         'console_scripts': [
