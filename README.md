@@ -2,6 +2,42 @@
 
 `omeify` is a Python package designed to streamline the conversion of various image files, such as TIFF files, into the OME-TIFF format. The generated OME-TIFF files are deidentified following the MITI standard. This package relies on two Java tools: [bioformats2raw](https://github.com/glencoesoftware/bioformats2raw) and [raw2ometiff](https://github.com/glencoesoftware/raw2ometiff).
 
+## Docker quickstart
+
+```bash
+$ docker pull vacation/omeify:latest
+$ docker run --rm -v $(pwd):$(pwd) -u $(id -u):$(id -g) vacation/omeify:latest omeify -h
+usage: omeify [-h] --type {qptiff_mif,qptiff_he} [--series SERIES]
+              [--rename_channels_json RENAME_CHANNELS_JSON] [--omit_uuid]
+              [--output_json OUTPUT_JSON] [--cache_directory CACHE_DIRECTORY]
+              [-v]
+              input output
+
+omeify: Convert images into OME-TIFF format
+
+positional arguments:
+  input                 Input image file path
+  output                Output OME-TIFF file path
+
+options:
+  -h, --help            show this help message and exit
+  --type {qptiff_mif,qptiff_he}
+                        Input image type (qptiff_mif: Akoya mIF qptiff,
+                        qptiff_he: Akoya H&E qptiff) (default: None)
+  --series SERIES       Series number (integer) (default: 0)
+  --rename_channels_json RENAME_CHANNELS_JSON
+                        JSON file that contains channel renaming dictionary
+                        (default: None)
+  --omit_uuid           Omit UUID in OME tag (default: False)
+  --output_json OUTPUT_JSON
+                        Output file for run info (default: None)
+  --cache_directory CACHE_DIRECTORY
+                        Path to a directory for storing temporary Zarr
+                        directories. Defaults to the system's temporary
+                        folder. (default: None)
+  -v, --verbose         Enable verbose logging (default: False)
+```
+
 ## Dependencies
 
 - `bioformats2raw`: A Java application that converts various image file formats, including .mrxs, to an intermediate Zarr structure compatible with the OME-NGFF specification. This tool is used in conjunction with `raw2ometiff` to produce a Bio-Formats 5.9.x ("Faas") or Bio-Formats 6.x (true OME-TIFF) pyramid.
