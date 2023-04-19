@@ -85,6 +85,8 @@ RUN cd /Source/omeify && \
 #ENTRYPOINT ["bash", "-c", "source /miniconda/etc/profile.d/conda.sh && conda activate base && $0 \"$@\"", "--"]
 
 RUN chmod +x /Source/omeify/entrypoint.sh
+RUN chmod -R a+rx /Source/bioformats2raw/build/bin
+RUN chmod -R a+rx /Source/raw2ometiff/build/bin
 
 
 ENTRYPOINT ["/Source/omeify/entrypoint.sh"]
