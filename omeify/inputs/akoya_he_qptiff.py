@@ -13,7 +13,7 @@ class AkoyaHEQptiff(GenericConversion):
         return AkoyaHEQptiffImageFeatures(self.input_file_path, series = self.series)
 
     def raw2ometiff(self,zarr,output_path):
-        Raw2OmeTiffConverter(zarr.store.path).convert(output_path, rgb = True)
+        Raw2OmeTiffConverter(zarr.store.path).convert(output_path, rgb = False)
 
 class AkoyaHEQptiffImageFeatures(TiffImageFeatures):
     def __init__(self, tiff_file_path, series=0):
@@ -33,16 +33,35 @@ class AkoyaHEQptiffImageFeatures(TiffImageFeatures):
 
     @property
     def plane_count(self):
-        return 1
+        return 3
         
     # Override the channels property
     @property
     def channels(self):
+        '''
+        channel_features = [
+            {
+                'ID':'Channel:00',
+                'Name':'RGB',
+                'SamplesPerPixel':3
+            },
+        ]
+        '''
         channel_features = [
             {
                 'ID':'Channel:0:0',
-                'Name':'RGB',
-                'SamplesPerPixel':3
+                'Name':'RED',
+                'SamplesPerPixel':1
+            },
+            {
+                'ID':'Channel:0:1',
+                'Name':'GREEN',
+                'SamplesPerPixel':1
+            },
+            {
+                'ID':'Channel:0:2',
+                'Name':'BLUE',
+                'SamplesPerPixel':1
             },
         ]
         return channel_features

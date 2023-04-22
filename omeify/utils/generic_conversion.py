@@ -46,7 +46,7 @@ class GenericConversion:
         # This may involve using the specific ImageFeatures class to parse the input
         raise NotImplementedError("Needs to be implemented for the specific input type.")
 
-    def convert(self, output_path, display_uuid = True):
+    def convert(self, output_path, display_uuid = True, deidentify_ome = True):
         from omeify.utils import OMESchemaValidator
         from omeschema import get_ome_schema_path
         from omeify import __version__ as my_omeify_version
@@ -65,9 +65,13 @@ class GenericConversion:
         myuuid = _d['uuid']
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info(f"Constructed OME metadata:\n{omexml}")
-        # now replace the METADATA.ome.xml
-        with open(os.path.join(zarr.store.path,'OME','METADATA.ome.xml'),'w') as output_file:
-            output_file.write(omexml)
+        if deidentify_ome:
+            # now replace the METADATA.ome.xml
+            with open(os.path.join(zarr.store.path,'OME','METADATA.ome.xml'),'w') as output_file:
+                output_file.write(omexml)
+        else:
+            with open(os.path.join(zarr.store.path,'OME','METADATA.ome.xml'),'rt') as inf:
+                omexml = inf.read()
         self.raw2ometiff(zarr,output_path)
         b2r_converter.cleanup()
         osv = OMESchemaValidator(schema_location = get_ome_schema_path())
