@@ -2,9 +2,12 @@ from omeify.converters import Bioformats2RawConverter
 from omeify.converters import Raw2OmeTiffConverter
 from omeify.utils.generate_ome_xml import generate_ome_xml
 
+from datetime import datetime
+
 import os
 import logging
 import hashlib
+import time
 
 class GenericConversion:
     def __init__(self, input_file_path, series = 0, rename_channels = {}):
@@ -35,6 +38,10 @@ class GenericConversion:
     def rename_channels(self, value):
         self._rename_channels = value
 
+    @property
+    def input_type(self):
+        # String representation of the input type
+        raise NotImplementedError("Needs to be implemented for the specific input type.")
 
     def raw2ometiff(self,zarr,output_path):
         #Raw2OmeTiffConverter(zarr.store.path).convert(output_path)
@@ -46,11 +53,12 @@ class GenericConversion:
         # This may involve using the specific ImageFeatures class to parse the input
         raise NotImplementedError("Needs to be implemented for the specific input type.")
 
-    def convert(self, output_path, display_uuid = True, deidentify_ome = True):
+    def convert(self, output_path, display_uuid = True, deidentify_ome = True, compression = 'LZW'):
+        start_time = time.time()
+
         from omeify.utils import OMESchemaValidator
         from omeschema import get_ome_schema_path
-        from omeify import __version__ as my_omeify_version
-        from tiffinspector import __version__ as my_tiffinspector_version
+        from omeify import get_version_info
 
         # Convert the currently selected series
         if self.logger.isEnabledFor(logging.INFO):
@@ -72,26 +80,61 @@ class GenericConversion:
         else:
             with open(os.path.join(zarr.store.path,'OME','METADATA.ome.xml'),'rt') as inf:
                 omexml = inf.read()
-        self.raw2ometiff(zarr,output_path)
+        if os.path.exists(output_path):
+            self.logger.info("Overwriting existing output file by removing it first.")
+            os.remove(output_path)
+        self.raw2ometiff(zarr,output_path,compression)
         b2r_converter.cleanup()
         osv = OMESchemaValidator(schema_location = get_ome_schema_path())
+
+        # now get file information
+        input_size = os.path.getsize(self.input_file_path)
+        output_size = os.path.getsize(output_path)
+        compression_ratio = output_size / input_size
+
+
+        stop_time = time.time()
+
+        run_time = stop_time - start_time
+
+        # make run times readable
+        start_time_readable = datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S')
+        stop_time_readable = datetime.fromtimestamp(stop_time).strftime('%Y-%m-%d %H:%M:%S')
+        run_time_readable = f"{run_time // 3600:02.0f}:{(run_time % 3600) // 60:02.0f}:{run_time % 60:05.2f}"
+
         return {
-            'input_path':self.input_file_path,
-            'input_md5_checksum': md5_checksum(self.input_file_path),
-            'input_series':self.series,
-            'rename_channels':self.rename_channels,
-            'output_path':output_path,
-            'output_md5_checksum': md5_checksum(output_path),
-            'output_uuid':myuuid,
-            'ome_xml':omexml,
-            'ome_schema_location':osv.schema_location,
-            'ome_xml_is_valid':osv.validate(omexml),
-            'versions':{
-                'omeify':my_omeify_version,
-                'bioformats2raw':Bioformats2RawConverter.get_version(),
-                'raw2ometiff':Raw2OmeTiffConverter.get_version(),
-                'tiff-inspector':my_tiffinspector_version,
-            }
+            'ome':{
+                'xml_string':omexml,
+                'schema_location':osv.schema_location,
+                'xml_is_valid':osv.validate(omexml),
+                'uuid':myuuid,
+            },
+            'input_file':{
+                'path':self.input_file_path,
+                'md5_checksum': md5_checksum(self.input_file_path),
+                'size_bytes':input_size,
+                'type_description':self.input_type,
+            },
+            'output_file':{
+                'path':output_path,
+                'md5_checksum': md5_checksum(output_path),
+                'size_bytes':output_size,
+                'type_description':'OME-TIFF',
+            },
+            'options':{
+                'compression':compression,
+                'deidentify_ome':deidentify_ome,
+                'display_uuid':display_uuid,
+                'series':self.series,
+                'rename_channels':self.rename_channels,
+            },
+            'conversion_stats':{
+                'start_time': start_time_readable,
+                'stop_time': stop_time_readable,
+                'run_time': run_time_readable,
+                'compression_ratio':compression_ratio,
+            },
+            'versions':get_version_info()
         }
 
 def md5_checksum(file_path):

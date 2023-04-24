@@ -58,7 +58,8 @@ class Bioformats2RawConverter:
             self.raw_path = tmp_dir
         except Exception as e:
             # clean up temp dir in case of error
-            shutil.rmtree(tmp_dir)
+            if tmp_dir is not None and tmp_dir.endswith('.zarr') and os.path.isdir(tmp_dir):
+                shutil.rmtree(tmp_dir)
             raise e
         return self.raw
     def cleanup(self):

@@ -38,15 +38,16 @@ class Raw2OmeTiffConverter:
             cls.logger.warning(f"Error occured while trying to get the version of raw2ometiff: {e}")
             return None
 
-    def convert(self, output_path, rgb = False):
-        conversion = self._run_raw2ometiff(output_path,rgb)
+    def convert(self, output_path, rgb = False, compression = None):
+        conversion = self._run_raw2ometiff(output_path,rgb,compression)
         return conversion
 
-    def _run_raw2ometiff(self,output_path,rgb):
+    def _run_raw2ometiff(self,output_path,rgb,compression):
         cmd = [
             "raw2ometiff",
             "-p" if self.logger.isEnabledFor(logging.INFO) else None,
             "--rgb" if rgb else None,
+            f'--compression={compression}' if compression else None,
             self.input_raw.store.path,
             output_path,
             # Additional command line arguments can be added here

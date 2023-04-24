@@ -10,7 +10,7 @@ $ docker run --rm -v $(pwd):$(pwd) -u $(id -u):$(id -g) vacation/omeify:latest o
 usage: omeify [-h] --type {qptiff_mif,qptiff_he} [--series SERIES]
               [--rename_channels_json RENAME_CHANNELS_JSON] [--omit_uuid]
               [--output_json OUTPUT_JSON] [--cache_directory CACHE_DIRECTORY]
-              [-v]
+              [--compression {LZW,JPEG,Uncompressed}] [-v] [--version]
               input output
 
 omeify: Convert images into OME-TIFF format
@@ -33,9 +33,14 @@ options:
                         Output file for run info (default: None)
   --cache_directory CACHE_DIRECTORY
                         Path to a directory for storing temporary Zarr
-                        directories. Defaults to the system temporary
-                        folder. (default: None)
+                        directories. Defaults to the system temporary folder.
+                        (default: None)
+  --compression {LZW,JPEG,Uncompressed}
+                        Compression type for output OME-TIFF file (LZW, JPEG)
+                        (default: LZW)
   -v, --verbose         Enable verbose logging (default: False)
+  --version             Display omeify and constituent programs versions
+                        (default: False)
 ```
 
 ## Dependencies
@@ -63,18 +68,39 @@ pip install omeify
 
 You can use `omeify` through the command line interface by running the following command:
 
-```bash
-omeify input output --type TYPE --series SERIES --rename_channels_json RENAME_CHANNELS_JSON --omit_uuid --output_json OUTPUT_JSON -v
 ```
+$ omeify -h
+usage: omeify [-h] --type {qptiff_mif,qptiff_he} [--series SERIES]
+              [--rename_channels_json RENAME_CHANNELS_JSON] [--omit_uuid] [--output_json OUTPUT_JSON]
+              [--cache_directory CACHE_DIRECTORY] [--compression {LZW,JPEG,Uncompressed}] [-v]
+              [--version]
+              input output
 
-* `input`: Input image file path.
-* `output`: Output OME-TIFF file path.
-* `--type`: Input image type (qptiff_mif: Akoya mIF qptiff, qptiff_he: Akoya H&E qptiff).
-* `--series`: Series number (integer).
-* `--rename_channels_json`: JSON file that contains a channel renaming dictionary.
-* `--omit_uuid`: Omit UUID in OME tag (optional).
-* `--output_json`: Output file for run info (optional).
-* `-v` `--verbose`: Enable verbose logging (optional).
+omeify: Convert images into OME-TIFF format
+
+positional arguments:
+  input                 Input image file path
+  output                Output OME-TIFF file path
+
+options:
+  -h, --help            show this help message and exit
+  --type {qptiff_mif,qptiff_he}
+                        Input image type (qptiff_mif: Akoya mIF qptiff, qptiff_he: Akoya H&E qptiff)
+                        (default: None)
+  --series SERIES       Series number (integer) (default: 0)
+  --rename_channels_json RENAME_CHANNELS_JSON
+                        JSON file that contains channel renaming dictionary (default: None)
+  --omit_uuid           Omit UUID in OME tag (default: False)
+  --output_json OUTPUT_JSON
+                        Output file for run info (default: None)
+  --cache_directory CACHE_DIRECTORY
+                        Path to a directory for storing temporary Zarr directories. Defaults to the
+                        system temporary folder. (default: None)
+  --compression {LZW,JPEG,Uncompressed}
+                        Compression type for output OME-TIFF file (LZW, JPEG) (default: LZW)
+  -v, --verbose         Enable verbose logging (default: False)
+  --version             Display omeify and constituent programs versions (default: False)
+```
 
 ## Python API
 

@@ -51,7 +51,7 @@ def generate_ome_xml(tiff_features,zarr_object,display_uuid=True, rename_channel
             ID=f"{c['ID']}", 
             Name=f"{c['Name'] if c['Name'] not in rename_channels else rename_channels[c['Name']]}", 
             SamplesPerPixel=f"{c['SamplesPerPixel']}")
-        #etree.SubElement(channel, "LightPath")
+        etree.SubElement(channel, "LightPath")
     
     #etree.SubElement(pixels, "MetadataOnly")
 

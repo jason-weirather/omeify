@@ -14,8 +14,13 @@ class AkoyaMIFQptiff(GenericConversion):
         # Add code here to update the OME-TIFF metadata based on AkoyaHeTiffImageFeatures
         return AkoyaMIFQptiffImageFeatures(self.input_file_path, series = self.series)
 
-    def raw2ometiff(self,zarr,output_path):
-        Raw2OmeTiffConverter(zarr.store.path).convert(output_path, rgb = False)
+    def raw2ometiff(self, zarr, output_path, compression):
+        Raw2OmeTiffConverter(zarr.store.path).convert(output_path, rgb = False, compression = compression)
+
+    @property
+    def input_type(self):
+        # String representation of the input type
+        return "Akoya MIF QPTIFF"
 
 class AkoyaMIFQptiffImageFeatures(TiffImageFeatures):
     def __init__(self, tiff_file_path, series=0):

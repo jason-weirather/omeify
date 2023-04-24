@@ -1,8 +1,13 @@
 # cli.py
-import argparse, json, logging
+import argparse, json, logging, sys
 from .inputs import AkoyaMIFQptiff, AkoyaHEQptiff
 
 def main():
+    if '--version' in sys.argv:
+        from omeify import get_version_info
+        print(json.dumps(get_version_info(), indent=2))
+        sys.exit(0)
+
     parser = argparse.ArgumentParser(description='omeify: Convert images into OME-TIFF format', 
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('input', type=str, help='Input image file path')
@@ -15,7 +20,10 @@ def main():
     parser.add_argument('--omit_uuid', action='store_true', help='Omit UUID in OME tag')
     parser.add_argument('--output_json', type=str, help='Output file for run info')
     parser.add_argument('--cache_directory', type=str, help="Path to a directory for storing temporary Zarr directories. Defaults to the system temporary folder.")
+    parser.add_argument('--compression', type=str, default='LZW', choices=['LZW', 'JPEG', 'Uncompressed'], help='Compression type for output OME-TIFF file (LZW, JPEG)')
     parser.add_argument('-v','--verbose', action='store_true', help='Enable verbose logging')
+    parser.add_argument('--version', action='store_true', help='Display omeify and constituent programs versions')
+
     args = parser.parse_args()
 
     # Set up logging
@@ -37,7 +45,7 @@ def main():
         input_processor.rename_channels = _d
 
 
-    output_info = input_processor.convert(args.output,display_uuid = False if args.omit_uuid else True)
+    output_info = input_processor.convert(args.output,display_uuid = False if args.omit_uuid else True, compression = args.compression)
 
     if args.output_json:
         with open(args.output_json, 'w') as f:
