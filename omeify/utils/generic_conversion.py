@@ -90,6 +90,7 @@ class GenericConversion:
             with open(os.path.join(zarr.store.path,'OME','METADATA.ome.xml'),'w') as output_file:
                 output_file.write(omexml)
         else:
+            raise ValueError("Only deidentification is currently enabled")
             with open(os.path.join(zarr.store.path,'OME','METADATA.ome.xml'),'rt') as inf:
                 omexml = inf.read()
         if os.path.exists(output_path):

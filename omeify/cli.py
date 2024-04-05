@@ -23,6 +23,8 @@ def main():
     parser.add_argument('--compression', type=str, default='LZW', choices=['LZW', 'JPEG', 'Uncompressed'], help='Compression type for output OME-TIFF file (LZW, JPEG)')
     parser.add_argument('-v','--verbose', action='store_true', help='Enable verbose logging')
     parser.add_argument('--version', action='store_true', help='Display omeify and constituent programs versions')
+    parser.add_argument('--physical_size_x_um', help='Provide a size in um for x pixel size for types where one is not provided')
+    parser.add_argument('--physical_size_y_um', help='Provide a size in um for y pixel size for types where one is not provided')
 
     args = parser.parse_args()
 
@@ -35,7 +37,14 @@ def main():
     elif args.type == 'qptiff_he':
         input_processor = AkoyaHEQptiff(args.input,series=args.series)
     elif args.type == 'component':
-        input_processor = AkoyaComponentTiff(args.input,series=args.series)
+        if args.physical_size_x_um is None or args.physical_size_y_um is None:
+            raise ValueError("When generating a component OME tiff the arguments physical_size_x_um and physical_size_y_um are required.")
+        input_processor = AkoyaComponentTiff(
+            args.input,
+            series=args.series,
+            physical_size_x_um=args.physical_size_x_um,
+            physical_size_y_um=args.physical_size_y_um
+        )
 
     if args.cache_directory:
         input_processor.cache_directory = args.cache_directory

@@ -4,12 +4,15 @@ from omeify.converters import Raw2OmeTiffConverter
 import xmltodict
 
 class AkoyaComponentTiff(GenericConversion):
-    def __init__(self, input_file_path, series=0, rename_channels = {}):
+    def __init__(self, input_file_path, series=0, physical_size_x_um=0.496, physical_size_y_um=0.496, rename_channels = {}):
         super().__init__(input_file_path, series=series, rename_channels = rename_channels)
+        # Need to pass along these dimensions
+        self._physical_size_x_um = physical_size_x_um
+        self._physical_size_y_um = physical_size_y_um
 
     def generate_original_tiff_features(self):
         # Add code here to update the OME-TIFF metadata based on AkoyaHeTiffImageFeatures
-        return AkoyaComponentTiffImageFeatures(self.input_file_path, series = self.series)
+        return AkoyaComponentTiffImageFeatures(self.input_file_path, series = self.series, physical_size_x_um = self._physical_size_x_um, physical_size_y_um = self._physical_size_y_um)
 
     def raw2ometiff(self, zarr, output_path, compression):
         Raw2OmeTiffConverter(zarr.store.path).convert(output_path, rgb = False, compression = compression)
@@ -20,8 +23,10 @@ class AkoyaComponentTiff(GenericConversion):
         return "Akoya Component TIFF"
 
 class AkoyaComponentTiffImageFeatures(TiffImageFeatures):
-    def __init__(self, tiff_file_path, series=0):
+    def __init__(self, tiff_file_path, series=0, physical_size_x_um=0.496, physical_size_y_um=0.496):
         super().__init__(tiff_file_path, series)
+        self._physical_size_x_um = physical_size_x_um
+        self._physical_size_y_um = physical_size_y_um
 
     # Override the name property
     @property
@@ -29,15 +34,25 @@ class AkoyaComponentTiffImageFeatures(TiffImageFeatures):
         # Implement the platform-specific logic for retrieving the name here
         return 'Component'
 
+    # Override the type property
+    @property
+    def type(self):
+        # Tifffile dtypes aren't 1:1 with OME specification for tifffile
+        if self.report['series'][self.series]['levels'][0]['pages'][0]['metadata']['dtype'] == 'float32':
+            return 'float'
+        return self.report['series'][self.series]\
+            ['levels'][0]['pages'][0]['metadata']['dtype']
+
+
     # Override the size property
     @property
     def physical_size_x(self):
-        return 0.496
+        return  self._physical_size_x_um
 
     # Override the size property
     @property
     def physical_size_y(self):
-        return 0.496
+        return  self._physical_size_y_um
     
     # Override the size_c property
     @property

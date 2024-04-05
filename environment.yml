@@ -2,9 +2,9 @@
 name: omeify
 channels:
   - defaults
-  - vacation
+  - ome
 dependencies:
   - python
-  - bioformats2raw=0.6.1
-  - raw2ometiff=0.4.1
+  - bioformats2raw=0.9.1
+  - raw2ometiff=0.5.0
 
