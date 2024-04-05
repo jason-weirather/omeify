@@ -2,6 +2,9 @@ from omeify.converters import Bioformats2RawConverter
 from omeify.converters import Raw2OmeTiffConverter
 from omeify.utils.generate_ome_xml import generate_ome_xml
 
+import xml.dom.minidom
+
+
 from datetime import datetime
 
 import os
@@ -71,8 +74,17 @@ class GenericConversion:
         _d = generate_ome_xml(tf, zarr, display_uuid = display_uuid, rename_channels = self.rename_channels)
         omexml = _d['xml_string']
         myuuid = _d['uuid']
+
+        # Parse the XML string
+        dom = xml.dom.minidom.parseString(omexml)
+
+        # Pretty-print the XML
+        prettyxml = dom.toprettyxml(indent="  ")
+
+
+
         if self.logger.isEnabledFor(logging.INFO):
-            self.logger.info(f"Constructed OME metadata:\n{omexml}")
+            self.logger.info(f"Constructed OME metadata:\n{prettyxml}")
         if deidentify_ome:
             # now replace the METADATA.ome.xml
             with open(os.path.join(zarr.store.path,'OME','METADATA.ome.xml'),'w') as output_file:

@@ -22,7 +22,10 @@ setup(
         'zarr',
         'tiff-inspector',
         'ome-schema',
-        'lxml'
+        'lxml',
+        'numpy',
+        'six',
+        'python-dateutil>=2.8.2'
     ],
     entry_points={
         'console_scripts': [

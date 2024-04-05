@@ -1,8 +1,15 @@
 from lxml import etree
+
+
 import os
 import omeify
 import uuid
 import xmltodict
+
+def get_map_annotation(xml_path):
+    tree = etree.parse(xml_path)
+    map_annotation = tree.find(".//{http://www.openmicroscopy.org/Schemas/OME/2016-06}MapAnnotation")
+    return map_annotation
 
 def generate_ome_xml(tiff_features,zarr_object,display_uuid=True, rename_channels = {}):
     myuuid = None
@@ -58,27 +65,16 @@ def generate_ome_xml(tiff_features,zarr_object,display_uuid=True, rename_channel
     # Create a MapAnnotation element and add it to the StructuredAnnotations
     etree.SubElement(pixels, "TiffData", IFD="0", PlaneCount=f"{tiff_features.plane_count}")
 
-    
     # Get the build OME tiff
-    preomexml = None
-    with open(os.path.join(zarr_object.store.path,'OME','METADATA.ome.xml'),mode='r') as inf:
-        preomexml = xmltodict.parse(inf.read())['OME']\
-            ['StructuredAnnotations']\
-            ['MapAnnotation']\
-            ['Value']\
-            ['M']
-    #print(preomexml)
+
+    map_annotation = get_map_annotation(os.path.join(zarr_object.store.path,'OME','METADATA.ome.xml'))
+
     # Create a StructuredAnnotations element
     structured_annotations = etree.SubElement(root, "StructuredAnnotations")
 
-    # Create a MapAnnotation element and add it to the StructuredAnnotations
-    map_annotation = etree.SubElement(structured_annotations, "MapAnnotation", ID="Annotation:Resolution:0", Namespace="openmicroscopy.org/PyramidResolution")
-
-    # Create a Value element and add it to the MapAnnotation
-    value_element = etree.SubElement(map_annotation, "Value")
-
-    for item in preomexml:
-        etree.SubElement(value_element, "M", K=f"{item['@K']}").text = item['#text']
+    if map_annotation is not None:
+        # Smaller images may not have map annotation
+        structured_annotations.append(map_annotation)
 
     # To view the XML tree as a string, use the following code:
     xml_string = etree.tostring(root, pretty_print=False, encoding="utf-8", xml_declaration=True).decode("utf-8")

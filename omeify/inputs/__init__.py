@@ -1,2 +1,3 @@
 from .akoya_mif_qptiff import AkoyaMIFQptiff
 from .akoya_he_qptiff import AkoyaHEQptiff
+from .akoya_component_tiff import AkoyaComponentTiff
