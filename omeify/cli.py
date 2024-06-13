@@ -1,6 +1,6 @@
 # cli.py
 import argparse, json, logging, sys
-from .inputs import AkoyaMIFQptiff, AkoyaHEQptiff, AkoyaComponentTiff
+from .inputs import AkoyaMIFQptiff, AkoyaHEQptiff, HaloMIFTiff, AkoyaComponentTiff
 
 def main():
     if '--version' in sys.argv:
@@ -12,9 +12,9 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('input', type=str, help='Input image file path')
     parser.add_argument('output', type=str, help='Output OME-TIFF file path')
-    parser.add_argument('--type', choices=['qptiff_mif', 'qptiff_he','component'], 
+    parser.add_argument('--type', choices=['qptiff_mif', 'qptiff_he','halo_mif','component'], 
                                   required=True, 
-                                  help='Input image type (qptiff_mif: Akoya mIF qptiff, qptiff_he: Akoya H&E qptiff, component: Akoya Component tiff)')
+                                  help='Input image type (qptiff_mif: Akoya mIF qptiff, qptiff_he: Akoya H&E qptiff, halo_mif: HALO mIF tiff, component: Akoya Component tiff)')
     parser.add_argument('--series', type=int, default=0, help='Series number (integer)')
     parser.add_argument('--rename_channels_json', type=str, help='JSON file that contains channel renaming dictionary')
     parser.add_argument('--omit_uuid', action='store_true', help='Omit UUID in OME tag')
@@ -36,6 +36,8 @@ def main():
         input_processor = AkoyaMIFQptiff(args.input,series=args.series)
     elif args.type == 'qptiff_he':
         input_processor = AkoyaHEQptiff(args.input,series=args.series)
+    elif args.type == 'qptiff_he':
+        input_processor = HaloMIFTiff(args.input,series=args.series)
     elif args.type == 'component':
         if args.physical_size_x_um is None or args.physical_size_y_um is None:
             raise ValueError("When generating a component OME tiff the arguments physical_size_x_um and physical_size_y_um are required.")
