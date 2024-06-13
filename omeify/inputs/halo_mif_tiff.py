@@ -63,4 +63,13 @@ class HaloMIFTiffImageFeatures(TiffImageFeatures):
         _tags_dict = dict([(x[0],x[4]) for x in page['tags']])
         _d = xmltodict.parse(_tags_dict['ImageDescription'])
         channel_features = _d['OME']['Image']['Pixels']['Channel']
+        # replace keys with ones without @ symbols
+        replacement = {'@ID':'ID',
+              '@Name':'Name',
+              '@SamplesPerPixel':'SamplesPerPixel',
+              '@Color':'Color'}
+        for d in channel_features:
+            for k, v in list(d.items()):
+                d[replacement.get(k, k)] = d.pop(k)
+        
         return channel_features
