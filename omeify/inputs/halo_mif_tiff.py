@@ -43,6 +43,18 @@ class HaloMIFTiffImageFeatures(TiffImageFeatures):
     def physical_size_y(self):
         return self.image_description['OME']\
             ['Image']['Pixels']['@PhysicalSizeY']
+    
+    # Override the size_x property
+    @property
+    def size_x(self):
+        return self.image_description['OME']\
+            ['Image']['Pixels']['@SizeX']
+    
+    # Override the size_y property
+    @property
+    def size_y(self):
+        return self.image_description['OME']\
+            ['Image']['Pixels']['@SizeY']
 
     # Override the size_c property
     @property
