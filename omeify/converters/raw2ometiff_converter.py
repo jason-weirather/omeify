@@ -62,7 +62,12 @@ class Raw2OmeTiffConverter:
 
         if self.logger.isEnabledFor(logging.INFO):
             self.logger.info("Executing raw2ometiff conversion...")
-        process = subprocess.run(cmd, check=True, stdout=stdout_setting, stderr=stderr_setting)
+            
+        #process = subprocess.run(cmd, check=True, stdout=stdout_setting, stderr=stderr_setting)
+        try:
+            process = subprocess.run(cmd, check=True, stdout=stdout_setting, stderr=stderr_setting)
+        except subprocess.CalledProcessError as e:
+            print(f"Command failed with exit code {e.returncode}: {e.stderr}")
 
         if self.logger.isEnabledFor(logging.WARNING) and process.stderr:
             self.logger.error(process.stderr.decode("utf-8"))

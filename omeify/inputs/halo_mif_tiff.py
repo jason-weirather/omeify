@@ -60,11 +60,15 @@ class HaloMIFTiffImageFeatures(TiffImageFeatures):
     @property
     def size_c(self):
         # Implement the platform-specific logic for retrieving the size_c here
-        return len(self.report['series'][self.series]['levels'][0]['pages'])
+        #return len(self.report['series'][self.series]['levels'][0]['pages'])
+        return self.image_description['OME']\
+            ['Image']['Pixels']['@SizeC']
 
     @property
     def plane_count(self):
-        return len(self.report['series'][self.series]['levels'][0]['pages'])    
+        #return len(self.report['series'][self.series]['levels'][0]['pages'])
+        return self.image_description['OME']\
+            ['Image']['Pixels']['@SizeZ']
 
     # Override the channels property
     @property
