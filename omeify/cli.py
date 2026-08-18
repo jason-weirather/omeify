@@ -1,72 +1,219 @@
-# cli.py
-import argparse, json, logging, sys
-from .inputs import AkoyaMIFQptiff, AkoyaHEQptiff, HaloMIFTiff, AkoyaComponentTiff
+from __future__ import annotations
 
-def main():
-    if '--version' in sys.argv:
-        from omeify import get_version_info
-        print(json.dumps(get_version_info(), indent=2))
-        sys.exit(0)
+import json
+import logging
+from pathlib import Path
+from typing import Any
 
-    parser = argparse.ArgumentParser(description='omeify: Convert images into OME-TIFF format', 
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('input', type=str, help='Input image file path')
-    parser.add_argument('output', type=str, help='Output OME-TIFF file path')
-    parser.add_argument('--type', choices=['qptiff_mif', 'qptiff_he','halo_mif','component'], 
-                                  required=True, 
-                                  help='Input image type (qptiff_mif: Akoya mIF qptiff, qptiff_he: Akoya H&E qptiff, halo_mif: HALO mIF tiff, component: Akoya Component tiff)')
-    parser.add_argument('--series', type=int, default=0, help='Series number (integer)')
-    parser.add_argument('--rename_channels_json', type=str, help='JSON file that contains channel renaming dictionary')
-    parser.add_argument('--omit_uuid', action='store_true', help='Omit UUID in OME tag')
-    parser.add_argument('--output_json', type=str, help='Output file for run info')
-    parser.add_argument('--cache_directory', type=str, help="Path to a directory for storing temporary Zarr directories. Defaults to the system temporary folder.")
-    parser.add_argument('--compression', type=str, default='LZW', choices=['LZW', 'JPEG', 'Uncompressed'], help='Compression type for output OME-TIFF file (LZW, JPEG)')
-    parser.add_argument('-v','--verbose', action='store_true', help='Enable verbose logging')
-    parser.add_argument('--version', action='store_true', help='Display omeify and constituent programs versions')
-    parser.add_argument('--physical_size_x_um', help='Provide a size in um for x pixel size for types where one is not provided')
-    parser.add_argument('--physical_size_y_um', help='Provide a size in um for y pixel size for types where one is not provided')
+import click
 
-    args = parser.parse_args()
+from omeify import get_version_info
+from omeify.inputs import AkoyaComponentTiff, AkoyaHEQptiff, AkoyaMIFQptiff, HaloMIFTiff
 
-    # Set up logging
-    log_level = logging.INFO if args.verbose else logging.WARNING
-    logging.basicConfig(level=log_level)
 
-    if args.type == 'qptiff_mif':
-        input_processor = AkoyaMIFQptiff(args.input,series=args.series)
-    elif args.type == 'qptiff_he':
-        input_processor = AkoyaHEQptiff(args.input,series=args.series)
-    elif args.type == 'qptiff_he':
-        input_processor = HaloMIFTiff(args.input,series=args.series)
-    elif args.type == 'component':
-        if args.physical_size_x_um is None or args.physical_size_y_um is None:
-            raise ValueError("When generating a component OME tiff the arguments physical_size_x_um and physical_size_y_um are required.")
-        input_processor = AkoyaComponentTiff(
-            args.input,
-            series=args.series,
-            physical_size_x_um=args.physical_size_x_um,
-            physical_size_y_um=args.physical_size_y_um
+def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo(json.dumps(get_version_info(), indent=2))
+    ctx.exit()
+
+
+def _load_channel_renames(path: Path | None) -> dict[str, str]:
+    if path is None:
+        return {}
+    try:
+        value: Any = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise click.ClickException(f"Unable to read channel rename JSON {path}: {exc}") from exc
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    ):
+        raise click.ClickException(
+            "Channel rename JSON must be an object mapping strings to strings"
         )
-
-    if args.cache_directory:
-        input_processor.cache_directory = args.cache_directory
-
-    if args.rename_channels_json:
-        _d = {}
-        with open(args.rename_channels_json,'rt') as inf:
-            _d = json.loads(inf.read())
-        input_processor.rename_channels = _d
+    return value
 
 
-    output_info = input_processor.convert(args.output,display_uuid = False if args.omit_uuid else True, compression = args.compression)
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.argument(
+    "input_path",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+)
+@click.argument(
+    "output_path",
+    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--type",
+    "input_type",
+    type=click.Choice(["qptiff_mif", "qptiff_he", "halo_mif", "component"]),
+    required=True,
+    help="Input image profile.",
+)
+@click.option("--series", type=click.IntRange(min=0), default=0, show_default=True)
+@click.option(
+    "--rename-channels-json",
+    "--rename_channels_json",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="JSON object mapping source channel names to output names.",
+)
+@click.option("--omit-uuid", "--omit_uuid", is_flag=True, help="Omit the optional OME root UUID.")
+@click.option(
+    "--output-json",
+    "--output_json",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Write the conversion report to this JSON file instead of stdout.",
+)
+@click.option(
+    "--cache-directory",
+    "--cache_directory",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Directory for temporary rebuilt pyramid levels.",
+)
+@click.option(
+    "--compression",
+    type=click.Choice(["LZW", "Deflate", "ZSTD", "JPEG", "Uncompressed"], case_sensitive=False),
+    default="LZW",
+    show_default=True,
+)
+@click.option(
+    "--tile-size",
+    type=click.IntRange(min=16),
+    default=1024,
+    show_default=True,
+    help="Square output tile size; must be divisible by 16.",
+)
+@click.option(
+    "--pyramid-levels",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Number of subresolution levels.  By default, build until the image fits one tile.",
+)
+@click.option(
+    "--downsample",
+    type=click.Choice(["mean", "nearest"]),
+    default="mean",
+    show_default=True,
+)
+@click.option(
+    "--workers",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Maximum parallel TIFF compression workers.",
+)
+@click.option(
+    "--physical-size-x-um",
+    "--physical_size_x_um",
+    type=click.FloatRange(min=0, min_open=True),
+    default=None,
+)
+@click.option(
+    "--physical-size-y-um",
+    "--physical_size_y_um",
+    type=click.FloatRange(min=0, min_open=True),
+    default=None,
+)
+@click.option("--overwrite/--no-overwrite", default=True, show_default=True)
+@click.option("--checksums/--no-checksums", default=True, show_default=True)
+@click.option(
+    "--strict-miti/--no-strict-miti",
+    default=False,
+    show_default=True,
+    help=(
+        "Fail when the generated OME header violates the current MITI header YAML. "
+        "The current profile rejects native uint8 even though uint8 is valid OME."
+    ),
+)
+@click.option("-v", "--verbose", count=True, help="Increase logging verbosity.")
+@click.option(
+    "--version",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_version_callback,
+    help="Display omeify and dependency versions as JSON.",
+)
+def main(
+    input_path: Path,
+    output_path: Path,
+    input_type: str,
+    series: int,
+    rename_channels_json: Path | None,
+    omit_uuid: bool,
+    output_json: Path | None,
+    cache_directory: Path | None,
+    compression: str,
+    tile_size: int,
+    pyramid_levels: int | None,
+    downsample: str,
+    workers: int | None,
+    physical_size_x_um: float | None,
+    physical_size_y_um: float | None,
+    overwrite: bool,
+    checksums: bool,
+    strict_miti: bool,
+    verbose: int,
+) -> None:
+    """Convert INPUT_PATH into a deidentified pyramidal OME-TIFF at OUTPUT_PATH."""
 
-    if args.output_json:
-        with open(args.output_json, 'w') as f:
-            f.write(json.dumps(output_info,indent=2))
+    log_level = logging.DEBUG if verbose >= 2 else logging.INFO if verbose == 1 else logging.WARNING
+    logging.basicConfig(level=log_level, format="%(levelname)s %(name)s: %(message)s")
+    rename_channels = _load_channel_renames(rename_channels_json)
+
+    if output_json is not None:
+        report_path = output_json.resolve()
+        if report_path in {input_path.resolve(), output_path.resolve()}:
+            raise click.UsageError("--output-json must differ from both image paths")
+
+    if input_type == "qptiff_mif":
+        processor = AkoyaMIFQptiff(input_path, series=series, rename_channels=rename_channels)
+    elif input_type == "qptiff_he":
+        processor = AkoyaHEQptiff(input_path, series=series, rename_channels=rename_channels)
+    elif input_type == "halo_mif":
+        processor = HaloMIFTiff(input_path, series=series, rename_channels=rename_channels)
+    elif input_type == "component":
+        if physical_size_x_um is None or physical_size_y_um is None:
+            raise click.UsageError(
+                "--physical-size-x-um and --physical-size-y-um are required for component TIFFs"
+            )
+        processor = AkoyaComponentTiff(
+            input_path,
+            series=series,
+            physical_size_x_um=physical_size_x_um,
+            physical_size_y_um=physical_size_y_um,
+            rename_channels=rename_channels,
+        )
     else:
-        print(json.dumps(output_info,indent=2))
-    
+        raise AssertionError(input_type)
+
+    if cache_directory is not None:
+        processor.cache_directory = cache_directory
+
+    try:
+        report = processor.convert(
+            output_path,
+            display_uuid=not omit_uuid,
+            compression=compression,
+            tile_size=tile_size,
+            pyramid_levels=pyramid_levels,
+            downsample=downsample,
+            max_workers=workers,
+            overwrite=overwrite,
+            calculate_checksums=checksums,
+            strict_miti=strict_miti,
+        )
+    except Exception as exc:
+        if verbose >= 2:
+            raise
+        raise click.ClickException(str(exc)) from exc
+
+    rendered = json.dumps(report, indent=2)
+    if output_json is None:
+        click.echo(rendered)
+    else:
+        output_json.parent.mkdir(parents=True, exist_ok=True)
+        output_json.write_text(rendered + "\n", encoding="utf-8")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omeify"
+dynamic = ["version"]
+description = "Convert multiplexed tissue images into deidentified, pyramidal OME-TIFF"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Jason L Weirather" },
+]
+keywords = ["OME-TIFF", "microscopy", "pathology", "multiplex imaging", "MITI"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+  "click>=8.1,<9",
+  "numpy>=1.23,<3",
+  # Newer tifffile releases dropped Python 3.10.  Keep that interpreter on the
+  # last compatible window while allowing newer Pythons to use the tested API.
+  "tifffile>=2024.8.30,<2025.5.21; python_version == '3.10'",
+  "tifffile>=2024.8.30,<2026.4.11; python_version == '3.11'",
+  "tifffile>=2024.8.30,<2027; python_version >= '3.12'",
+  # LZW and most TIFF compression codecs are supplied by imagecodecs.
+  # Newer imagecodecs releases likewise dropped Python 3.10.
+  "imagecodecs>=2024.1.1,<2025.8.2; python_version == '3.10'",
+  "imagecodecs>=2024.1.1,<2026.5.10; python_version == '3.11'",
+  "imagecodecs>=2024.1.1,<2027; python_version >= '3.12'",
+  "lxml>=5,<7",
+  # Supplies a local OME 2016-06 XSD, avoiding validation-time network access.
+  "ome-schema>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/jason-weirather/omeify"
+Repository = "https://github.com/jason-weirather/omeify"
+Issues = "https://github.com/jason-weirather/omeify/issues"
+
+[project.scripts]
+omeify = "omeify.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "pytest>=8,<10",
+  "ruff>=0.12",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["omeify"]
+
+[tool.hatch.version]
+path = "omeify/_version.py"
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

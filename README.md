@@ -1,123 +1,82 @@
 # omeify
 
-`omeify` is a Python package designed to streamline the conversion of various image files, such as TIFF files, into the OME-TIFF format. The generated OME-TIFF files are deidentified following the MITI standard. This package relies on two Java tools: [bioformats2raw](https://github.com/glencoesoftware/bioformats2raw) `0.6.1` and [raw2ometiff](https://github.com/glencoesoftware/raw2ometiff) `0.4.1`.
+`omeify` converts multiplexed tissue images into a standardized, deidentified, tiled and pyramidal OME-TIFF. Version 0.4 replaces the Java `bioformats2raw` → Zarr → `raw2ometiff` chain with a pure-Python `tifffile` implementation.
 
-## Docker quickstart
+## What this iteration supports
 
-```
-$ docker pull vacation/omeify:latest
-$ docker run --rm -v $(pwd):$(pwd) -u $(id -u):$(id -g) vacation/omeify:latest omeify -h
-usage: omeify [-h] --type {qptiff_mif,qptiff_he} [--series SERIES]
-              [--rename_channels_json RENAME_CHANNELS_JSON] [--omit_uuid]
-              [--output_json OUTPUT_JSON] [--cache_directory CACHE_DIRECTORY]
-              [--compression {LZW,JPEG,Uncompressed}] [-v] [--version]
-              input output
+- Akoya mIF QPTIFF
+- HALO planar mIF TIFF / OME-TIFF
+- Akoya component TIFF
+- `uint8`, `uint16`, and the other scalar dtypes supported by OME-TIFF, without intensity rescaling
+- Fresh pyramid construction from the full-resolution source pixels
+- Lossless LZW, Deflate, ZSTD, or uncompressed output; JPEG remains available for `uint8` only
+- Click-based CLI, `pyproject.toml` packaging, and no Java runtime
 
-omeify: Convert images into OME-TIFF format
+The H&E class remains importable but intentionally raises a clear `NotImplementedError`. The next iteration should write H&E as one interleaved RGB image (`SamplesPerPixel=3`), not as three grayscale pages.
 
-positional arguments:
-  input                 Input image file path
-  output                Output OME-TIFF file path
+## MITI scope
 
-options:
-  -h, --help            show this help message and exit
-  --type {qptiff_mif,qptiff_he}
-                        Input image type (qptiff_mif: Akoya mIF qptiff,
-                        qptiff_he: Akoya H&E qptiff) (default: None)
-  --series SERIES       Series number (integer) (default: 0)
-  --rename_channels_json RENAME_CHANNELS_JSON
-                        JSON file that contains channel renaming dictionary
-                        (default: None)
-  --omit_uuid           Omit UUID in OME tag (default: False)
-  --output_json OUTPUT_JSON
-                        Output file for run info (default: None)
-  --cache_directory CACHE_DIRECTORY
-                        Path to a directory for storing temporary Zarr
-                        directories. Defaults to the system temporary folder.
-                        (default: None)
-  --compression {LZW,JPEG,Uncompressed}
-                        Compression type for output OME-TIFF file (LZW, JPEG)
-                        (default: LZW)
-  -v, --verbose         Enable verbose logging (default: False)
-  --version             Display omeify and constituent programs versions
-                        (default: False)
-```
+The output covers the standardized OME-TIFF image-file portion of MITI. Whether an image is Level 2 or Level 3 depends on the processing and QC performed upstream. A complete MITI submission also requires linked file, biospecimen, reagent, acquisition, channel, instrument, processing, and related manifest metadata. The OME root UUID is valid OME-XML and is retained by default.
 
-## Dependencies
+The current MITI `yaml/05-ome-tiff-header.yaml` profile lists only `uint16` and `float` as accepted pixel types. Therefore, a native `uint8` image can be valid OME-TIFF while failing that narrower MITI header profile. `omeify` does not mutate the scientific data to make the checkbox turn green: it preserves the native dtype, records the header result in the conversion report, and offers `--strict-miti` when a hard failure is desired.
 
-- `bioformats2raw`: A Java application that converts various image file formats, including .mrxs, to an intermediate Zarr structure compatible with the OME-NGFF specification. This tool is used in conjunction with `raw2ometiff` to produce a Bio-Formats 5.9.x ("Faas") or Bio-Formats 6.x (true OME-TIFF) pyramid.
-- `raw2ometiff`: A Java application that converts a directory of tiles to an OME-TIFF pyramid. This tool is the second half of the iSyntax/.mrxs to OME-TIFF conversion process.
-
-**Note**: As `omeify` is licensed under the MIT license, the GPL-licensed dependencies (`bioformats2raw` and `raw2ometiff`) are not included. Instructions on how to install these dependencies will be provided later.
-
-## MITI Standard
-
-`omeify` follows the [Minimum Information guidelines for highly multiplexed tissue images (MITI)](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9009186/) to ensure the highest standards in data and metadata handling. The MITI standard is specifically designed for tissue atlases that combine multi-channel microscopy with single cell sequencing and other omics data from normal and diseased specimens. This standard guides data deposition, curation, and release.
-
-## Installation
-
-1. Install the `omeify` package:
+## Install
 
 ```bash
-pip install omeify
+python -m pip install .
 ```
 
-## Usage
+For development:
 
-### Command Line Interface (CLI)
-
-You can use `omeify` through the command line interface by running the following command:
-
+```bash
+python -m pip install -e '.[dev]'
+pytest
 ```
-$ omeify -h
-usage: omeify [-h] --type {qptiff_mif,qptiff_he} [--series SERIES]
-              [--rename_channels_json RENAME_CHANNELS_JSON] [--omit_uuid] [--output_json OUTPUT_JSON]
-              [--cache_directory CACHE_DIRECTORY] [--compression {LZW,JPEG,Uncompressed}] [-v]
-              [--version]
-              input output
 
-omeify: Convert images into OME-TIFF format
+## CLI
 
-positional arguments:
-  input                 Input image file path
-  output                Output OME-TIFF file path
-
-options:
-  -h, --help            show this help message and exit
-  --type {qptiff_mif,qptiff_he}
-                        Input image type (qptiff_mif: Akoya mIF qptiff, qptiff_he: Akoya H&E qptiff)
-                        (default: None)
-  --series SERIES       Series number (integer) (default: 0)
-  --rename_channels_json RENAME_CHANNELS_JSON
-                        JSON file that contains channel renaming dictionary (default: None)
-  --omit_uuid           Omit UUID in OME tag (default: False)
-  --output_json OUTPUT_JSON
-                        Output file for run info (default: None)
-  --cache_directory CACHE_DIRECTORY
-                        Path to a directory for storing temporary Zarr directories. Defaults to the
-                        system temporary folder. (default: None)
-  --compression {LZW,JPEG,Uncompressed}
-                        Compression type for output OME-TIFF file (LZW, JPEG) (default: LZW)
-  -v, --verbose         Enable verbose logging (default: False)
-  --version             Display omeify and constituent programs versions (default: False)
+```bash
+omeify input.qptiff output.ome.tif \
+  --type qptiff_mif \
+  --compression LZW \
+  --tile-size 1024 \
+  --downsample mean \
+  --cache-directory /fast/scratch
 ```
+
+Useful options:
+
+```text
+--pyramid-levels N       Explicit subresolution count; auto by default
+--rename-channels-json   JSON map from source names to output names
+--omit-uuid              Omit the optional OME root UUID
+--workers N              TIFF compression workers
+--no-checksums           Skip the final whole-file checksum pass
+--strict-miti            Fail on the current MITI header-profile check
+```
+
+The existing underscore spellings such as `--rename_channels_json` remain accepted as aliases.
+
+The conversion report includes separate `ome`, `miti_header`, and `verification` sections. This keeps schema validity, MITI profile conformance, and binary-image checks from being blended into one suspiciously cheerful boolean.
 
 ## Python API
 
-You can also use `omeify` within your Python scripts:
+```python
+from omeify.inputs import AkoyaMIFQptiff
 
-```py
-from omeify.inputs import AkoyaMIFQptiff, AkoyaHEQptiff
+converter = AkoyaMIFQptiff("input.qptiff", series=0)
+converter.rename_channels = {"FITC": "PanCK"}
+converter.cache_directory = "/fast/scratch"
 
-input_processor = AkoyaMIFQptiff(input_file_path, series=series_number)
-input_processor.rename_channels = rename_channels_dict
-
-output_info = input_processor.convert(output_file_path, display_uuid=True)
+report = converter.convert(
+    "output.ome.tif",
+    compression="LZW",
+    tile_size=1024,
+    downsample="mean",
+    strict_miti=False,
+)
 ```
 
-Replace `AkoyaMIFQptiff` with `AkoyaHEQptiff` if you are working with H&E qptiff files.
+## I/O strategy
 
-## License
-
-This project is licensed under the MIT License. Please note that the `bioformats2raw` and `raw2ometiff` dependencies are licensed under the GPL License and are not included in this repository.
-
+The full-resolution source is never materialized as one giant NumPy array. `omeify` decodes only the source strips or tiles needed for each output tile. Newly generated lower-resolution levels are staged as temporary uncompressed tiled BigTIFF files, one level at a time. Peak RAM is therefore governed primarily by a few output tiles plus the largest source strip or tile, while temporary disk use is approximately one third of the uncompressed base image for a complete 2× pyramid. The final file is first written and verified beside the requested destination and then atomically moved into place, so a cache directory on another filesystem does not break finalization.

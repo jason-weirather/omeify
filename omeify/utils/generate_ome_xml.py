@@ -1,82 +1,101 @@
-from lxml import etree
+from __future__ import annotations
 
-
-import os
-import omeify
 import uuid
-import xmltodict
+from collections.abc import Mapping, Sequence
 
-def get_map_annotation(xml_path):
-    tree = etree.parse(xml_path)
-    map_annotation = tree.find(".//{http://www.openmicroscopy.org/Schemas/OME/2016-06}MapAnnotation")
-    return map_annotation
+from lxml import etree
+from tifffile import OmeXml
 
-def generate_ome_xml(tiff_features,zarr_object,display_uuid=True, rename_channels = {}):
-    myuuid = None
-    if display_uuid: myuuid = str(uuid.uuid4())
-    # Create the root element with the specified namespace and attributes
-    namespaces = {
-        None: "http://www.openmicroscopy.org/Schemas/OME/2016-06",
-        "xsi": "http://www.w3.org/2001/XMLSchema-instance"
-     }
-    root = etree.Element("OME", {
-        etree.QName(namespaces["xsi"], "schemaLocation"): "http://www.openmicroscopy.org/Schemas/OME/2016-06 http://www.openmicroscopy.org/Schemas/OME/2016-06/ome.xsd"
-    }, nsmap=namespaces)
+from omeify import __version__
+from omeify.utils.tiff_image_features import ImageMetadata
 
-    # Add optional attributes to the root element
-    if display_uuid: root.set("UUID", f"urn:uuid:{myuuid}")
-    #root.set("Creator", f'omeify v{omeify.__version__}')
+_OME_NAMESPACE = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
+_PYRAMID_NAMESPACE = "openmicroscopy.org/PyramidResolution"
 
 
-    # Create an Image element
-    image = etree.SubElement(root, "Image", 
-        ID=f"{tiff_features.image_id}", 
-        Name=f"{tiff_features.name}")
+def _level_yx(shape: Sequence[int]) -> tuple[int, int]:
+    if len(shape) == 2:
+        return int(shape[0]), int(shape[1])
+    if len(shape) == 3:
+        return int(shape[-2]), int(shape[-1])
+    raise ValueError(f"Expected YX or CYX level shape, got {tuple(shape)}")
 
-    # Create the Pixels element and add it to the Image
-    pixels = etree.SubElement(
-        image, "Pixels", 
-        BigEndian=f"{tiff_features.big_endian}", 
-        DimensionOrder=f"{tiff_features.dimension_order}", 
-        ID=f"{tiff_features.pixel_id}", 
-        Interleaved=f"{tiff_features.interleaved}",
-        PhysicalSizeX=f"{tiff_features.physical_size_x}", 
-        PhysicalSizeXUnit=f"{tiff_features.physical_size_x_unit}", 
-        PhysicalSizeY=f"{tiff_features.physical_size_y}",
-        PhysicalSizeYUnit=f"{tiff_features.physical_size_y_unit}", 
-        SignificantBits=f"{tiff_features.significant_bits}", 
-        SizeC=f"{tiff_features.size_c}", 
-        SizeT=f"{tiff_features.size_t}", 
-        SizeX=f"{tiff_features.size_x}", 
-        SizeY=f"{tiff_features.size_y}",
-        SizeZ=f"{tiff_features.size_z}",
-        Type=f"{tiff_features.type}")
 
-    # Create the Channel elements and add them to the Pixels
-    for c in tiff_features.channels:
-        channel = etree.SubElement(pixels, "Channel", 
-            ID=f"{c['ID']}", 
-            Name=f"{c['Name'] if c['Name'] not in rename_channels else rename_channels[c['Name']]}", 
-            SamplesPerPixel=f"{c['SamplesPerPixel']}")
-        etree.SubElement(channel, "LightPath")
-    
-    #etree.SubElement(pixels, "MetadataOnly")
+def generate_ome_xml(
+    tiff_features: ImageMetadata,
+    level_shapes: Sequence[Sequence[int]],
+    *,
+    display_uuid: bool = True,
+    rename_channels: Mapping[str, str] | None = None,
+) -> dict[str, str | None]:
+    """Generate a minimal, schema-oriented OME-XML block for one planar mIF image."""
 
-    # Create a MapAnnotation element and add it to the StructuredAnnotations
-    etree.SubElement(pixels, "TiffData", IFD="0", PlaneCount=f"{tiff_features.plane_count}")
+    rename_channels = dict(rename_channels or {})
+    channel_names = [rename_channels.get(name, name) for name in tiff_features.channel_names]
+    file_uuid = str(uuid.uuid4())
 
-    # Get the build OME tiff
+    ome = OmeXml(
+        Creator=f"omeify {__version__}",
+        UUID=file_uuid,
+    )
 
-    map_annotation = get_map_annotation(os.path.join(zarr_object.store.path,'OME','METADATA.ome.xml'))
+    image_metadata: dict[str, object] = {
+        "Name": tiff_features.image_name,
+        "SignificantBits": tiff_features.significant_bits,
+        "PhysicalSizeX": tiff_features.physical_size_x_um,
+        "PhysicalSizeXUnit": "µm",
+        "PhysicalSizeY": tiff_features.physical_size_y_um,
+        "PhysicalSizeYUnit": "µm",
+        "Channel": {"Name": channel_names},
+    }
 
-    # Create a StructuredAnnotations element
-    structured_annotations = etree.SubElement(root, "StructuredAnnotations")
+    if len(level_shapes) > 1:
+        annotation: dict[str, str] = {"Namespace": _PYRAMID_NAMESPACE}
+        for index, shape in enumerate(level_shapes[1:], start=1):
+            level_y, level_x = _level_yx(shape)
+            annotation[str(index)] = f"{level_x} {level_y}"
+        image_metadata["MapAnnotation"] = annotation
 
-    if map_annotation is not None:
-        # Smaller images may not have map annotation
-        structured_annotations.append(map_annotation)
+    shape_cyx = tiff_features.shape_cyx
+    stored_shape = (
+        tiff_features.size_c,
+        1,
+        1,
+        tiff_features.size_y,
+        tiff_features.size_x,
+        1,
+    )
+    ome.addimage(
+        tiff_features.dtype,
+        shape_cyx,
+        stored_shape,
+        axes="CYX",
+        **image_metadata,
+    )
 
-    # To view the XML tree as a string, use the following code:
-    xml_string = etree.tostring(root, pretty_print=False, encoding="utf-8", xml_declaration=True).decode("utf-8")
-    
-    return {'xml_string':xml_string, 'uuid':myuuid}
+    root = etree.fromstring(ome.tostring(declaration=True).encode("utf-8"))
+    if not display_uuid:
+        root.attrib.pop("UUID", None)
+
+    namespace = {"ome": _OME_NAMESPACE}
+    pixels = root.find(".//ome:Pixels", namespaces=namespace)
+    if pixels is None:
+        raise RuntimeError("tifffile generated OME-XML without a Pixels element")
+    # These values describe the file that omeify writes, not the source file.
+    pixels.set("BigEndian", "false")
+    # Preserve the historical omeify convention.  For the supported mIF path,
+    # SizeZ=SizeT=1, therefore XYZCT still maps consecutive top-level IFDs to
+    # consecutive channels while matching the MITI example/header convention.
+    pixels.set("DimensionOrder", "XYZCT")
+    pixels.set("Interleaved", "false")
+
+    xml_string = etree.tostring(
+        root,
+        encoding="utf-8",
+        xml_declaration=True,
+        pretty_print=False,
+    ).decode("utf-8")
+    return {
+        "xml_string": xml_string,
+        "uuid": file_uuid if display_uuid else None,
+    }
