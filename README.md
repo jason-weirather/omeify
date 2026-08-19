@@ -6,9 +6,8 @@ guidelines (Schapiro et. al. Nat Methods. 2022).
 
 ## Design goals
 
-- Produce a predictable OME-TIFF representation from heterogeneous TIFF-family inputs
-- Preserve native pixel dtype and full-resolution values unless lossy JPEG is requested
-- Keep interleaved RGB H&E intact instead of turning red, green, and blue into separate pages
+- Produce a predictable OME-TIFF representation from other image format inputs
+- Preserve native pixel dtype and full-resolution image quality
 - Minimize carried-forward metadata while retaining image geometry, physical scale, and color
 - Rebuild pyramid levels from full resolution rather than trusting source pyramids
 - Keep peak memory bounded by processing strips and tiles instead of materializing a whole slide
