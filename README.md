@@ -1,9 +1,8 @@
 # omeify
 
-`omeify` converts supported tissue-image formats into standardized, deidentified, tiled,
-pyramidal OME-TIFF. It is deliberately opinionated: preserve the full-resolution pixels,
-reconstruct only the metadata needed to interpret them, rebuild the image pyramid, and verify
-the resulting file before it replaces the destination.
+`omeify` converts supported tissue-image formats into standardized, metadata deidentified, tiled,
+pyramidal OME-TIFF. Deidentified and minimal metadata follows MITI (Minimum Information about highly multiplexed Tissue Imaging)
+guidelines (Schapiro et. al. Nat Methods. 2022). 
 
 ## Design goals
 
