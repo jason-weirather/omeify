@@ -242,7 +242,6 @@ Only the selected TIFF series is converted. The default is series 0, which is th
 whole-slide series for the supported QPTIFF and SVS examples. Use `--series` only when inspection
 shows that the desired full-resolution image is elsewhere.
 
-The existing underscore spellings such as `--rename_channels_json` remain accepted as aliases.
 The conversion report keeps separate `ome`, `miti_header`, and `verification` sections so XML
 validity, header-profile validity, and binary-image verification remain distinct.
 

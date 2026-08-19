@@ -59,20 +59,17 @@ def _load_channel_renames(path: Path | None) -> dict[str, str]:
 @click.option("--series", type=click.IntRange(min=0), default=0, show_default=True)
 @click.option(
     "--rename-channels-json",
-    "--rename_channels_json",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="JSON object mapping source channel names to output names.",
 )
-@click.option("--omit-uuid", "--omit_uuid", is_flag=True, help="Omit the optional OME root UUID.")
+@click.option("--omit-uuid", is_flag=True, help="Omit the optional OME root UUID.")
 @click.option(
     "--output-json",
-    "--output_json",
     type=click.Path(dir_okay=False, path_type=Path),
     help="Write the conversion report to this JSON file instead of stdout.",
 )
 @click.option(
     "--cache-directory",
-    "--cache_directory",
     type=click.Path(file_okay=False, path_type=Path),
     help="Directory for temporary rebuilt pyramid levels.",
 )
@@ -123,13 +120,11 @@ def _load_channel_renames(path: Path | None) -> dict[str, str]:
 )
 @click.option(
     "--physical-size-x-um",
-    "--physical_size_x_um",
     type=click.FloatRange(min=0, min_open=True),
     default=None,
 )
 @click.option(
     "--physical-size-y-um",
-    "--physical_size_y_um",
     type=click.FloatRange(min=0, min_open=True),
     default=None,
 )
