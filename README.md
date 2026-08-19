@@ -40,6 +40,10 @@ The OME root UUID is generated and retained by default. It can be omitted explic
 
 `omeify` constructs a new OME-XML header instead of copying arbitrary source metadata into the output. The goal is to retain the minimum information needed to unambiguously interpret the pixels in the OME-TIFF while avoiding unnecessary vendor, acquisition, or potentially identifying metadata.
 
+The guiding resource for MITI (Minimum Information about highly multiplexed Tissue Imaging) is:
+
+> **Schapiro D, Yapp C, Sokolov A, et al.** MITI minimum information guidelines for highly multiplexed tissue images. *Nat Methods.* 2022;19:262–267. doi:10.1038/s41592-022-01415-4.
+
 The normalized header record is validated against the bundled JSON Schema:
 
 ```text
