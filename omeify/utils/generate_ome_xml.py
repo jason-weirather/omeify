@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping, Sequence
+from typing import Literal
 
 from lxml import etree
 from tifffile import OmeXml
@@ -27,8 +28,12 @@ def generate_ome_xml(
     *,
     display_uuid: bool = True,
     rename_channels: Mapping[str, str] | None = None,
+    output_byteorder: Literal["<", ">"] = "<",
 ) -> dict[str, str | None]:
     """Generate a minimal, schema-oriented OME-XML block for one planar mIF image."""
+
+    if output_byteorder not in {"<", ">"}:
+        raise ValueError("output_byteorder must be '<' or '>'")
 
     rename_channels = dict(rename_channels or {})
     channel_names = [rename_channels.get(name, name) for name in tiff_features.channel_names]
@@ -82,7 +87,7 @@ def generate_ome_xml(
     if pixels is None:
         raise RuntimeError("tifffile generated OME-XML without a Pixels element")
     # These values describe the file that omeify writes, not the source file.
-    pixels.set("BigEndian", "false")
+    pixels.set("BigEndian", "true" if output_byteorder == ">" else "false")
     # Preserve the historical omeify convention.  For the supported mIF path,
     # SizeZ=SizeT=1, therefore XYZCT still maps consecutive top-level IFDs to
     # consecutive channels while matching the MITI example/header convention.

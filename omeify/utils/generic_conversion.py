@@ -78,7 +78,6 @@ class GenericConversion:
         max_workers: int | None = None,
         overwrite: bool = True,
         calculate_checksums: bool = True,
-        strict_miti: bool = False,
     ) -> dict[str, object]:
         if not deidentify_ome:
             raise ValueError(
@@ -107,6 +106,5 @@ class GenericConversion:
             display_uuid=display_uuid,
             overwrite=overwrite,
             calculate_checksums=calculate_checksums,
-            strict_miti=strict_miti,
         )
         return converter.convert()

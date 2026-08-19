@@ -6,7 +6,7 @@ import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal
 from xml.etree import ElementTree
 
 import numpy as np
@@ -20,7 +20,7 @@ InputProfile = Literal[
     "component",
 ]
 
-_OME_DTYPES = {
+_SUPPORTED_MIF_DTYPES = {
     "int8",
     "int16",
     "int32",
@@ -29,9 +29,6 @@ _OME_DTYPES = {
     "uint32",
     "float32",
     "float64",
-    "complex64",
-    "complex128",
-    "bool",
 }
 
 
@@ -102,14 +99,21 @@ def _unit_to_micrometers(value: float, unit: str | None) -> float:
     return float(value) * factors[normalized]
 
 
+def _resolution_value(value: object) -> float:
+    """Normalize tifffile rational-tag values across API versions."""
+
+    if isinstance(value, (tuple, list, np.ndarray)) and len(value) == 2:
+        numerator, denominator = value
+        return float(numerator) / float(denominator)
+    return float(value)
+
+
 def _resolution_tag_to_um(page: tifffile.TiffPage) -> tuple[float, float] | None:
     """Return pixel size from standard TIFF resolution tags, when trustworthy."""
 
     try:
-        x_num, x_den = page.tags["XResolution"].value
-        y_num, y_den = page.tags["YResolution"].value
-        x_ppu = float(x_num) / float(x_den)
-        y_ppu = float(y_num) / float(y_den)
+        x_ppu = _resolution_value(page.tags["XResolution"].value)
+        y_ppu = _resolution_value(page.tags["YResolution"].value)
         unit_value = int(page.tags["ResolutionUnit"].value)
     except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return None
@@ -397,8 +401,12 @@ class TiffMIFSource:
         size_y = int(page0.imagelength)
         size_x = int(page0.imagewidth)
         dtype = np.dtype(self.level0.dtype).newbyteorder("=")
-        if dtype.name not in _OME_DTYPES:
-            raise TypeError(f"OME-TIFF does not support source dtype {dtype}")
+        if dtype.name not in _SUPPORTED_MIF_DTYPES:
+            supported = ", ".join(sorted(_SUPPORTED_MIF_DTYPES))
+            raise TypeError(
+                f"Unsupported mIF source dtype {dtype}. Supported dtypes are: {supported}. "
+                "omeify does not cast unsupported pixel data."
+            )
 
         for index, page in enumerate(self.pages):
             if int(page.imagelength) != size_y or int(page.imagewidth) != size_x:
@@ -503,8 +511,9 @@ class TiffMIFSource:
         images = _ome_images(root)
         if not images:
             return None
-        image_index = min(self.series_index, len(images) - 1)
-        return _ome_pixels(images[image_index])
+        if self.series_index >= len(images):
+            return None
+        return _ome_pixels(images[self.series_index])
 
     def _ome_channel_names(self) -> list[str]:
         pixels = self._selected_ome_pixels()
@@ -565,28 +574,12 @@ class TiffMIFSource:
             )
         return x_um, y_um
 
-    def _significant_bits(self, dtype: np.dtype) -> int:
-        pixels = self._selected_ome_pixels()
-        if pixels is not None and "SignificantBits" in pixels.attrib:
-            try:
-                value = int(pixels.attrib["SignificantBits"])
-                if 0 < value <= dtype.itemsize * 8:
-                    return value
-            except ValueError:
-                pass
+    @staticmethod
+    def _significant_bits(dtype: np.dtype) -> int:
+        """Return the storage width represented by the output pixel type."""
 
-        try:
-            bits_per_sample = self.pages[0].bitspersample
-            if isinstance(bits_per_sample, Sequence) and not isinstance(
-                bits_per_sample, (str, bytes)
-            ):
-                bits_per_sample = bits_per_sample[0]
-            value = int(bits_per_sample)
-            if 0 < value <= dtype.itemsize * 8:
-                return value
-        except (AttributeError, TypeError, ValueError, IndexError):
-            pass
-        return dtype.itemsize * 8
+        return int(dtype.itemsize * 8)
+
 
 
 class TiffImageFeatures:

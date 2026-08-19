@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omeify"
-dynamic = ["version"]
+version = "0.4.1"
 description = "Convert multiplexed tissue images into deidentified, pyramidal OME-TIFF"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
@@ -27,19 +27,21 @@ classifiers = [
 dependencies = [
   "click>=8.1,<9",
   "numpy>=1.23,<3",
-  # Newer tifffile releases dropped Python 3.10.  Keep that interpreter on the
-  # last compatible window while allowing newer Pythons to use the tested API.
+  # Newer tifffile releases dropped Python 3.10 and then Python 3.11.
   "tifffile>=2024.8.30,<2025.5.21; python_version == '3.10'",
   "tifffile>=2024.8.30,<2026.4.11; python_version == '3.11'",
   "tifffile>=2024.8.30,<2027; python_version >= '3.12'",
   # LZW and most TIFF compression codecs are supplied by imagecodecs.
-  # Newer imagecodecs releases likewise dropped Python 3.10.
   "imagecodecs>=2024.1.1,<2025.8.2; python_version == '3.10'",
   "imagecodecs>=2024.1.1,<2026.5.10; python_version == '3.11'",
   "imagecodecs>=2024.1.1,<2027; python_version >= '3.12'",
   "lxml>=5,<7",
+  "jsonschema>=4.20,<5",
   # Supplies a local OME 2016-06 XSD, avoiding validation-time network access.
   "ome-schema>=0.1.0",
+  # Python 3.11+ has tomllib in the standard library. This fallback is used
+  # only when importing directly from an uninstalled Python 3.10 checkout.
+  "tomli>=2,<3; python_version < '3.11'",
 ]
 
 [project.urls]
@@ -59,9 +61,6 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["omeify"]
-
-[tool.hatch.version]
-path = "omeify/_version.py"
 
 [tool.pytest.ini_options]
 addopts = "-ra"

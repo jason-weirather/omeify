@@ -12,6 +12,7 @@ from typing import Iterable, Literal, Sequence
 
 import numpy as np
 import tifffile
+from lxml import etree
 
 from omeify import __version__, get_version_info
 from omeify.utils.generate_ome_xml import generate_ome_xml
@@ -27,6 +28,7 @@ from omeify.utils.tiff_image_features import (
 LOGGER = logging.getLogger(__name__)
 
 DownsampleMethod = Literal["mean", "nearest"]
+_OUTPUT_BYTEORDER: Literal["<", ">"] = "<"
 
 
 @dataclass(frozen=True)
@@ -283,7 +285,6 @@ class TifffileConverter:
         display_uuid: bool = True,
         overwrite: bool = True,
         calculate_checksums: bool = True,
-        strict_miti: bool = False,
     ) -> None:
         self.input_path = Path(input_path)
         self.output_path = Path(output_path)
@@ -308,7 +309,6 @@ class TifffileConverter:
         self.display_uuid = bool(display_uuid)
         self.overwrite = bool(overwrite)
         self.calculate_checksums = bool(calculate_checksums)
-        self.strict_miti = bool(strict_miti)
 
     def convert(self) -> dict[str, object]:
         start_epoch = time.time()
@@ -343,6 +343,7 @@ class TifffileConverter:
                 level_shapes,
                 display_uuid=self.display_uuid,
                 rename_channels=self.rename_channels,
+                output_byteorder=_OUTPUT_BYTEORDER,
             )
             omexml = str(xml_info["xml_string"])
             validator = OMESchemaValidator()
@@ -350,9 +351,9 @@ class TifffileConverter:
             if xml_is_valid is False:
                 raise ValueError("Generated OME-XML failed OME 2016-06 schema validation")
             miti_header = validate_miti_ome_tiff_header(omexml)
-            if self.strict_miti and not miti_header.strict_is_valid:
+            if not miti_header.is_valid:
                 details = "; ".join(miti_header.errors)
-                raise ValueError(f"Generated OME header failed the current MITI profile: {details}")
+                raise ValueError(f"Generated OME header failed omeify MITI validation: {details}")
 
             LOGGER.info(
                 "Converting %s channels of %s data at %sx%s into %s pyramid levels",
@@ -426,7 +427,7 @@ class TifffileConverter:
                 "type_description": "Pyramidal OME-TIFF",
                 "dtype": features.dtype.name,
                 "shape_cyx": list(features.shape_cyx),
-                "byte_order": "little",
+                "byte_order": verification["output_byte_order"],
                 "lossless_compression": compression.lossless,
             },
             "image": {
@@ -452,7 +453,6 @@ class TifffileConverter:
                 "series": self.series,
                 "rename_channels": self.rename_channels,
                 "max_workers": self.max_workers,
-                "strict_miti": self.strict_miti,
             },
             "conversion_stats": {
                 "start_time": datetime.fromtimestamp(start_epoch).strftime("%Y-%m-%d %H:%M:%S"),
@@ -504,7 +504,7 @@ class TifffileConverter:
         with tifffile.TiffWriter(
             output_path,
             bigtiff=True,
-            byteorder="<",
+            byteorder=_OUTPUT_BYTEORDER,
             ome=False,
         ) as writer:
             writer.write(
@@ -549,7 +549,7 @@ class TifffileConverter:
         with tifffile.TiffWriter(
             output_path,
             bigtiff=True,
-            byteorder="<",
+            byteorder=_OUTPUT_BYTEORDER,
             ome=False,
         ) as writer:
             base_readers = source.plane_readers()
@@ -598,6 +598,12 @@ class TifffileConverter:
     ) -> dict[str, object]:
         verification: dict[str, object] = {
             "ome_tiff_recognized": False,
+            "bigtiff": False,
+            "output_byte_order": None,
+            "byte_order_metadata_matches_tiff": False,
+            "significant_bits_matches_dtype": False,
+            "tiff_data_mapping_matches": False,
+            "pyramid_annotation_linked": False,
             "dtype_matches_source": False,
             "pyramid_level_shapes_match": False,
             "top_level_ifd_count_matches": False,
@@ -612,6 +618,96 @@ class TifffileConverter:
             if not output.is_ome:
                 raise ValueError("Written TIFF is not recognized as OME-TIFF")
             verification["ome_tiff_recognized"] = True
+
+            if not output.is_bigtiff:
+                raise ValueError("Written output is not BigTIFF")
+            verification["bigtiff"] = True
+
+            actual_byteorder = output.byteorder
+            if actual_byteorder not in {"<", ">"}:
+                raise ValueError(f"Unexpected TIFF byte order {actual_byteorder!r}")
+            if actual_byteorder != _OUTPUT_BYTEORDER:
+                raise ValueError(
+                    f"Output TIFF byte order {actual_byteorder!r} does not match configured "
+                    f"byte order {_OUTPUT_BYTEORDER!r}"
+                )
+            verification["output_byte_order"] = (
+                "big" if actual_byteorder == ">" else "little"
+            )
+
+            omexml = output.ome_metadata
+            if not omexml:
+                raise ValueError("Written OME-TIFF does not contain OME-XML metadata")
+            parser = etree.XMLParser(resolve_entities=False, no_network=True)
+            root = etree.fromstring(omexml.encode("utf-8"), parser=parser)
+            namespace = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
+            image = root.find("./ome:Image", namespaces=namespace)
+            pixels = root.find("./ome:Image/ome:Pixels", namespaces=namespace)
+            if image is None or pixels is None:
+                raise ValueError("Written OME-XML does not contain Image/Pixels")
+
+            declared_big_endian = (pixels.get("BigEndian") or "").strip().lower()
+            expected_big_endian = "true" if actual_byteorder == ">" else "false"
+            if declared_big_endian != expected_big_endian:
+                raise ValueError(
+                    f"OME BigEndian={declared_big_endian!r} does not match TIFF byte order "
+                    f"{actual_byteorder!r}"
+                )
+            verification["byte_order_metadata_matches_tiff"] = True
+
+            try:
+                declared_significant_bits = int(pixels.get("SignificantBits", ""))
+            except ValueError as exc:
+                raise ValueError("OME SignificantBits is missing or invalid") from exc
+            if declared_significant_bits != features.significant_bits:
+                raise ValueError(
+                    f"OME SignificantBits={declared_significant_bits} does not match "
+                    f"dtype width {features.significant_bits}"
+                )
+            verification["significant_bits_matches_dtype"] = True
+
+            tiff_data = pixels.findall("./ome:TiffData", namespaces=namespace)
+            expected_plane_count = features.size_c
+            if len(tiff_data) != 1:
+                raise ValueError(
+                    f"OME Pixels contains {len(tiff_data)} TiffData elements; expected one"
+                )
+            if int(tiff_data[0].get("IFD", "0")) != 0:
+                raise ValueError("OME TiffData must start at IFD=0")
+            if int(tiff_data[0].get("PlaneCount", "0")) != expected_plane_count:
+                raise ValueError(
+                    f"OME TiffData PlaneCount does not match channel count "
+                    f"{expected_plane_count}"
+                )
+            verification["tiff_data_mapping_matches"] = True
+
+            expected_subifds = len(level_shapes) - 1
+            if expected_subifds:
+                map_annotations = root.findall(
+                    "./ome:StructuredAnnotations/ome:MapAnnotation",
+                    namespaces=namespace,
+                )
+                pyramid_annotations = [
+                    item
+                    for item in map_annotations
+                    if item.get("Namespace") == "openmicroscopy.org/PyramidResolution"
+                ]
+                annotation_refs = {
+                    item.get("ID")
+                    for item in image.findall("./ome:AnnotationRef", namespaces=namespace)
+                }
+                if len(pyramid_annotations) != 1:
+                    raise ValueError(
+                        "OME pyramid metadata must contain exactly one PyramidResolution "
+                        "MapAnnotation"
+                    )
+                annotation_id = pyramid_annotations[0].get("ID")
+                if not annotation_id or annotation_id not in annotation_refs:
+                    raise ValueError(
+                        "OME PyramidResolution MapAnnotation is not linked from Image"
+                    )
+            verification["pyramid_annotation_linked"] = True
+
             series = output.series[0]
             if np.dtype(series.dtype).newbyteorder("=") != features.dtype:
                 raise TypeError(
@@ -638,7 +734,6 @@ class TifffileConverter:
                 )
             verification["top_level_ifd_count_matches"] = True
 
-            expected_subifds = len(level_shapes) - 1
             all_levels_tiled = True
             for channel, frame in enumerate(output.pages):
                 page = frame.aspage()
@@ -665,18 +760,24 @@ class TifffileConverter:
             if compression.lossless:
                 input_readers = source.plane_readers(cache_mib=16)
                 output_readers = _page_readers(output, features.size_c)
-                coordinates = sorted({
-                    (0, 0),
-                    (features.size_y // 2, features.size_x // 2),
-                    (features.size_y - 1, features.size_x - 1),
-                })
+                coordinates = sorted(
+                    {
+                        (0, 0),
+                        (features.size_y // 2, features.size_x // 2),
+                        (features.size_y - 1, features.size_x - 1),
+                    }
+                )
                 verification["base_pixel_values_checked"] = True
                 verification["channels_checked"] = features.size_c
                 verification["points_per_channel"] = len(coordinates)
                 for channel in range(features.size_c):
                     for y, x in coordinates:
-                        source_value = input_readers[channel].read_region(y, y + 1, x, x + 1)[0, 0]
-                        output_value = output_readers[channel].read_region(y, y + 1, x, x + 1)[0, 0]
+                        source_value = input_readers[channel].read_region(
+                            y, y + 1, x, x + 1
+                        )[0, 0]
+                        output_value = output_readers[channel].read_region(
+                            y, y + 1, x, x + 1
+                        )[0, 0]
                         if source_value != output_value:
                             raise ValueError(
                                 "Lossless base-image verification failed at "

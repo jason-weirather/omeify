@@ -1,24 +1,39 @@
 # omeify
 
-`omeify` converts multiplexed tissue images into a standardized, deidentified, tiled and pyramidal OME-TIFF. Version 0.4 replaces the Java `bioformats2raw` → Zarr → `raw2ometiff` chain with a pure-Python `tifffile` implementation.
+`omeify` converts supported multiplexed tissue images into standardized, deidentified, tiled, pyramidal OME-TIFF. Version 0.4 replaces the Java `bioformats2raw` → Zarr → `raw2ometiff` chain with a pure-Python `tifffile` implementation.
 
 ## What this iteration supports
 
 - Akoya mIF QPTIFF
 - HALO planar mIF TIFF / OME-TIFF
 - Akoya component TIFF
-- `uint8`, `uint16`, and the other scalar dtypes supported by OME-TIFF, without intensity rescaling
+- Native `uint8`, `uint16`, `uint32`, `int8`, `int16`, `int32`, `float32`, and `float64` pixels
+- Exact dtype preservation with no automatic casting or intensity rescaling
 - Fresh pyramid construction from the full-resolution source pixels
 - Lossless LZW, Deflate, ZSTD, or uncompressed output; JPEG remains available for `uint8` only
 - Click-based CLI, `pyproject.toml` packaging, and no Java runtime
 
-The H&E class remains importable but intentionally raises a clear `NotImplementedError`. The next iteration should write H&E as one interleaved RGB image (`SamplesPerPixel=3`), not as three grayscale pages.
+Unsupported dtypes fail before conversion. The H&E class remains importable but intentionally raises `NotImplementedError`; the H&E iteration should write one interleaved RGB image with `SamplesPerPixel=3`, not three grayscale pages.
 
-## MITI scope
+## Output conventions
 
-The output covers the standardized OME-TIFF image-file portion of MITI. Whether an image is Level 2 or Level 3 depends on the processing and QC performed upstream. A complete MITI submission also requires linked file, biospecimen, reagent, acquisition, channel, instrument, processing, and related manifest metadata. The OME root UUID is valid OME-XML and is retained by default.
+The current mIF writer deliberately emits one little-endian BigTIFF series. The TIFF byte order is `<`, and the generated OME-XML therefore declares `BigEndian="false"`. Converting a big-endian source to this output representation changes byte encoding, not the numeric dtype or pixel values.
 
-The current MITI `yaml/05-ome-tiff-header.yaml` profile lists only `uint16` and `float` as accepted pixel types. Therefore, a native `uint8` image can be valid OME-TIFF while failing that narrower MITI header profile. `omeify` does not mutate the scientific data to make the checkbox turn green: it preserves the native dtype, records the header result in the conversion report, and offers `--strict-miti` when a hard failure is desired.
+`SignificantBits` is the full storage width of the output pixel type: 8 for `uint8`, 16 for `uint16`, 32 for `float32`, and so on. The OME root UUID remains enabled by default and may be omitted explicitly with `--omit-uuid`.
+
+Each full-resolution channel is a top-level IFD. Rebuilt lower resolutions are tiled SubIFDs marked as reduced-resolution images. `TiffData IFD="0"` maps only the full-resolution channel planes; pyramid SubIFDs are not counted as additional OME planes.
+
+## MITI header scope
+
+`omeify` validates the OME-TIFF header fields relevant to the MITI image-header minimums. The normalized validation record is checked against the bundled JSON Schema at:
+
+```text
+omeify/schemas/miti_ome_tiff_header.schema.json
+```
+
+The published MITI header YAML lists only `uint16` and `float` in its pixel-type enumeration. `omeify` treats the absence of valid OME types such as `uint8` as an incomplete enumeration, accepts the scalar OME types listed above, and never changes scientific data to satisfy that list. Genuine header-validation failures stop conversion; there is no separate strict mode.
+
+MITI also defines companion biospecimen, reagent, acquisition, channel, instrument, processing, and analysis metadata. This package is concerned with the OME-TIFF image header and file structure, not with replacing those companion records.
 
 ## Install
 
@@ -32,6 +47,8 @@ For development:
 python -m pip install -e '.[dev]'
 pytest
 ```
+
+The authoritative package version is the static `version` field in `pyproject.toml`. Installed code reads that value from distribution metadata through `importlib.metadata`; direct source-tree imports fall back to the neighboring `pyproject.toml`.
 
 ## CLI
 
@@ -52,12 +69,11 @@ Useful options:
 --omit-uuid              Omit the optional OME root UUID
 --workers N              TIFF compression workers
 --no-checksums           Skip the final whole-file checksum pass
---strict-miti            Fail on the current MITI header-profile check
 ```
 
 The existing underscore spellings such as `--rename_channels_json` remain accepted as aliases.
 
-The conversion report includes separate `ome`, `miti_header`, and `verification` sections. This keeps schema validity, MITI profile conformance, and binary-image checks from being blended into one suspiciously cheerful boolean.
+The conversion report includes separate `ome`, `miti_header`, and `verification` sections. Structural verification checks BigTIFF, TIFF/OME byte-order agreement, dtype, SignificantBits, TiffData mapping, pyramid geometry, tiled storage, SubIFDs, reduced-resolution flags, and the linked pyramid annotation. Lossless output also spot-checks base pixels against the source in every channel.
 
 ## Python API
 
@@ -73,10 +89,11 @@ report = converter.convert(
     compression="LZW",
     tile_size=1024,
     downsample="mean",
-    strict_miti=False,
 )
 ```
 
 ## I/O strategy
 
-The full-resolution source is never materialized as one giant NumPy array. `omeify` decodes only the source strips or tiles needed for each output tile. Newly generated lower-resolution levels are staged as temporary uncompressed tiled BigTIFF files, one level at a time. Peak RAM is therefore governed primarily by a few output tiles plus the largest source strip or tile, while temporary disk use is approximately one third of the uncompressed base image for a complete 2× pyramid. The final file is first written and verified beside the requested destination and then atomically moved into place, so a cache directory on another filesystem does not break finalization.
+The full-resolution source is never materialized as one giant NumPy array. `omeify` decodes only the source strips or tiles required for the current output tile. Rebuilt lower-resolution levels are staged as temporary uncompressed tiled BigTIFF files, one level at a time. Peak RAM is therefore governed primarily by a few image tiles plus the largest decoded source segment, while temporary disk use is approximately one third of the uncompressed base image for a complete 2× pyramid.
+
+The final file is written and verified beside the requested destination and then atomically moved into place. A failed write or verification does not destroy an existing valid output.

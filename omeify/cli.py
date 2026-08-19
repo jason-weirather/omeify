@@ -115,15 +115,6 @@ def _load_channel_renames(path: Path | None) -> dict[str, str]:
 )
 @click.option("--overwrite/--no-overwrite", default=True, show_default=True)
 @click.option("--checksums/--no-checksums", default=True, show_default=True)
-@click.option(
-    "--strict-miti/--no-strict-miti",
-    default=False,
-    show_default=True,
-    help=(
-        "Fail when the generated OME header violates the current MITI header YAML. "
-        "The current profile rejects native uint8 even though uint8 is valid OME."
-    ),
-)
 @click.option("-v", "--verbose", count=True, help="Increase logging verbosity.")
 @click.option(
     "--version",
@@ -151,7 +142,6 @@ def main(
     physical_size_y_um: float | None,
     overwrite: bool,
     checksums: bool,
-    strict_miti: bool,
     verbose: int,
 ) -> None:
     """Convert INPUT_PATH into a deidentified pyramidal OME-TIFF at OUTPUT_PATH."""
@@ -200,7 +190,6 @@ def main(
             max_workers=workers,
             overwrite=overwrite,
             calculate_checksums=checksums,
-            strict_miti=strict_miti,
         )
     except Exception as exc:
         if verbose >= 2:

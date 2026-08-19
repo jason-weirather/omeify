@@ -118,10 +118,15 @@ def test_conversion_preserves_dtype_and_rebuilds_pyramid(tmp_path: Path, dtype) 
     )
 
     assert report["output_file"]["dtype"] == np.dtype(dtype).name
-    assert report["options"]["strict_miti"] is False
     assert report["input_file"]["sha256_checksum"] is None
     assert report["output_file"]["sha256_checksum"] is None
     assert report["verification"]["ome_tiff_recognized"] is True
+    assert report["verification"]["bigtiff"] is True
+    assert report["verification"]["output_byte_order"] == "little"
+    assert report["verification"]["byte_order_metadata_matches_tiff"] is True
+    assert report["verification"]["significant_bits_matches_dtype"] is True
+    assert report["verification"]["tiff_data_mapping_matches"] is True
+    assert report["verification"]["pyramid_annotation_linked"] is True
     assert report["verification"]["dtype_matches_source"] is True
     assert report["verification"]["pyramid_level_shapes_match"] is True
     assert report["verification"]["top_level_ifd_count_matches"] is True
@@ -131,10 +136,8 @@ def test_conversion_preserves_dtype_and_rebuilds_pyramid(tmp_path: Path, dtype) 
     assert report["verification"]["base_pixel_values_match"] is True
     assert report["verification"]["channels_checked"] == data.shape[0]
     assert report["verification"]["points_per_channel"] == 3
-    expected_miti = np.dtype(dtype) == np.dtype("uint16")
-    assert report["miti_header"]["strict_is_valid"] is expected_miti
-    if not expected_miti:
-        assert any("Pixels Type='uint8'" in item for item in report["miti_header"]["errors"])
+    assert report["miti_header"]["is_valid"] is True
+    assert report["miti_header"]["errors"] == []
     with tifffile.TiffFile(output) as tif:
         assert tif.is_ome
         series = tif.series[0]
@@ -215,7 +218,7 @@ def test_zero_pyramid_levels_writes_base_only(tmp_path: Path) -> None:
     )
 
     assert report["pyramid"]["subresolution_count"] == 0
-    assert report["miti_header"]["strict_is_valid"] is True
+    assert report["miti_header"]["is_valid"] is True
     with tifffile.TiffFile(output) as tif:
         assert len(tif.series[0].levels) == 1
         np.testing.assert_array_equal(tif.series[0].asarray(), data)
@@ -256,13 +259,13 @@ def test_float32_dtype_and_miti_type_are_preserved(tmp_path: Path) -> None:
     )
 
     assert report["output_file"]["dtype"] == "float32"
-    assert report["miti_header"]["strict_is_valid"] is True
+    assert report["miti_header"]["is_valid"] is True
     assert 'Type="float"' in report["ome"]["xml_string"]
     with tifffile.TiffFile(output) as tif:
         np.testing.assert_array_equal(tif.series[0].levels[0].asarray(), data)
 
 
-def test_significant_bits_comes_from_source_ome_metadata(tmp_path: Path) -> None:
+def test_significant_bits_matches_dtype_width(tmp_path: Path) -> None:
     data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
     source = tmp_path / "source-12bit.ome.tif"
     output = tmp_path / "output.ome.tif"
@@ -276,9 +279,10 @@ def test_significant_bits_comes_from_source_ome_metadata(tmp_path: Path) -> None
         calculate_checksums=False,
     )
 
-    assert report["image"]["significant_bits"] == 12
+    assert report["image"]["significant_bits"] == 16
+    assert report["verification"]["significant_bits_matches_dtype"] is True
     with tifffile.TiffFile(output) as tif:
-        assert 'SignificantBits="12"' in tif.ome_metadata
+        assert 'SignificantBits="16"' in tif.ome_metadata
 
 
 def test_deflate_is_lossless_and_uses_the_same_streaming_path(tmp_path: Path) -> None:
@@ -301,20 +305,19 @@ def test_deflate_is_lossless_and_uses_the_same_streaming_path(tmp_path: Path) ->
         np.testing.assert_array_equal(tif.series[0].levels[0].asarray(), data)
 
 
-def test_strict_miti_rejects_uint8_without_creating_output(tmp_path: Path) -> None:
-    data = np.arange(2 * 32 * 32, dtype=np.uint8).reshape(2, 32, 32)
-    source = tmp_path / "source.ome.tif"
+def test_unsupported_dtype_fails_without_casting(tmp_path: Path) -> None:
+    data = np.arange(2 * 16 * 16, dtype=np.uint64).reshape(2, 16, 16)
+    source = tmp_path / "source-uint64.tif"
     output = tmp_path / "output.ome.tif"
-    _write_source(source, data)
+    tifffile.imwrite(source, data, photometric="minisblack", metadata={"axes": "CYX"})
 
-    with pytest.raises(ValueError, match="failed the current MITI profile"):
+    with pytest.raises(TypeError, match="Unsupported mIF source dtype uint64"):
         HaloMIFTiff(source).convert(
             output,
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
             calculate_checksums=False,
-            strict_miti=True,
         )
     assert not output.exists()
 
@@ -352,6 +355,7 @@ def test_big_endian_input_is_written_little_endian_without_value_change(
 
     assert report["input_file"]["byte_order"] == "big"
     assert report["output_file"]["byte_order"] == "little"
+    assert report["verification"]["byte_order_metadata_matches_tiff"] is True
     with tifffile.TiffFile(output) as tif:
         assert tif.byteorder == "<"
         assert 'BigEndian="false"' in tif.ome_metadata
@@ -375,17 +379,11 @@ def test_explicit_pyramid_level_count_must_be_possible(tmp_path: Path) -> None:
     assert not output.exists()
 
 
-def test_mean_downsample_handles_bool_and_complex() -> None:
-    boolean = np.array([[True, False], [True, False]], dtype=np.bool_)
-    assert not bool(_mean_downsample_2x(boolean, (1, 1))[0, 0])
-
-    complex_data = np.array(
-        [[1 + 2j, 3 + 4j], [5 + 6j, 7 + 8j]],
-        dtype=np.complex64,
-    )
-    result = _mean_downsample_2x(complex_data, (1, 1))
-    assert result.dtype == np.dtype("complex64")
-    assert result[0, 0] == pytest.approx(4 + 5j)
+def test_mean_downsample_preserves_signed_integer_dtype() -> None:
+    data = np.array([[-3, -2], [2, 3]], dtype=np.int16)
+    result = _mean_downsample_2x(data, (1, 1))
+    assert result.dtype == np.dtype("int16")
+    assert result[0, 0] == 0
 
 
 def test_compatibility_features_expose_old_metadata_properties(tmp_path: Path) -> None:
@@ -424,5 +422,32 @@ def test_click_version_is_eager_and_json() -> None:
     result = CliRunner().invoke(main, ["--version"])
     assert result.exit_code == 0
     version_info = json.loads(result.output)
-    assert version_info["omeify"] == "0.4.0"
+    assert version_info["omeify"] == "0.4.1"
     assert "tifffile" in version_info
+
+    help_result = CliRunner().invoke(main, ["--help"])
+    assert help_result.exit_code == 0
+    assert "--strict-miti" not in help_result.output
+
+def test_pyproject_is_the_version_authority() -> None:
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+
+    from omeify import __version__
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with pyproject.open("rb") as handle:
+        project_version = tomllib.load(handle)["project"]["version"]
+    assert __version__ == project_version == "0.4.1"
+
+
+def test_bundled_miti_json_schema_is_available() -> None:
+    import json
+    from importlib.resources import files
+
+    resource = files("omeify.schemas").joinpath("miti_ome_tiff_header.schema.json")
+    schema = json.loads(resource.read_text(encoding="utf-8"))
+    assert schema["$schema"].endswith("draft/2020-12/schema")
+    assert "uint8" in schema["properties"]["pixel_type"]["enum"]

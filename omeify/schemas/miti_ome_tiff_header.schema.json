@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/miti_ome_tiff_header.schema.json",
+  "title": "omeify MITI OME-TIFF header profile",
+  "description": "A normalized JSON representation of the OME-TIFF header fields required by omeify's interpretation of the MITI header minimums. Pixel types follow the OME 2016-06 scalar numeric types supported by omeify, including uint8.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "image_id",
+    "pixels_id",
+    "big_endian",
+    "dimension_order",
+    "interleaved",
+    "physical_size_x",
+    "physical_size_x_unit",
+    "physical_size_y",
+    "physical_size_y_unit",
+    "significant_bits",
+    "size_c",
+    "size_t",
+    "size_x",
+    "size_y",
+    "size_z",
+    "pixel_type",
+    "channels",
+    "tiff_data"
+  ],
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^urn:uuid:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "creator": {
+      "type": "string",
+      "minLength": 1
+    },
+    "image_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "image_name": {
+      "type": "string"
+    },
+    "pixels_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "big_endian": {
+      "type": "boolean"
+    },
+    "dimension_order": {
+      "enum": ["XYZCT", "XYZTC", "XYCTZ", "XYCZT", "XYTCZ", "XYTZC"]
+    },
+    "interleaved": {
+      "type": "boolean"
+    },
+    "physical_size_x": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "physical_size_x_unit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "physical_size_y": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "physical_size_y_unit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "physical_size_z": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "physical_size_z_unit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "significant_bits": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "size_c": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "size_t": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "size_x": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "size_y": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "size_z": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "pixel_type": {
+      "enum": ["int8", "int16", "int32", "uint8", "uint16", "uint32", "float", "double"]
+    },
+    "channels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "samples_per_pixel"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "samples_per_pixel": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "tiff_data": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ifd", "plane_count"],
+        "properties": {
+          "ifd": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "plane_count": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "size_z": {
+            "minimum": 2
+          }
+        }
+      },
+      "then": {
+        "required": ["physical_size_z", "physical_size_z_unit"]
+      }
+    }
+  ]
+}
