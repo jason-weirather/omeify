@@ -689,7 +689,7 @@ class TifffileConverter:
             if features.icc_profile is not None:
                 common_options["iccprofile"] = features.icc_profile
 
-        software = f"omeify {__version__}; tifffile {tifffile.__version__}"
+        software = f"omeify {__version__}"
 
         with tifffile.TiffWriter(
             output_path,
