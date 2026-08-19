@@ -4,6 +4,9 @@
 pyramidal OME-TIFF. Deidentified and minimal metadata follows MITI (Minimum Information about highly multiplexed Tissue Imaging)
 guidelines (Schapiro et. al. Nat Methods. 2022). 
 
+> ⚠️ **Deidentification note:** rebuilding a minimal header avoids carrying arbitrary source metadata into the output. It does not inspect pixels for burned-in labels or other identifying content.
+
+
 ## Design goals
 
 - Produce a predictable OME-TIFF representation from other image format inputs
@@ -157,8 +160,6 @@ another place for unnecessary source identity to enter the standardized file.
 This is metadata minimization, not metadata invention. MITI also defines biospecimen, reagent,
 acquisition, instrument, processing, analysis, and other companion metadata. Those records remain
 important to a complete MITI dataset but are outside the OME-TIFF header generated here.
-
-> **Deidentification note:** rebuilding a minimal header avoids carrying arbitrary source metadata into the output. It does not inspect pixels for burned-in labels or other identifying content.
 
 ## Validation and verification
 
