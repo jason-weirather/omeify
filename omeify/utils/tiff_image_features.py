@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -16,9 +17,13 @@ LOGGER = logging.getLogger(__name__)
 
 InputProfile = Literal[
     "akoya_mif_qptiff",
+    "akoya_he_qptiff",
+    "svs",
     "halo_mif",
     "component",
 ]
+
+PixelLayout = Literal["planar", "rgb"]
 
 _SUPPORTED_MIF_DTYPES = {
     "int8",
@@ -30,6 +35,13 @@ _SUPPORTED_MIF_DTYPES = {
     "float32",
     "float64",
 }
+
+_SUPPORTED_RGB_DTYPES = {"uint8"}
+_APERIO_MPP_PATTERN = re.compile(
+    r"(?:^|\|)\s*MPP\s*=\s*"
+    r"(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)",
+    flags=re.IGNORECASE,
+)
 
 
 def _local_name(tag: str) -> str:
@@ -143,18 +155,43 @@ class ImageMetadata:
     physical_size_y_um: float
     source_axes: str
     source_byte_order: str
+    pixel_layout: PixelLayout = "planar"
+    samples_per_pixel: int = 1
+    icc_profile: bytes | None = None
 
     @property
     def shape_cyx(self) -> tuple[int, int, int]:
         return self.size_c, self.size_y, self.size_x
 
+    @property
+    def is_rgb(self) -> bool:
+        return self.pixel_layout == "rgb"
+
+    @property
+    def output_axes(self) -> str:
+        return "YXS" if self.is_rgb else "CYX"
+
+    @property
+    def output_shape(self) -> tuple[int, int, int]:
+        if self.is_rgb:
+            return self.size_y, self.size_x, self.samples_per_pixel
+        return self.size_c, self.size_y, self.size_x
+
+    @property
+    def plane_count(self) -> int:
+        return len(self.channel_names)
+
+    @property
+    def photometric(self) -> str:
+        return "rgb" if self.is_rgb else "minisblack"
+
 
 class TiffPlaneReader:
-    """Random-access reader for one grayscale TIFF page.
+    """Random-access reader for one grayscale or interleaved RGB TIFF page.
 
-    Only intersecting tiles or strips are decoded.  A small LRU cache prevents
-    repeated decoding when the requested output tile grid does not exactly match
-    the source grid.
+    Only intersecting tiles or strips are decoded. A small LRU cache prevents
+    repeated decoding when the requested output tile grid does not exactly
+    match the source grid.
     """
 
     def __init__(
@@ -164,10 +201,16 @@ class TiffPlaneReader:
         lock: threading.RLock | None = None,
         cache_mib: int = 64,
     ) -> None:
-        if int(page.samplesperpixel) != 1:
+        self.samples_per_pixel = int(page.samplesperpixel)
+        if self.samples_per_pixel not in {1, 3}:
             raise ValueError(
-                "The mIF writer requires one grayscale sample per TIFF page; "
-                f"found SamplesPerPixel={page.samplesperpixel}."
+                "omeify supports one grayscale sample or three interleaved RGB samples "
+                f"per TIFF page; found SamplesPerPixel={self.samples_per_pixel}."
+            )
+        if self.samples_per_pixel > 1 and int(page.planarconfig) != 1:
+            raise ValueError(
+                "RGB input must use contiguous samples (PlanarConfiguration=1); "
+                f"found PlanarConfiguration={int(page.planarconfig)}."
             )
 
         self.page = page
@@ -189,7 +232,10 @@ class TiffPlaneReader:
 
         nominal_segment_bytes = max(
             1,
-            self.segment_height * self.segment_width * max(1, self.dtype.itemsize),
+            self.segment_height
+            * self.segment_width
+            * self.samples_per_pixel
+            * max(1, self.dtype.itemsize),
         )
         self.cache_capacity = max(
             1,
@@ -197,8 +243,10 @@ class TiffPlaneReader:
         )
 
     @property
-    def shape(self) -> tuple[int, int]:
-        return self.height, self.width
+    def shape(self) -> tuple[int, ...]:
+        if self.samples_per_pixel == 1:
+            return self.height, self.width
+        return self.height, self.width, self.samples_per_pixel
 
     def clear_cache(self) -> None:
         self._cache.clear()
@@ -206,21 +254,30 @@ class TiffPlaneReader:
     def _segment_index(self, segment_y: int, segment_x: int) -> int:
         return segment_y * self.segments_across + segment_x
 
-    @staticmethod
-    def _as_2d(decoded: np.ndarray) -> np.ndarray:
+    def _normalize_decoded(self, decoded: np.ndarray) -> np.ndarray:
         array = np.asarray(decoded)
-        if array.ndim == 4:
-            if array.shape[0] != 1 or array.shape[-1] != 1:
-                raise ValueError(f"Unsupported decoded TIFF segment shape {array.shape}")
-            array = array[0, :, :, 0]
-        elif array.ndim == 3:
-            if array.shape[0] == 1:
-                array = array[0]
-            elif array.shape[-1] == 1:
-                array = array[..., 0]
-        if array.ndim != 2:
-            raise ValueError(f"Unsupported decoded TIFF segment shape {array.shape}")
+        if array.ndim == 4 and array.shape[0] == 1:
+            array = array[0]
+
+        if self.samples_per_pixel == 1:
+            if array.ndim == 3:
+                if array.shape[0] == 1:
+                    array = array[0]
+                elif array.shape[-1] == 1:
+                    array = array[..., 0]
+            if array.ndim != 2:
+                raise ValueError(f"Unsupported decoded grayscale TIFF segment shape {array.shape}")
+            return array
+
+        if array.ndim != 3 or array.shape[-1] != self.samples_per_pixel:
+            raise ValueError(f"Unsupported decoded RGB TIFF segment shape {array.shape}")
         return array
+
+    def _empty_segment(self, height: int, width: int) -> np.ndarray:
+        shape = (height, width)
+        if self.samples_per_pixel > 1:
+            shape += (self.samples_per_pixel,)
+        return np.zeros(shape, dtype=self.dtype)
 
     def _decode_segment(self, index: int) -> tuple[np.ndarray, int, int]:
         cached = self._cache.get(index)
@@ -264,17 +321,17 @@ class TiffPlaneReader:
             origin_y = segment_y * self.segment_height
             origin_x = segment_x * self.segment_width
 
+        valid_h = min(self.segment_height, self.height - origin_y)
+        valid_w = min(self.segment_width, self.width - origin_x)
         if decoded is None:
-            valid_h = min(self.segment_height, self.height - origin_y)
-            valid_w = min(self.segment_width, self.width - origin_x)
-            array = np.zeros((max(0, valid_h), max(0, valid_w)), dtype=self.dtype)
+            array = self._empty_segment(max(0, valid_h), max(0, valid_w))
         else:
-            array = self._as_2d(decoded)
+            array = self._normalize_decoded(decoded)
             if array.dtype != self.dtype:
                 array = array.astype(self.dtype, copy=False)
             valid_h = min(array.shape[0], self.height - origin_y)
             valid_w = min(array.shape[1], self.width - origin_x)
-            array = np.ascontiguousarray(array[:valid_h, :valid_w])
+            array = np.ascontiguousarray(array[:valid_h, :valid_w, ...])
 
         value = (array, origin_y, origin_x)
         self._cache[index] = value
@@ -288,7 +345,7 @@ class TiffPlaneReader:
             raise ValueError(
                 f"Requested region {(y0, y1, x0, x1)} is outside page shape {self.shape}"
             )
-        output = np.zeros((y1 - y0, x1 - x0), dtype=self.dtype)
+        output = self._empty_segment(y1 - y0, x1 - x0)
         if output.size == 0:
             return output
 
@@ -314,15 +371,17 @@ class TiffPlaneReader:
                 output[
                     copy_y0 - y0 : copy_y1 - y0,
                     copy_x0 - x0 : copy_x1 - x0,
+                    ...,
                 ] = segment[
                     copy_y0 - seg_y0 : copy_y1 - seg_y0,
                     copy_x0 - seg_x0 : copy_x1 - seg_x0,
+                    ...,
                 ]
         return output
 
 
 class TiffMIFSource:
-    """Open and normalize a TIFF-like mIF source into planar C/Y/X pages."""
+    """Open and normalize a supported TIFF-family source for conversion."""
 
     def __init__(
         self,
@@ -397,6 +456,14 @@ class TiffMIFSource:
         if self.tiff is None or self.level0 is None or not self.pages:
             raise ValueError("Selected series contains no readable TIFF pages")
 
+        if self.profile in {"akoya_he_qptiff", "svs"}:
+            return self._inspect_rgb()
+        return self._inspect_planar()
+
+    def _inspect_planar(self) -> ImageMetadata:
+        if self.tiff is None or self.level0 is None or not self.pages:
+            raise ValueError("Selected series contains no readable TIFF pages")
+
         page0 = self.pages[0]
         size_y = int(page0.imagelength)
         size_x = int(page0.imagewidth)
@@ -422,8 +489,8 @@ class TiffMIFSource:
                 )
             if int(page.samplesperpixel) != 1:
                 raise ValueError(
-                    "RGB/contiguous-sample TIFF input is intentionally deferred to the H&E "
-                    "iteration.  The mIF path requires SamplesPerPixel=1 for every page."
+                    "The planar mIF profile requires SamplesPerPixel=1 for every page; "
+                    "use the qptiff_he or svs profile for interleaved RGB input."
                 )
 
         axes = str(getattr(self.level0, "axes", ""))
@@ -477,6 +544,84 @@ class TiffMIFSource:
             physical_size_y_um=physical_y,
             source_axes=axes,
             source_byte_order="big" if self.tiff.byteorder == ">" else "little",
+            pixel_layout="planar",
+            samples_per_pixel=1,
+        )
+
+    def _inspect_rgb(self) -> ImageMetadata:
+        if self.tiff is None or self.level0 is None or not self.pages:
+            raise ValueError("Selected series contains no readable TIFF pages")
+        if self.profile == "akoya_he_qptiff" and not self.tiff.is_qpi:
+            raise ValueError(
+                "The qptiff_he profile requires a PerkinElmer/Akoya QPI TIFF source."
+            )
+        if self.profile == "svs" and not self.tiff.is_svs:
+            raise ValueError("The svs profile requires an Aperio SVS source.")
+        if len(self.pages) != 1:
+            raise ValueError(
+                "RGB H&E conversion expects exactly one full-resolution TIFF page in the "
+                f"selected series; found {len(self.pages)}."
+            )
+
+        page0 = self.pages[0]
+        size_y = int(page0.imagelength)
+        size_x = int(page0.imagewidth)
+        dtype = np.dtype(self.level0.dtype).newbyteorder("=")
+        if dtype.name not in _SUPPORTED_RGB_DTYPES:
+            supported = ", ".join(sorted(_SUPPORTED_RGB_DTYPES))
+            raise TypeError(
+                f"Unsupported RGB source dtype {dtype}. Supported dtypes are: {supported}. "
+                "omeify does not cast unsupported pixel data."
+            )
+
+        samples_per_pixel = int(page0.samplesperpixel)
+        if samples_per_pixel != 3:
+            raise ValueError(
+                "RGB H&E input must contain exactly three samples per pixel; "
+                f"found SamplesPerPixel={samples_per_pixel}."
+            )
+        if int(page0.planarconfig) != 1:
+            raise ValueError(
+                "RGB H&E input must use contiguous samples (PlanarConfiguration=1); "
+                f"found PlanarConfiguration={int(page0.planarconfig)}."
+            )
+        if int(page0.photometric) not in {2, 6}:
+            raise ValueError(
+                "RGB H&E input must use RGB or YCbCr photometric interpretation; "
+                f"found PhotometricInterpretation={int(page0.photometric)}."
+            )
+
+        axes = str(getattr(self.level0, "axes", ""))
+        shape = tuple(int(value) for value in getattr(self.level0, "shape", ()))
+        if axes != "YXS" or shape != (size_y, size_x, samples_per_pixel):
+            raise ValueError(
+                "RGB H&E input must resolve to one YXS series with shape "
+                f"(Y, X, 3); found axes={axes!r}, shape={shape}."
+            )
+
+        physical_x, physical_y = self._physical_sizes(page0)
+        icc_profile = page0.iccprofile
+        if icc_profile is not None:
+            icc_profile = bytes(icc_profile)
+
+        return ImageMetadata(
+            input_path=self.input_path,
+            series_index=self.series_index,
+            input_type=self.input_type,
+            image_name=self.image_name,
+            size_c=samples_per_pixel,
+            size_y=size_y,
+            size_x=size_x,
+            dtype=dtype,
+            significant_bits=self._significant_bits(dtype),
+            channel_names=("RGB",),
+            physical_size_x_um=physical_x,
+            physical_size_y_um=physical_y,
+            source_axes=axes,
+            source_byte_order="big" if self.tiff.byteorder == ">" else "little",
+            pixel_layout="rgb",
+            samples_per_pixel=samples_per_pixel,
+            icc_profile=icc_profile,
         )
 
     def _channel_names(self, size_c: int) -> list[str]:
@@ -531,7 +676,7 @@ class TiffMIFSource:
                 raise ValueError("Both physical_size_x_um and physical_size_y_um are required")
             x_um = float(self.physical_size_x_override)
             y_um = float(self.physical_size_y_override)
-        elif self.profile in {"akoya_mif_qptiff", "component"}:
+        elif self.profile in {"akoya_mif_qptiff", "akoya_he_qptiff", "component"}:
             root = _parse_xml(page0.description)
             pixel_size = (
                 _first_descendant_text(root, "PixelSizeMicrons")
@@ -546,6 +691,18 @@ class TiffMIFSource:
                     raise ValueError(
                         "Akoya metadata does not contain PixelSizeMicrons and TIFF resolution "
                         "tags do not define a physical unit."
+                    )
+                x_um, y_um = fallback
+        elif self.profile == "svs":
+            match = _APERIO_MPP_PATTERN.search(page0.description or "")
+            if match is not None:
+                x_um = y_um = float(match.group("value"))
+            else:
+                fallback = _resolution_tag_to_um(page0)
+                if fallback is None:
+                    raise ValueError(
+                        "Aperio SVS metadata does not contain MPP and TIFF resolution tags "
+                        "do not define a physical unit."
                     )
                 x_um, y_um = fallback
         elif self.profile == "halo_mif":
@@ -580,6 +737,8 @@ class TiffMIFSource:
 
         return int(dtype.itemsize * 8)
 
+
+TiffImageSource = TiffMIFSource
 
 
 class TiffImageFeatures:
@@ -637,7 +796,7 @@ class TiffImageFeatures:
 
     @property
     def interleaved(self) -> str:
-        return "false"
+        return "true" if self._metadata.is_rgb else "false"
 
     @property
     def physical_size_x(self) -> float:
@@ -691,7 +850,7 @@ class TiffImageFeatures:
 
     @property
     def plane_count(self) -> int:
-        return self._metadata.size_c
+        return self._metadata.plane_count
 
     @property
     def channels(self) -> list[dict[str, object]]:
@@ -699,7 +858,7 @@ class TiffImageFeatures:
             {
                 "ID": f"Channel:0:{index}",
                 "Name": name,
-                "SamplesPerPixel": 1,
+                "SamplesPerPixel": self._metadata.samples_per_pixel,
             }
             for index, name in enumerate(self._metadata.channel_names)
         ]

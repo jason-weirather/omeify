@@ -35,7 +35,7 @@ class MITIHeaderValidation:
     The upstream MITI YAML is used as the field-level source, but omeify treats
     its omission of valid scalar OME types such as ``uint8`` as an incomplete
     enumeration. The bundled JSON Schema therefore accepts the OME scalar
-    numeric types that the current mIF writer can preserve without casting.
+    numeric types that the current writers can preserve without casting.
     """
 
     is_valid: bool
@@ -118,11 +118,11 @@ def _deduplicate(values: list[str]) -> tuple[str, ...]:
 
 
 def validate_miti_ome_tiff_header(xml_string: str) -> MITIHeaderValidation:
-    """Validate the generated OME-TIFF header used by the planar mIF writer.
+    """Validate an omeify planar mIF or interleaved RGB OME-TIFF header.
 
     JSON Schema handles required fields, primitive types, and controlled
     values. Python checks relationships that JSON Schema cannot express
-    cleanly, including channel count, plane count, planar channel layout, and
+    cleanly, including channel/sample count, plane count, sample layout, and
     the requirement that SignificantBits equal the declared pixel type width.
     """
 
@@ -149,8 +149,8 @@ def validate_miti_ome_tiff_header(xml_string: str) -> MITIHeaderValidation:
         )
     if len(images) > 1:
         warnings.append(
-            "Header validation checked only the first Image element; omeify's mIF writer "
-            "normally emits exactly one"
+            "Header validation checked only the first Image element; omeify normally emits "
+            "exactly one"
         )
     image = images[0]
 
@@ -265,36 +265,46 @@ def validate_miti_ome_tiff_header(xml_string: str) -> MITIHeaderValidation:
     pixel_type = record.get("pixel_type")
     significant_bits = record.get("significant_bits")
 
-    if isinstance(size_c, int) and len(channels) != size_c:
+    samples_per_pixel = [channel.get("samples_per_pixel") for channel in channels]
+    if isinstance(size_c, int) and all(isinstance(value, int) for value in samples_per_pixel):
+        total_samples = sum(samples_per_pixel)
+        if total_samples != size_c:
+            errors.append(
+                f"Pixels declares SizeC={size_c}, but Channel SamplesPerPixel values "
+                f"sum to {total_samples}"
+            )
+
+    if interleaved is False and channels and any(value != 1 for value in samples_per_pixel):
         errors.append(
-            f"Pixels declares SizeC={size_c} but contains {len(channels)} Channel elements"
+            "The planar omeify profile requires SamplesPerPixel=1 for every Channel"
         )
-    if channels and any(channel.get("samples_per_pixel") != 1 for channel in channels):
-        errors.append("The planar mIF profile requires SamplesPerPixel=1 for every Channel")
-    if interleaved is not None and interleaved:
-        errors.append("The planar mIF profile requires Pixels Interleaved=false")
+    if interleaved is True:
+        if len(channels) != 1 or samples_per_pixel != [3] or size_c != 3:
+            errors.append(
+                "The interleaved RGB omeify profile requires SizeC=3 and one Channel "
+                "with SamplesPerPixel=3"
+            )
 
     if len(tiff_data) != 1:
         errors.append(
-            "The omeify mIF header must contain exactly one TiffData element; "
+            "The omeify image header must contain exactly one TiffData element; "
             f"found {len(tiff_data)}"
         )
     elif tiff_data[0].get("ifd") != 0:
-        errors.append("The omeify mIF TiffData element must begin at IFD=0")
+        errors.append("The omeify TiffData element must begin at IFD=0")
 
     if (
-        isinstance(size_c, int)
-        and isinstance(size_z, int)
+        isinstance(size_z, int)
         and isinstance(size_t, int)
         and tiff_data
         and all(isinstance(item.get("plane_count"), int) for item in tiff_data)
     ):
-        expected_planes = size_c * size_z * size_t
+        expected_planes = len(channels) * size_z * size_t
         actual_planes = sum(item["plane_count"] for item in tiff_data)
         if actual_planes != expected_planes:
             errors.append(
-                f"TiffData PlaneCount totals {actual_planes}, but SizeC*SizeZ*SizeT is "
-                f"{expected_planes}"
+                f"TiffData PlaneCount totals {actual_planes}, but the logical Channel "
+                f"count times SizeZ*SizeT is {expected_planes}"
             )
 
     expected_bits = _OME_PIXEL_BITS.get(pixel_type)

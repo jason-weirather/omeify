@@ -5,10 +5,10 @@ from pathlib import Path
 from omeify.utils.generic_conversion import GenericConversion
 
 
-class AkoyaHEQptiff(GenericConversion):
-    """Convert Akoya brightfield H&E QPTIFF as one interleaved RGB image."""
+class AperioSVS(GenericConversion):
+    """Convert an Aperio SVS baseline image as one interleaved RGB image."""
 
-    profile = "akoya_he_qptiff"
+    profile = "svs"
     image_name = "WholeSlideHE"
     default_compression = "JPEG"
 
@@ -22,4 +22,4 @@ class AkoyaHEQptiff(GenericConversion):
 
     @property
     def input_type(self) -> str:
-        return "Akoya H&E QPTIFF"
+        return "Aperio SVS"

@@ -8,7 +8,13 @@ from typing import Any
 import click
 
 from omeify import get_version_info
-from omeify.inputs import AkoyaComponentTiff, AkoyaHEQptiff, AkoyaMIFQptiff, HaloMIFTiff
+from omeify.inputs import (
+    AkoyaComponentTiff,
+    AkoyaHEQptiff,
+    AkoyaMIFQptiff,
+    AperioSVS,
+    HaloMIFTiff,
+)
 
 
 def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -> None:
@@ -46,7 +52,7 @@ def _load_channel_renames(path: Path | None) -> dict[str, str]:
 @click.option(
     "--type",
     "input_type",
-    type=click.Choice(["qptiff_mif", "qptiff_he", "halo_mif", "component"]),
+    type=click.Choice(["qptiff_mif", "qptiff_he", "svs", "halo_mif", "component"]),
     required=True,
     help="Input image profile.",
 )
@@ -73,8 +79,22 @@ def _load_channel_renames(path: Path | None) -> dict[str, str]:
 @click.option(
     "--compression",
     type=click.Choice(["LZW", "Deflate", "ZSTD", "JPEG", "Uncompressed"], case_sensitive=False),
-    default="LZW",
+    default=None,
+    help="Default: JPEG for qptiff_he/svs; LZW for planar mIF/component inputs.",
+)
+@click.option(
+    "--jpeg-quality",
+    type=click.IntRange(min=1, max=100),
+    default=90,
     show_default=True,
+    help="JPEG encoder quality used when --compression JPEG is active.",
+)
+@click.option(
+    "--jpeg-subsampling",
+    type=click.Choice(["444", "422", "420", "411"]),
+    default="444",
+    show_default=True,
+    help="JPEG chroma subsampling for interleaved RGB output.",
 )
 @click.option(
     "--tile-size",
@@ -133,7 +153,9 @@ def main(
     omit_uuid: bool,
     output_json: Path | None,
     cache_directory: Path | None,
-    compression: str,
+    compression: str | None,
+    jpeg_quality: int,
+    jpeg_subsampling: str,
     tile_size: int,
     pyramid_levels: int | None,
     downsample: str,
@@ -159,6 +181,8 @@ def main(
         processor = AkoyaMIFQptiff(input_path, series=series, rename_channels=rename_channels)
     elif input_type == "qptiff_he":
         processor = AkoyaHEQptiff(input_path, series=series, rename_channels=rename_channels)
+    elif input_type == "svs":
+        processor = AperioSVS(input_path, series=series, rename_channels=rename_channels)
     elif input_type == "halo_mif":
         processor = HaloMIFTiff(input_path, series=series, rename_channels=rename_channels)
     elif input_type == "component":
@@ -184,6 +208,8 @@ def main(
             output_path,
             display_uuid=not omit_uuid,
             compression=compression,
+            jpeg_quality=jpeg_quality,
+            jpeg_subsampling=jpeg_subsampling,
             tile_size=tile_size,
             pyramid_levels=pyramid_levels,
             downsample=downsample,

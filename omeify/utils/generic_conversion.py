@@ -4,13 +4,14 @@ import logging
 from pathlib import Path
 from typing import ClassVar
 
-from omeify.converters import TifffileConverter
+from omeify.converters import JPEGSubsampling, TifffileConverter
 from omeify.utils.tiff_image_features import InputProfile, TiffImageFeatures
 
 
 class GenericConversion:
     profile: ClassVar[InputProfile]
     image_name: ClassVar[str] = "WholeSlideMIF"
+    default_compression: ClassVar[str] = "LZW"
 
     def __init__(
         self,
@@ -70,8 +71,10 @@ class GenericConversion:
         output_path: str | Path,
         display_uuid: bool = True,
         deidentify_ome: bool = True,
-        compression: str = "LZW",
+        compression: str | None = None,
         *,
+        jpeg_quality: int = 90,
+        jpeg_subsampling: JPEGSubsampling = "444",
         tile_size: int = 1024,
         pyramid_levels: int | None = None,
         downsample: str = "mean",
@@ -81,7 +84,7 @@ class GenericConversion:
     ) -> dict[str, object]:
         if not deidentify_ome:
             raise ValueError(
-                "The pure-Python mIF path intentionally writes newly constructed, "
+                "The pure-Python conversion path intentionally writes newly constructed, "
                 "deidentified OME metadata; preserving source metadata is not supported."
             )
         if downsample not in {"mean", "nearest"}:
@@ -98,7 +101,9 @@ class GenericConversion:
             physical_size_x_um=self._physical_size_x_um,
             physical_size_y_um=self._physical_size_y_um,
             cache_directory=self.cache_directory,
-            compression=compression,
+            compression=compression or self.default_compression,
+            jpeg_quality=jpeg_quality,
+            jpeg_subsampling=jpeg_subsampling,
             tile_size=tile_size,
             pyramid_levels=pyramid_levels,
             downsample=downsample,  # type: ignore[arg-type]

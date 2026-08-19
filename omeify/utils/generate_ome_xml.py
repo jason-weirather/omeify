@@ -14,12 +14,10 @@ _OME_NAMESPACE = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
 _PYRAMID_NAMESPACE = "openmicroscopy.org/PyramidResolution"
 
 
-def _level_yx(shape: Sequence[int]) -> tuple[int, int]:
-    if len(shape) == 2:
-        return int(shape[0]), int(shape[1])
-    if len(shape) == 3:
-        return int(shape[-2]), int(shape[-1])
-    raise ValueError(f"Expected YX or CYX level shape, got {tuple(shape)}")
+def _level_yx(shape: Sequence[int], axes: str) -> tuple[int, int]:
+    if len(shape) != len(axes):
+        raise ValueError(f"Shape {tuple(shape)} does not match axes {axes!r}")
+    return int(shape[axes.index("Y")]), int(shape[axes.index("X")])
 
 
 def generate_ome_xml(
@@ -30,7 +28,7 @@ def generate_ome_xml(
     rename_channels: Mapping[str, str] | None = None,
     output_byteorder: Literal["<", ">"] = "<",
 ) -> dict[str, str | None]:
-    """Generate a minimal, schema-oriented OME-XML block for one planar mIF image."""
+    """Generate minimal OME-XML for one planar mIF or interleaved RGB image."""
 
     if output_byteorder not in {"<", ">"}:
         raise ValueError("output_byteorder must be '<' or '>'")
@@ -56,24 +54,23 @@ def generate_ome_xml(
     if len(level_shapes) > 1:
         annotation: dict[str, str] = {"Namespace": _PYRAMID_NAMESPACE}
         for index, shape in enumerate(level_shapes[1:], start=1):
-            level_y, level_x = _level_yx(shape)
+            level_y, level_x = _level_yx(shape, tiff_features.output_axes)
             annotation[str(index)] = f"{level_x} {level_y}"
         image_metadata["MapAnnotation"] = annotation
 
-    shape_cyx = tiff_features.shape_cyx
     stored_shape = (
-        tiff_features.size_c,
+        tiff_features.plane_count,
         1,
         1,
         tiff_features.size_y,
         tiff_features.size_x,
-        1,
+        tiff_features.samples_per_pixel,
     )
     ome.addimage(
         tiff_features.dtype,
-        shape_cyx,
+        tiff_features.output_shape,
         stored_shape,
-        axes="CYX",
+        axes=tiff_features.output_axes,
         **image_metadata,
     )
 
@@ -96,11 +93,11 @@ def generate_ome_xml(
         raise RuntimeError("tifffile generated OME-XML without a Pixels element")
     # These values describe the file that omeify writes, not the source file.
     pixels.set("BigEndian", "true" if output_byteorder == ">" else "false")
-    # Preserve the historical omeify convention.  For the supported mIF path,
-    # SizeZ=SizeT=1, therefore XYZCT still maps consecutive top-level IFDs to
-    # consecutive channels while matching the MITI example/header convention.
+    # Preserve the historical omeify dimension-order convention. With
+    # SizeZ=SizeT=1, XYZCT maps planar channel pages in order and also
+    # correctly describes one interleaved RGB plane.
     pixels.set("DimensionOrder", "XYZCT")
-    pixels.set("Interleaved", "false")
+    pixels.set("Interleaved", "true" if tiff_features.is_rgb else "false")
 
     xml_string = etree.tostring(
         root,

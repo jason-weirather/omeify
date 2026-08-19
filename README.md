@@ -1,44 +1,96 @@
 # omeify
 
-`omeify` converts supported multiplexed tissue images into standardized, deidentified, tiled, pyramidal OME-TIFF. It is deliberately opinionated: preserve the full-resolution scientific pixels, reconstruct only the metadata needed to interpret them, rebuild the image pyramid, and verify the resulting file before it replaces the destination.
+`omeify` converts supported tissue-image formats into standardized, deidentified, tiled,
+pyramidal OME-TIFF. It is deliberately opinionated: preserve the full-resolution pixels,
+reconstruct only the metadata needed to interpret them, rebuild the image pyramid, and verify
+the resulting file before it replaces the destination.
 
 ## Design goals
 
 - Produce a predictable OME-TIFF representation from heterogeneous TIFF-family inputs
-- Preserve the native pixel dtype and full-resolution pixel values
-- Minimize carried-forward metadata while retaining the information required to interpret the image
-- Rebuild pyramid levels from the full-resolution image rather than trusting source pyramids
+- Preserve native pixel dtype and full-resolution values unless lossy JPEG is requested
+- Keep interleaved RGB H&E intact instead of turning red, green, and blue into separate pages
+- Minimize carried-forward metadata while retaining image geometry, physical scale, and color
+- Rebuild pyramid levels from full resolution rather than trusting source pyramids
 - Keep peak memory bounded by processing strips and tiles instead of materializing a whole slide
-- Fail on unsupported image layouts or dtypes rather than silently coercing data
+- Fail on unsupported layouts or dtypes rather than silently coercing data
 
 ## Supported inputs
 
-The current planar mIF path supports:
+### Planar multiplex images
 
 - Akoya mIF QPTIFF
 - HALO planar mIF TIFF / OME-TIFF
 - Akoya component TIFF
-- Native `uint8`, `uint16`, `uint32`, `int8`, `int16`, `int32`, `float32`, and `float64` pixels
-- Lossless LZW, Deflate, ZSTD, or uncompressed output
-- JPEG output for `uint8` images when lossy compression is explicitly desired
+- Native `uint8`, `uint16`, `uint32`, `int8`, `int16`, `int32`, `float32`, and
+  `float64` pixels
 
-Unsupported dtypes fail before conversion. `omeify` does not automatically cast or rescale unsupported pixel data.
+The planar profile writes `CYX`: one grayscale top-level IFD per logical channel,
+`SamplesPerPixel=1`, and `Interleaved=false`.
 
-The current mIF profile is planar: one grayscale sample per channel with `SizeZ=1` and `SizeT=1`. The H&E class remains importable but intentionally raises `NotImplementedError`; the H&E iteration will use the conventional interleaved RGB representation rather than three grayscale channel pages. That RGB work will also require a separate or generalized header-validation profile because `SamplesPerPixel=3` changes the relationship between logical channels and `SizeC`.
+### Brightfield RGB images
+
+- Akoya H&E QPTIFF from PhenoImager HT or PhenoCycler Fusion
+- Aperio SVS
+- Interleaved `uint8` RGB with source axes `YXS`, `SamplesPerPixel=3`, and contiguous samples
+
+The RGB profile writes one top-level interleaved RGB IFD, not three grayscale pages. Its OME
+model uses `SizeC=3`, one `Channel` with `SamplesPerPixel=3`, `Interleaved=true`, and one
+physical TIFF plane in `TiffData`.
+
+Akoya physical pixel size is read from `PixelSizeMicrons` in the QPI description. Aperio pixel
+size is read from `MPP`, with standard TIFF resolution tags used as a fallback. A source ICC
+profile is preserved when present. Arbitrary vendor descriptions, filenames, user names,
+scanner identifiers, dates, and other free text are not copied into the output OME-XML.
+
+Unsupported dtypes and image layouts fail before conversion. `omeify` does not automatically
+cast or rescale unsupported pixel data.
+
+## Compression policy
+
+Planar mIF and component inputs default to lossless LZW. Brightfield `qptiff_he` and `svs`
+inputs default to JPEG because whole-slide RGB pathology images become extraordinarily large
+under lossless compression.
+
+The omeify brightfield default is:
+
+- JPEG quality `90`
+- 4:4:4 chroma sampling, represented to tifffile as subsampling `(1, 1)`
+
+This is a conservative project default, not a universal pathology standard. It avoids chroma
+subsampling while still providing substantial compression. Configure it with
+`--jpeg-quality` and `--jpeg-subsampling`. Available sampling choices are `444`, `422`, `420`,
+and `411`. Tile dimensions must satisfy the JPEG sampling alignment; omeify reports a clear
+error when they do not.
+
+Lossless LZW, Deflate, ZSTD, and uncompressed output remain available for RGB images. JPEG is
+restricted to `uint8` input.
 
 ## Output conventions
 
-The mIF writer emits one little-endian BigTIFF series. The TIFF byte order is `<`, and the generated OME-XML therefore declares `BigEndian="false"`. Converting a big-endian source to this representation changes byte encoding, not the numeric dtype or pixel values.
+All profiles emit one little-endian BigTIFF series. The generated OME-XML therefore declares
+`BigEndian="false"`. Converting a big-endian source changes byte encoding, not its numeric dtype
+or values.
 
-`SignificantBits` is the full storage width of the output pixel type: 8 for `uint8`, 16 for `uint16`, 32 for `float32`, and so on.
+`SignificantBits` is the full storage width of the output pixel type: 8 for `uint8`, 16 for
+`uint16`, 32 for `float32`, and so on.
 
-Each full-resolution channel is a top-level IFD. Rebuilt lower resolutions are tiled SubIFDs marked as reduced-resolution images. `TiffData IFD="0"` maps the full-resolution planes beginning at the first IFD; pyramid SubIFDs are not additional OME planes.
+Every physical full-resolution plane is a top-level IFD. Rebuilt lower resolutions are tiled
+SubIFDs marked as reduced-resolution images. For planar mIF, the physical plane count equals
+the logical channel count. For interleaved RGB, three color samples occupy one physical plane.
+Pyramid SubIFDs are not additional OME planes.
 
-The OME root UUID is generated and retained by default. It can be omitted explicitly with `--omit-uuid`.
+The source pyramid is ignored for all profiles. Each reduced level is rebuilt from the preceding
+level using deterministic local 2× mean by default, or nearest-neighbor when requested. For RGB,
+the operation is applied independently to all three samples while preserving the `YXS` layout.
+
+The OME root UUID is generated and retained by default. It can be omitted with `--omit-uuid`.
 
 ## MITI-aligned metadata minimization
 
-`omeify` constructs a new OME-XML header instead of copying arbitrary source metadata into the output. The goal is to retain the minimum information needed to unambiguously interpret the pixels in the OME-TIFF while avoiding unnecessary vendor, acquisition, or potentially identifying metadata.
+`omeify` constructs a new OME-XML header instead of copying arbitrary source metadata. The goal
+is to retain the minimum information needed to unambiguously interpret the pixels while avoiding
+unnecessary vendor, acquisition, or potentially identifying metadata.
 
 The guiding resource for MITI (Minimum Information about highly multiplexed Tissue Imaging) is:
 
@@ -50,69 +102,82 @@ The normalized header record is validated against the bundled JSON Schema:
 omeify/schemas/miti_ome_tiff_header.schema.json
 ```
 
-This schema implements the intent of the MITI OME-TIFF header minimums for the image representation written by `omeify`. It is intentionally a little stronger than a literal transcription of the MITI table: fields such as `Pixels ID`, `Interleaved`, `SignificantBits`, channel IDs, and TIFF IFD mapping are also checked because they make the generated OME-TIFF self-consistent and mechanically interpretable.
+This schema implements the intent of the MITI OME-TIFF header minimums for the image
+representations written by `omeify`. It is intentionally stronger than a literal transcription
+of the MITI table: fields such as `Pixels ID`, `Interleaved`, `SignificantBits`, channel IDs, and
+TIFF IFD mapping are also checked because they make the generated OME-TIFF mechanically
+interpretable.
 
-The published MITI header definition does not enumerate every valid OME scalar pixel type. `omeify` accepts the scalar numeric types that the current mIF writer can preserve exactly and never changes scientific data merely to satisfy an incomplete enumeration.
+The published MITI header definition does not enumerate every valid OME scalar pixel type.
+`omeify` accepts the scalar numeric types its writers can preserve and never changes scientific
+data merely to satisfy an incomplete enumeration.
 
 ### Header fields
 
 | Field | Requirement | Why it is retained |
 |---|---|---|
 | `Image ID` | Required | Provides the internal OME identifier for the image object. |
-| `Pixels ID` | Required | Provides the internal OME identifier for the pixel object referenced by the image. |
-| `BigEndian` | Required | Declares the byte order of the written TIFF so numeric values can be decoded correctly. It must agree with the actual TIFF byte order. |
-| `DimensionOrder` | Required | Defines how Z, C, and T planes map onto the TIFF plane sequence. The current planar mIF profile writes `XYZCT`. |
-| `Interleaved` | Required by the omeify mIF profile | Declares that channels are stored as separate planar samples rather than interleaved samples. The current mIF profile requires `false`. |
-| `PhysicalSizeX`, `PhysicalSizeY` and units | Required | Converts pixel coordinates into physical distance. Without this calibration, spatial measurements in tissue have no physical scale. |
-| `PhysicalSizeZ` and unit | Required when `SizeZ > 1` | Provides the corresponding physical calibration for a Z stack. The current planar mIF profile has `SizeZ=1`. |
+| `Pixels ID` | Required | Provides the internal OME identifier for the pixel object. |
+| `BigEndian` | Required | Declares the byte order of the written TIFF and must match the file. |
+| `DimensionOrder` | Required | Defines how Z, C, and T map onto the TIFF plane sequence. |
+| `Interleaved` | Required by the omeify profile | `false` for planar mIF and `true` for interleaved RGB. |
+| `PhysicalSizeX`, `PhysicalSizeY`, and units | Required | Converts pixel coordinates into physical distance. |
+| `PhysicalSizeZ` and unit | Required when `SizeZ > 1` | Provides physical calibration for a Z stack. Current profiles use `SizeZ=1`. |
 | `SizeX`, `SizeY` | Required | Defines the full-resolution raster dimensions. |
-| `SizeC`, `SizeZ`, `SizeT` | Required | Defines the dimensional shape of the image and therefore how many logical planes must exist. |
-| `Type` | Required | Defines the numeric representation of each pixel. `omeify` preserves the supported native dtype and fails rather than casting an unsupported dtype. |
-| `SignificantBits` | Required by the omeify profile | Records the storage width of the output pixel type and is checked against `Type`. |
-| Channel `ID` | Required by the omeify profile | Gives each logical channel a unique OME identifier. |
-| Channel `Name` | Required | Preserves the human-readable identity of each image channel. |
-| Channel `SamplesPerPixel` | Required by the omeify mIF profile | Describes the planar channel layout. It is `1` for every channel in the current mIF writer. |
-| `TiffData IFD` | Required by the omeify profile | Connects the OME plane model to the actual TIFF IFD sequence. The current writer starts at IFD 0. |
-| `TiffData PlaneCount` | Required | States how many full-resolution planes belong to the image and is checked against `SizeC × SizeZ × SizeT`. |
+| `SizeC`, `SizeZ`, `SizeT` | Required | Defines the logical dimensional shape. RGB has `SizeC=3`. |
+| `Type` | Required | Defines the numeric representation of each sample. |
+| `SignificantBits` | Required by the omeify profile | Records and validates the output sample storage width. |
+| Channel `ID` | Required by the omeify profile | Gives every logical OME channel element a unique identifier. |
+| Channel `Name` | Required | Retains a human-readable channel identity. RGB uses the neutral name `RGB`. |
+| Channel `SamplesPerPixel` | Required by the omeify profile | `1` for planar channels and `3` for the single interleaved RGB channel. |
+| `TiffData IFD` | Required by the omeify profile | Maps the OME plane model to top-level TIFF IFDs beginning at IFD 0. |
+| `TiffData PlaneCount` | Required | Counts physical full-resolution planes, which is `1` for one RGB image. |
 
-For the current planar mIF representation, those fields are sufficient to reconstruct what is actually stored in the file: the raster dimensions, pixel type and byte encoding, physical scale, channel identities, logical dimension ordering, and the mapping from OME planes to TIFF IFDs. Experimental context such as biospecimen identifiers, antibody clone and lot, staining protocol, instrument configuration, acquisition date, and downstream analysis history is valuable metadata, but it is not required to decode or spatially interpret the image raster itself and belongs in the associated experimental records.
+These fields reconstruct what is stored in the file: raster dimensions, sample type and byte
+encoding, physical scale, channel/sample organization, dimension ordering, and TIFF IFD mapping.
+Experimental context such as biospecimen identifiers, antibody clone and lot, staining protocol,
+instrument configuration, acquisition date, and analysis history remains valuable but belongs in
+associated experimental records.
 
-The MITI header table also recommends a free-text `Comment`. `omeify` does not synthesize one or copy arbitrary source comments into the output. A comment is not needed to interpret the raster, and free-text source metadata is exactly the kind of material that metadata minimization is intended to avoid carrying forward. Conversion provenance is instead captured by the generated `Creator` value and the conversion report.
+The MITI header table also recommends a free-text `Comment`. `omeify` does not synthesize one or
+copy arbitrary source comments. Conversion provenance is captured by the generated `Creator`
+value and the conversion report.
 
 ### Additional OME metadata written by omeify
 
-`Image/@Name` is intentionally omitted. It is not needed to interpret the raster, and avoiding an image-level label removes another place where unnecessary source identity could otherwise enter the standardized file.
-
-A few fields are deliberately written in addition to the minimum header record:
+`Image/@Name` is intentionally omitted. It is not needed to interpret the raster and would create
+another place for unnecessary source identity to enter the standardized file.
 
 | Metadata | Policy | Purpose |
 |---|---|---|
-| Root `UUID` | Generated by default; optional with `--omit-uuid` | Gives the OME document a globally unique identifier without carrying a source identifier forward. |
+| Root `UUID` | Generated by default; optional with `--omit-uuid` | Gives the OME document a new globally unique identifier. |
 | Root `Creator` | Generated | Records the `omeify` version that created the OME-XML. |
-| Empty `LightPath` | Retained for each channel | Preserves the current channel structure without inventing acquisition metadata that is not known. |
-| Pyramid `MapAnnotation` + `AnnotationRef` | Generated when a pyramid is present | Describes the rebuilt resolution levels and links that annotation to the image. The TIFF SubIFD structure remains the actual pyramid storage. |
+| Empty `LightPath` | Generated for each OME channel | Preserves schema structure without inventing acquisition metadata. |
+| Pyramid `MapAnnotation` + `AnnotationRef` | Generated when a pyramid is present | Records rebuilt level dimensions and links them to the image. |
+| TIFF ICC profile | Preserved for RGB when present | Retains the source color-space characterization without copying free-text metadata. |
 
-This is metadata minimization, not metadata invention. `omeify` carries forward only the small set of source facts it needs, principally the image geometry, native dtype, physical pixel size, and channel names, then generates the OME/TIFF structural metadata for the file it actually writes.
+This is metadata minimization, not metadata invention. MITI also defines biospecimen, reagent,
+acquisition, instrument, processing, analysis, and other companion metadata. Those records remain
+important to a complete MITI dataset but are outside the OME-TIFF header generated here.
 
-MITI also defines biospecimen, reagent, acquisition, instrument, processing, analysis, and other companion metadata. Those records remain important to a complete MITI dataset, but they are outside the purpose of the OME-TIFF header generated by this package.
-
-> **Deidentification note:** rebuilding a minimal OME header avoids carrying arbitrary source metadata into the output. It does not inspect the image pixels themselves for burned-in labels or other identifying content.
+> **Deidentification note:** rebuilding a minimal header avoids carrying arbitrary source metadata into the output. It does not inspect pixels for burned-in labels or other identifying content.
 
 ## Validation and verification
 
-Before an output replaces the destination, `omeify` checks both metadata and TIFF structure. Validation includes:
+Before an output replaces the destination, `omeify` checks:
 
-- OME 2016-06 XML schema validation
+- OME 2016-06 XML schema validity
 - The bundled MITI-aligned header profile
 - BigTIFF and TIFF/OME byte-order agreement
 - Native dtype and `SignificantBits`
-- `TiffData` plane mapping
-- Channel and top-level IFD counts
+- Planar versus interleaved `Channel` and `SamplesPerPixel` organization
+- `TiffData` physical-plane mapping
+- Output axes, full-resolution shape, top-level IFD count, and photometric mode
 - Pyramid dimensions, tiled storage, SubIFDs, and reduced-resolution flags
 - The linked pyramid annotation
-- Spot checks of full-resolution pixel values for lossless output
-
-Channel names are taken from the source when available. If a source does not provide one, the current reader can fall back to a generic `Channel N` label. For quantitative mIF workflows, meaningful source channel names are strongly preferred because a syntactically valid placeholder cannot recover the biological identity of an unknown channel.
+- ICC profile preservation when one was supplied by an RGB source
+- Exact full-resolution spot checks for lossless output
+- Successful decoding of representative pixels for lossy JPEG output
 
 ## Install
 
@@ -127,9 +192,13 @@ python -m pip install -e '.[dev]'
 pytest
 ```
 
-The authoritative package version is the static `version` field in `pyproject.toml`. Installed code reads that value from distribution metadata through `importlib.metadata`; direct source-tree imports fall back to the neighboring `pyproject.toml`.
+The authoritative package version is the static `version` field in `pyproject.toml`. Installed
+code reads it from distribution metadata; direct source-tree imports fall back to the neighboring
+`pyproject.toml`.
 
 ## CLI
+
+Planar Akoya mIF:
 
 ```bash
 omeify input.qptiff output.ome.tif \
@@ -140,21 +209,47 @@ omeify input.qptiff output.ome.tif \
   --cache-directory /fast/scratch
 ```
 
+Akoya H&E QPTIFF using the brightfield JPEG defaults:
+
+```bash
+omeify H32_HE.qptiff H32_HE.ome.tif \
+  --type qptiff_he \
+  --tile-size 1024
+```
+
+Aperio SVS with an explicit quality setting:
+
+```bash
+omeify CMU-1.svs CMU-1.ome.tif \
+  --type svs \
+  --jpeg-quality 92 \
+  --jpeg-subsampling 444
+```
+
 Useful options:
 
 ```text
---pyramid-levels N       Explicit subresolution count; auto by default
---rename-channels-json   JSON map from source names to output names
---omit-uuid              Omit the optional OME root UUID
---workers N              TIFF compression workers
---no-checksums           Skip the final whole-file checksum pass
+--compression NAME        LZW, Deflate, ZSTD, JPEG, or Uncompressed
+--jpeg-quality N          JPEG quality from 1 through 100; default 90
+--jpeg-subsampling MODE   444, 422, 420, or 411; default 444
+--pyramid-levels N        Explicit subresolution count; auto by default
+--rename-channels-json    JSON map from source names to output names
+--omit-uuid               Omit the optional OME root UUID
+--workers N               TIFF compression workers
+--no-checksums            Skip the final whole-file checksum pass
 ```
 
-The existing underscore spellings such as `--rename_channels_json` remain accepted as aliases.
+Only the selected TIFF series is converted. The default is series 0, which is the baseline
+whole-slide series for the supported QPTIFF and SVS examples. Use `--series` only when inspection
+shows that the desired full-resolution image is elsewhere.
 
-The conversion report includes separate `ome`, `miti_header`, and `verification` sections so XML validity, header-profile validation, and binary-image verification remain distinct.
+The existing underscore spellings such as `--rename_channels_json` remain accepted as aliases.
+The conversion report keeps separate `ome`, `miti_header`, and `verification` sections so XML
+validity, header-profile validity, and binary-image verification remain distinct.
 
 ## Python API
+
+Planar mIF:
 
 ```python
 from omeify.inputs import AkoyaMIFQptiff
@@ -171,8 +266,31 @@ report = converter.convert(
 )
 ```
 
+Brightfield RGB:
+
+```python
+from omeify.inputs import AkoyaHEQptiff, AperioSVS
+
+qptiff_report = AkoyaHEQptiff("H32_HE.qptiff").convert(
+    "H32_HE.ome.tif",
+    jpeg_quality=90,
+    jpeg_subsampling="444",
+)
+
+svs_report = AperioSVS("CMU-1.svs").convert(
+    "CMU-1.ome.tif",
+    compression="JPEG",
+)
+```
+
 ## I/O strategy
 
-The full-resolution source is never materialized as one giant NumPy array. `omeify` decodes only the source strips or tiles required for the current output tile. Rebuilt lower-resolution levels are staged as temporary uncompressed tiled BigTIFF files, one level at a time. Peak RAM is therefore governed primarily by a few image tiles plus the largest decoded source segment, while temporary disk use is approximately one third of the uncompressed base image for a complete 2× pyramid.
+The full-resolution source is never materialized as one giant NumPy array. `omeify` decodes only
+the source strips or tiles required for the current output tile. Rebuilt lower-resolution levels
+are staged as temporary uncompressed tiled BigTIFF files, one level at a time. Peak RAM is
+therefore governed primarily by a few image tiles plus the largest decoded source segment.
+Temporary disk use is approximately one third of the uncompressed base image for a complete 2×
+pyramid.
 
-The final file is written and verified beside the requested destination and then atomically moved into place. A failed write or verification does not destroy an existing valid output.
+The final file is written and verified beside the requested destination and atomically moved into
+place. A failed write or verification does not destroy an existing valid output.
