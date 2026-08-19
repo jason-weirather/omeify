@@ -1,7 +1,7 @@
 # omeify
 
 `omeify` converts supported tissue-image formats into standardized, metadata-deidentified, tiled,
-pyramidal OME-TIFF. Deidentified and minimal metadata follows MITI (Minimum Information about highly multiplexed Tissue Imaging)
+pyramidal OME-TIFF. Metadata deidentification follows MITI (Minimum Information about Highly Multiplexed Tissue Imaging)
 guidelines (Schapiro et. al. Nat Methods. 2022). 
 
 > ⚠️ **Deidentification note:** rebuilding a minimal header avoids carrying arbitrary source metadata into the output. It does not inspect pixels for burned-in labels or other identifying content.
