@@ -174,7 +174,6 @@ def validate_miti_ome_tiff_header(xml_string: str) -> MITIHeaderValidation:
             record[json_name] = value
 
     record["image_id"] = image.get("ID") or ""
-    record["image_name"] = image.get("Name") or ""
     record["pixels_id"] = pixels.get("ID") or ""
 
     big_endian = _parse_bool(pixels.get("BigEndian"), "Pixels BigEndian", errors)

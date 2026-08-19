@@ -431,7 +431,6 @@ class TifffileConverter:
                 "lossless_compression": compression.lossless,
             },
             "image": {
-                "name": features.image_name,
                 "channel_names": [
                     self.rename_channels.get(name, name) for name in features.channel_names
                 ],

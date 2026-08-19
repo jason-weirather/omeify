@@ -140,6 +140,8 @@ def test_conversion_preserves_dtype_and_rebuilds_pyramid(tmp_path: Path, dtype) 
     assert report["miti_header"]["errors"] == []
     with tifffile.TiffFile(output) as tif:
         assert tif.is_ome
+        assert '<Image ID="Image:0">' in tif.ome_metadata
+        assert report["image"].get("name") is None
         series = tif.series[0]
         assert series.axes == "CYX"
         assert series.dtype == np.dtype(dtype)
@@ -451,3 +453,4 @@ def test_bundled_miti_json_schema_is_available() -> None:
     schema = json.loads(resource.read_text(encoding="utf-8"))
     assert schema["$schema"].endswith("draft/2020-12/schema")
     assert "uint8" in schema["properties"]["pixel_type"]["enum"]
+    assert "image_name" not in schema["properties"]

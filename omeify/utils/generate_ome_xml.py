@@ -45,7 +45,6 @@ def generate_ome_xml(
     )
 
     image_metadata: dict[str, object] = {
-        "Name": tiff_features.image_name,
         "SignificantBits": tiff_features.significant_bits,
         "PhysicalSizeX": tiff_features.physical_size_x_um,
         "PhysicalSizeXUnit": "µm",
@@ -79,10 +78,19 @@ def generate_ome_xml(
     )
 
     root = etree.fromstring(ome.tostring(declaration=True).encode("utf-8"))
+
+    # OME Image/@Name is optional. Tifffile supplies a default (for example,
+    # "Image0") when no name is provided, so remove it explicitly to keep the
+    # generated header minimized and free of unnecessary image labels.
+    namespace = {"ome": _OME_NAMESPACE}
+    image = root.find("./ome:Image", namespaces=namespace)
+    if image is None:
+        raise RuntimeError("tifffile generated OME-XML without an Image element")
+    image.attrib.pop("Name", None)
+
     if not display_uuid:
         root.attrib.pop("UUID", None)
 
-    namespace = {"ome": _OME_NAMESPACE}
     pixels = root.find(".//ome:Pixels", namespaces=namespace)
     if pixels is None:
         raise RuntimeError("tifffile generated OME-XML without a Pixels element")

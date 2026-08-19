@@ -38,9 +38,6 @@
       "type": "string",
       "minLength": 1
     },
-    "image_name": {
-      "type": "string"
-    },
     "pixels_id": {
       "type": "string",
       "minLength": 1
