@@ -16,7 +16,9 @@ guidelines (Schapiro et. al. Nat Methods. 2022).
 - Keep peak memory bounded by processing strips and tiles instead of materializing a whole slide
 - Fail on unsupported layouts or dtypes rather than silently coercing data
 - Inspect the hierarchy and metadata of any TIFF without decoding the image raster
-- Provide a context-managed Python reader for standardized OME-TIFF images
+- Provide context-managed Python readers for multichannel and label OME-TIFF images
+- Provide one standards-enforcing OME-TIFF writer used by both the Python API and `convert`
+- Keep image analysis, segmentation, patch generation, stitching, and region measurements outside omeify
 
 ## Supported inputs
 
@@ -289,7 +291,15 @@ omeify/schemas/tiff_inspection.schema.json
 ```
 
 For an OME-TIFF, `inspect` parses the OME header rather than guessing channel names, dimension
-sizes, dimension order, or physical pixel sizes from TIFF pages alone.
+sizes, dimension order, or physical pixel sizes from TIFF pages alone. It also reports whether
+each OME header satisfies the bundled omeify MITI header profile, lists missing or invalid fields,
+and identifies additional OME metadata outside omeify's minimized output vocabulary. Additional
+metadata is informational: MITI is a minimum-information profile, so extra fields do not by
+themselves make a header invalid.
+
+> ⚠️ **Inspection is not deidentification.** Text and JSON inspection reports may expose source
+> paths, filenames, TIFF tags, vendor XML, scanner fields, or other identifying metadata. Review
+> inspection output before sharing it.
 
 ### Version
 
@@ -363,6 +373,60 @@ with OMETiffReader("output.ome.tif") as ome:
 `read_region` supports the common planar `CYX`, grayscale `YX`, and interleaved `YXS` OME-TIFF
 layouts without materializing the whole slide. `asarray(level=N)` remains available when loading
 an entire pyramid level is intentional.
+
+Logical OME channels are distinct from stored samples. A planar multiplex image normally has one
+sample per logical channel. RGB has one logical channel named `RGB`, three samples per pixel, and
+sample names `Red`, `Green`, and `Blue`.
+
+A label raster uses the same virtual-access boundary without inventing biological semantics:
+
+```python
+from omeify import OMETiffLabelReader
+
+with OMETiffLabelReader("cells.ome.tif") as labels:
+    block = labels.read_region(10_000, 11_024, 20_000, 21_024)
+```
+
+There are no separate `CellLabelImage` or `TissueLabelImage` types. `LabelImage` validates integer
+storage and provides image access only. It intentionally does not expose region properties or a
+`label_count`: an exact generic label count requires scanning the raster, and `max(label)` is not
+a reliable count when IDs are sparse. `scikit-image` is deliberately not an omeify dependency.
+
+### OME-TIFF writer
+
+`OMETiffWriter` writes arrays using the same tiled, pyramidal, metadata-minimized implementation
+used by `omeify convert`:
+
+```python
+import numpy as np
+from omeify import OMETiffWriter
+
+image = np.zeros((3, 4096, 4096), dtype=np.uint16)
+report = OMETiffWriter(
+    "image.ome.tif",
+    image_type="multichannel",
+    channel_names=["DAPI", "PanCK", "CD3"],
+    physical_size_x_um=0.5,
+    physical_size_y_um=0.5,
+).write(image)
+```
+
+Use `image_type="rgb"` for `YXS` `uint8` RGB data. RGB is written as one logical OME channel
+with `SamplesPerPixel=3`. Use `image_type="label"` for one integer `YX` label raster; label
+pyramids use nearest-neighbor downsampling and lossless compression. The image-type argument is
+writer policy, not a private TIFF tag. OME-TIFF itself does not intrinsically distinguish label
+values from intensity values.
+
+Advanced streaming sources can implement the small `PlaneReaderSource` contract and call
+`write_source`. The converter uses that path directly, so there is no second private writer
+quietly drifting away from the public API.
+
+## Architectural boundary
+
+`omeify` owns the TIFF/OME-TIFF file boundary: inspection, normalization, metadata validation,
+virtual region access, and standardized writing. It does not own tile scheduling, overlapping
+patch generation, stitching, segmentation, object reconciliation, or morphological analysis.
+Those operations belong in downstream computation packages such as OcelliKit.
 
 ## I/O strategy
 

@@ -11,7 +11,9 @@ from click.testing import CliRunner
 from omeify import (
     LabelImage,
     MultichannelImage,
+    OMETiffLabelReader,
     OMETiffReader,
+    OMETiffWriter,
     RGBImage,
     TiffInspector,
 )
@@ -51,6 +53,27 @@ def _write_ome_tiff(path: Path) -> np.ndarray:
         },
     )
     return data
+
+def _write_nonconforming_ome_tiff(path: Path) -> None:
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Instrument ID="Instrument:0"/>'
+        '<Image ID="Image:0" Name="potentially-identifying-name">'
+        '<Pixels ID="Pixels:0" DimensionOrder="XYZCT" Type="uint16" '
+        'SizeX="8" SizeY="8" SizeZ="1" SizeC="1" SizeT="1" '
+        'PhysicalSizeX="0.5" PhysicalSizeXUnit="um" '
+        'PhysicalSizeY="0.5" PhysicalSizeYUnit="um">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        '<TiffData IFD="0" PlaneCount="1"/>'
+        '</Pixels></Image></OME>'
+    )
+    tifffile.imwrite(
+        path,
+        np.zeros((8, 8), dtype=np.uint16),
+        description=xml,
+        metadata=None,
+    )
 
 
 def test_inspector_handles_non_ome_tiff_and_validates_schema(tmp_path: Path) -> None:
@@ -102,7 +125,30 @@ def test_ome_inspection_uses_header_for_channels_and_physical_size(tmp_path: Pat
     ]
     assert report["series"][0]["channel_names"] == ["DAPI", "PanCK", "CD3"]
     assert report["series"][0]["physical_size"]["x"]["value"] == pytest.approx(0.5)
+    assert ome["miti"]["status"] in {"pass", "fail"}
+    assert "MITI header profile:" in inspector.render_text()
     assert "OME channels (3): DAPI, PanCK, CD3" in inspector.render_text()
+    assert inspector.validation_errors() == ()
+
+
+def test_ome_inspection_reports_miti_missing_fields_and_additional_metadata(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "nonconforming.ome.tif"
+    _write_nonconforming_ome_tiff(source)
+
+    inspector = TiffInspector(source)
+    report = inspector.report
+    assessment = report["ome"]["miti"]
+
+    assert report["file"]["is_ome"] is True
+    assert assessment["status"] == "fail"
+    assert "Image[0]/Pixels/@BigEndian" in assessment["missing_fields"]
+    assert "Image[0]/Pixels/@Interleaved" in assessment["missing_fields"]
+    assert "Image[0]/Pixels/@SignificantBits" in assessment["missing_fields"]
+    assert "OME/Image[0]/@Name" in assessment["extra_metadata"]
+    assert "OME/Instrument[0]" in assessment["extra_metadata"]
+    assert "MITI header profile: FAIL" in inspector.render_text()
     assert inspector.validation_errors() == ()
 
 
@@ -150,7 +196,8 @@ def test_reader_rejects_non_ome_tiff(tmp_path: Path) -> None:
 
 def test_generic_rgb_and_label_interfaces_are_available() -> None:
     assert RGBImage.samples_per_pixel == 3
-    assert RGBImage.channel_names == ("Red", "Green", "Blue")
+    assert RGBImage.channel_names == ("RGB",)
+    assert RGBImage.sample_names == ("Red", "Green", "Blue")
     assert LabelImage.background_label == 0
 
 
@@ -177,7 +224,7 @@ def test_cli_inspect_text_json_and_output_file(tmp_path: Path) -> None:
     )
     assert output_result.exit_code == 0, output_result.output
     assert output_result.output == ""
-    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "1.0"
+    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "1.1"
 
 
 def test_ome_tiff_reader_reads_interleaved_rgb_regions(tmp_path: Path) -> None:
@@ -196,8 +243,105 @@ def test_ome_tiff_reader_reads_interleaved_rgb_regions(tmp_path: Path) -> None:
         assert ome.axes == "YXS"
         assert ome.size_c == 3
         assert ome.channel_names == ("RGB",)
+        assert ome.logical_channel_count == 1
+        assert ome.sample_count == 3
+        assert ome.sample_names == ("Red", "Green", "Blue")
         np.testing.assert_array_equal(ome.read_region(1, 6, 2, 9), data[1:6, 2:9, :])
         np.testing.assert_array_equal(
             ome.read_region(1, 6, 2, 9, channels=[2, 0]),
             data[1:6, 2:9, :][..., [2, 0]],
         )
+
+
+def test_public_ome_tiff_writer_emits_miti_profiled_multichannel_output(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "writer.ome.tif"
+    data = np.arange(3 * 25 * 33, dtype=np.uint16).reshape(3, 25, 33)
+
+    report = OMETiffWriter(
+        output,
+        image_type="multichannel",
+        channel_names=["DAPI", "PanCK", "CD3"],
+        physical_size_x_um=0.5,
+        physical_size_y_um=0.6,
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=1,
+    ).write(data)
+
+    assert report["image"]["image_type"] == "multichannel"
+    assert report["miti_header"]["is_valid"] is True
+    assert report["verification"]["base_pixel_values_match"] is True
+    assessment = TiffInspector(output).report["ome"]["miti"]
+    assert assessment["status"] == "pass"
+    assert assessment["missing_fields"] == []
+    assert assessment["extra_metadata"] == []
+
+    with OMETiffReader(output) as image:
+        assert image.logical_channel_count == 3
+        assert image.sample_count == 3
+        np.testing.assert_array_equal(
+            image.read_region(2, 8, 3, 10),
+            data[:, 2:8, 3:10],
+        )
+
+
+def test_label_writer_and_reader_stay_at_the_virtual_io_boundary(tmp_path: Path) -> None:
+    output = tmp_path / "labels.ome.tif"
+    labels = np.array(
+        [
+            [0, 1, 1, 0, 7],
+            [0, 1, 1, 0, 7],
+            [9, 0, 0, 9, 7],
+            [9, 9, 0, 0, 0],
+        ],
+        dtype=np.uint16,
+    )
+
+    report = OMETiffWriter(
+        output,
+        image_type="label",
+        channel_names=["Cells"],
+        physical_size_x_um=0.5,
+        physical_size_y_um=0.5,
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=1,
+    ).write(labels)
+
+    assert report["image"]["image_type"] == "label"
+    assert report["pyramid"]["downsample_method"] == "nearest"
+    assert report["miti_header"]["is_valid"] is True
+
+    with OMETiffLabelReader(output) as image:
+        assert isinstance(image, LabelImage)
+        assert image.background_label == 0
+        assert not hasattr(image, "label_count")
+        np.testing.assert_array_equal(image.asarray(), labels)
+        np.testing.assert_array_equal(image.read_region(1, 4, 1, 5), labels[1:4, 1:5])
+
+    with pytest.raises(ValueError, match="lossless compression"):
+        OMETiffWriter(
+            tmp_path / "lossy-label.ome.tif",
+            image_type="label",
+            physical_size_x_um=0.5,
+            physical_size_y_um=0.5,
+            compression="JPEG",
+            tile_size=16,
+            pyramid_levels=0,
+        ).write(labels.astype(np.uint8))
+
+
+def test_runtime_dependencies_exclude_scikit_image() -> None:
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with pyproject.open("rb") as handle:
+        dependencies = tomllib.load(handle)["project"]["dependencies"]
+    normalized = " ".join(str(item).lower() for item in dependencies)
+    assert "scikit-image" not in normalized
+    assert "skimage" not in normalized

@@ -666,12 +666,12 @@ def test_click_group_exposes_version_inspect_and_convert() -> None:
     result = CliRunner().invoke(main, ["version", "--json"])
     assert result.exit_code == 0
     version_info = json.loads(result.output)
-    assert version_info["omeify"] == "0.6.0"
+    assert version_info["omeify"] == "0.7.0"
     assert "tifffile" in version_info
 
     eager_result = CliRunner().invoke(main, ["--version"])
     assert eager_result.exit_code == 0
-    assert eager_result.output.strip() == "omeify 0.6.0"
+    assert eager_result.output.strip() == "omeify 0.7.0"
 
     help_result = CliRunner().invoke(main, ["--help"])
     assert help_result.exit_code == 0
@@ -737,7 +737,7 @@ def test_pyproject_is_the_version_authority() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with pyproject.open("rb") as handle:
         project_version = tomllib.load(handle)["project"]["version"]
-    assert __version__ == project_version == "0.6.0"
+    assert __version__ == project_version == "0.7.0"
 
 
 def test_bundled_miti_json_schema_is_available() -> None:
@@ -749,3 +749,34 @@ def test_bundled_miti_json_schema_is_available() -> None:
     assert schema["$schema"].endswith("draft/2020-12/schema")
     assert "uint8" in schema["properties"]["pixel_type"]["enum"]
     assert "image_name" not in schema["properties"]
+
+
+def test_converter_dogfoods_public_ome_tiff_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import omeify.converters.tifffile_converter as converter_module
+    from omeify import OMETiffWriter
+
+    called = {"value": False}
+
+    class RecordingWriter(OMETiffWriter):
+        def write_source(self, *args, **kwargs):
+            called["value"] = True
+            return super().write_source(*args, **kwargs)
+
+    monkeypatch.setattr(converter_module, "OMETiffWriter", RecordingWriter)
+    data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
+    source = tmp_path / "source.ome.tif"
+    output = tmp_path / "output.ome.tif"
+    _write_source(source, data)
+
+    HaloMIFTiff(source).convert(
+        output,
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+
+    assert called["value"] is True

@@ -280,7 +280,11 @@ def inspect_command(
     max_text_length: int,
     output: Path | None,
 ) -> None:
-    """Inspect any TIFF at INPUT_PATH without reading its image pixels."""
+    """Inspect any TIFF at INPUT_PATH without reading its image pixels.
+
+    Inspection output is raw diagnostic metadata, not deidentified output. It
+    may contain paths, filenames, vendor fields, or other identifying values.
+    """
 
     if output is not None and output.resolve() == input_path.resolve():
         raise click.UsageError("--output must differ from INPUT_PATH")

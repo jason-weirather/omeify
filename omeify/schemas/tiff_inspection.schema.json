@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jason-weirather/omeify/schemas/tiff_inspection.schema.json",
   "title": "omeify TIFF inspection report",
-  "description": "The stable JSON summary emitted by omeify inspect and TiffInspector for TIFF files. Higher detail levels add levels, pages, frames, TIFF tags, and parsed image descriptions while preserving the same top-level structure.",
+  "description": "The stable JSON summary emitted by omeify inspect and TiffInspector for TIFF files. Higher detail levels add levels, pages, frames, TIFF tags, and parsed image descriptions while preserving the same top-level structure. OME-TIFF reports include an omeify MITI header assessment and a list of additional OME metadata outside omeify's minimized output vocabulary.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,7 +19,7 @@
       "const": "omeify.schemas/tiff_inspection.schema.json"
     },
     "schema_version": {
-      "const": "1.0"
+      "const": "1.1"
     },
     "detail": {
       "type": "integer",
@@ -31,64 +31,112 @@
     },
     "ome": {
       "oneOf": [
-        {"type": "null"},
-        {"$ref": "#/$defs/ome"}
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/ome"
+        }
       ]
     },
     "series": {
       "type": "array",
-      "items": {"$ref": "#/$defs/series"}
+      "items": {
+        "$ref": "#/$defs/series"
+      }
     },
     "warnings": {
       "type": "array",
-      "items": {"type": "string"}
+      "items": {
+        "type": "string"
+      }
     }
   },
   "$defs": {
     "nullableString": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "nullableInteger": {
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "nullableBoolean": {
-      "type": ["boolean", "null"]
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "shape": {
       "type": "array",
-      "items": {"type": "integer", "minimum": 0}
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      }
     },
     "index": {
       "oneOf": [
-        {"type": "integer"},
+        {
+          "type": "integer"
+        },
         {
           "type": "array",
-          "items": {"type": "integer"}
+          "items": {
+            "type": "integer"
+          }
         },
-        {"type": "string"},
-        {"type": "null"}
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "textSummary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["length", "value", "truncated"],
+      "required": [
+        "length",
+        "value",
+        "truncated"
+      ],
       "properties": {
-        "length": {"type": "integer", "minimum": 0},
-        "value": {"type": "string"},
-        "truncated": {"type": "boolean"}
+        "length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "value": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
       }
     },
     "physicalValue": {
       "oneOf": [
-        {"type": "null"},
+        {
+          "type": "null"
+        },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["value", "unit"],
+          "required": [
+            "value",
+            "unit"
+          ],
           "properties": {
-            "value": {"type": "number"},
-            "unit": {"$ref": "#/$defs/nullableString"}
+            "value": {
+              "type": "number"
+            },
+            "unit": {
+              "$ref": "#/$defs/nullableString"
+            }
           }
         }
       ]
@@ -96,11 +144,21 @@
     "physicalSize": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["x", "y", "z"],
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
       "properties": {
-        "x": {"$ref": "#/$defs/physicalValue"},
-        "y": {"$ref": "#/$defs/physicalValue"},
-        "z": {"$ref": "#/$defs/physicalValue"}
+        "x": {
+          "$ref": "#/$defs/physicalValue"
+        },
+        "y": {
+          "$ref": "#/$defs/physicalValue"
+        },
+        "z": {
+          "$ref": "#/$defs/physicalValue"
+        }
       }
     },
     "file": {
@@ -119,56 +177,135 @@
         "top_level_ifd_count"
       ],
       "properties": {
-        "path": {"type": "string"},
-        "name": {"type": "string"},
-        "format": {"type": "string", "minLength": 1},
-        "size_bytes": {"type": ["integer", "null"], "minimum": 0},
-        "byte_order": {"enum": ["little", "big"]},
-        "is_bigtiff": {"type": "boolean"},
-        "is_ome": {"type": "boolean"},
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "byte_order": {
+          "enum": [
+            "little",
+            "big"
+          ]
+        },
+        "is_bigtiff": {
+          "type": "boolean"
+        },
+        "is_ome": {
+          "type": "boolean"
+        },
         "flags": {
           "type": "array",
-          "items": {"type": "string"},
+          "items": {
+            "type": "string"
+          },
           "uniqueItems": true
         },
-        "series_count": {"type": "integer", "minimum": 0},
-        "top_level_ifd_count": {"type": "integer", "minimum": 0}
+        "series_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "top_level_ifd_count": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "omeChannel": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["index", "id", "name", "samples_per_pixel", "color"],
+      "required": [
+        "index",
+        "id",
+        "name",
+        "samples_per_pixel",
+        "color"
+      ],
       "properties": {
-        "index": {"type": "integer", "minimum": 0},
-        "id": {"$ref": "#/$defs/nullableString"},
-        "name": {"$ref": "#/$defs/nullableString"},
-        "samples_per_pixel": {"$ref": "#/$defs/nullableInteger"},
-        "color": {"$ref": "#/$defs/nullableInteger"}
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "name": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "samples_per_pixel": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "color": {
+          "$ref": "#/$defs/nullableInteger"
+        }
       }
     },
     "omeTiffData": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ifd", "plane_count", "first_c", "first_z", "first_t"],
+      "required": [
+        "ifd",
+        "plane_count",
+        "first_c",
+        "first_z",
+        "first_t"
+      ],
       "properties": {
-        "ifd": {"$ref": "#/$defs/nullableInteger"},
-        "plane_count": {"$ref": "#/$defs/nullableInteger"},
-        "first_c": {"$ref": "#/$defs/nullableInteger"},
-        "first_z": {"$ref": "#/$defs/nullableInteger"},
-        "first_t": {"$ref": "#/$defs/nullableInteger"}
+        "ifd": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "plane_count": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "first_c": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "first_z": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "first_t": {
+          "$ref": "#/$defs/nullableInteger"
+        }
       }
     },
     "omeSize": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["x", "y", "z", "c", "t"],
+      "required": [
+        "x",
+        "y",
+        "z",
+        "c",
+        "t"
+      ],
       "properties": {
-        "x": {"$ref": "#/$defs/nullableInteger"},
-        "y": {"$ref": "#/$defs/nullableInteger"},
-        "z": {"$ref": "#/$defs/nullableInteger"},
-        "c": {"$ref": "#/$defs/nullableInteger"},
-        "t": {"$ref": "#/$defs/nullableInteger"}
+        "x": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "y": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "z": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "c": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "t": {
+          "$ref": "#/$defs/nullableInteger"
+        }
       }
     },
     "omeImage": {
@@ -189,23 +326,48 @@
         "tiff_data"
       ],
       "properties": {
-        "index": {"type": "integer", "minimum": 0},
-        "id": {"$ref": "#/$defs/nullableString"},
-        "name": {"$ref": "#/$defs/nullableString"},
-        "pixels_id": {"$ref": "#/$defs/nullableString"},
-        "dimension_order": {"$ref": "#/$defs/nullableString"},
-        "pixel_type": {"$ref": "#/$defs/nullableString"},
-        "significant_bits": {"$ref": "#/$defs/nullableInteger"},
-        "interleaved": {"$ref": "#/$defs/nullableBoolean"},
-        "size": {"$ref": "#/$defs/omeSize"},
-        "physical_size": {"$ref": "#/$defs/physicalSize"},
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "name": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "pixels_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "dimension_order": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "pixel_type": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "significant_bits": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "interleaved": {
+          "$ref": "#/$defs/nullableBoolean"
+        },
+        "size": {
+          "$ref": "#/$defs/omeSize"
+        },
+        "physical_size": {
+          "$ref": "#/$defs/physicalSize"
+        },
         "channels": {
           "type": "array",
-          "items": {"$ref": "#/$defs/omeChannel"}
+          "items": {
+            "$ref": "#/$defs/omeChannel"
+          }
         },
         "tiff_data": {
           "type": "array",
-          "items": {"$ref": "#/$defs/omeTiffData"}
+          "items": {
+            "$ref": "#/$defs/omeTiffData"
+          }
         }
       }
     },
@@ -219,30 +381,62 @@
         "uuid",
         "image_count",
         "images",
+        "miti",
         "xml"
       ],
       "properties": {
-        "namespace": {"$ref": "#/$defs/nullableString"},
-        "version": {"$ref": "#/$defs/nullableString"},
-        "creator": {"$ref": "#/$defs/nullableString"},
-        "uuid": {"$ref": "#/$defs/nullableString"},
-        "image_count": {"type": "integer", "minimum": 0},
+        "namespace": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "version": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "creator": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "uuid": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "image_count": {
+          "type": "integer",
+          "minimum": 0
+        },
         "images": {
           "type": "array",
-          "items": {"$ref": "#/$defs/omeImage"}
+          "items": {
+            "$ref": "#/$defs/omeImage"
+          }
         },
-        "xml": {"$ref": "#/$defs/textSummary"}
+        "xml": {
+          "$ref": "#/$defs/textSummary"
+        },
+        "miti": {
+          "$ref": "#/$defs/mitiAssessment"
+        }
       }
     },
     "frame": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["index", "axes", "shape", "dtype"],
+      "required": [
+        "index",
+        "axes",
+        "shape",
+        "dtype"
+      ],
       "properties": {
-        "index": {"$ref": "#/$defs/index"},
-        "axes": {"type": "string"},
-        "shape": {"$ref": "#/$defs/shape"},
-        "dtype": {"type": "string"}
+        "index": {
+          "$ref": "#/$defs/index"
+        },
+        "axes": {
+          "type": "string"
+        },
+        "shape": {
+          "$ref": "#/$defs/shape"
+        },
+        "dtype": {
+          "type": "string"
+        }
       }
     },
     "xmlNode": {
@@ -257,23 +451,38 @@
         "omitted_children"
       ],
       "properties": {
-        "tag": {"type": "string"},
+        "tag": {
+          "type": "string"
+        },
         "attributes": {
           "type": "object",
-          "additionalProperties": {"type": "string"}
+          "additionalProperties": {
+            "type": "string"
+          }
         },
-        "text": {"$ref": "#/$defs/nullableString"},
-        "text_truncated": {"type": "boolean"},
+        "text": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "text_truncated": {
+          "type": "boolean"
+        },
         "children": {
           "type": "array",
-          "items": {"$ref": "#/$defs/xmlNode"}
+          "items": {
+            "$ref": "#/$defs/xmlNode"
+          }
         },
-        "omitted_children": {"type": "integer", "minimum": 0}
+        "omitted_children": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "description": {
       "oneOf": [
-        {"type": "null"},
+        {
+          "type": "null"
+        },
         {
           "type": "object",
           "additionalProperties": false,
@@ -286,15 +495,33 @@
             "parsed_xml"
           ],
           "properties": {
-            "format": {"enum": ["xml", "text"]},
-            "length": {"type": "integer", "minimum": 0},
-            "value": {"type": "string"},
-            "truncated": {"type": "boolean"},
-            "xml_root": {"$ref": "#/$defs/nullableString"},
+            "format": {
+              "enum": [
+                "xml",
+                "text"
+              ]
+            },
+            "length": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "value": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "xml_root": {
+              "$ref": "#/$defs/nullableString"
+            },
             "parsed_xml": {
               "oneOf": [
-                {"type": "null"},
-                {"$ref": "#/$defs/xmlNode"}
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/xmlNode"
+                }
               ]
             }
           }
@@ -314,13 +541,33 @@
         "truncated"
       ],
       "properties": {
-        "code": {"type": "integer", "minimum": 0},
-        "name": {"type": "string"},
-        "dtype": {"type": "string"},
-        "count": {"type": "integer", "minimum": 0},
-        "value": {"type": "string"},
-        "value_length": {"type": ["integer", "null"], "minimum": 0},
-        "truncated": {"type": "boolean"}
+        "code": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "dtype": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "value": {
+          "type": "string"
+        },
+        "value_length": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        }
       }
     },
     "page": {
@@ -349,48 +596,103 @@
         "frames"
       ],
       "properties": {
-        "index": {"$ref": "#/$defs/index"},
-        "axes": {"type": "string"},
-        "shape": {"$ref": "#/$defs/shape"},
-        "dtype": {"type": "string"},
+        "index": {
+          "$ref": "#/$defs/index"
+        },
+        "axes": {
+          "type": "string"
+        },
+        "shape": {
+          "$ref": "#/$defs/shape"
+        },
+        "dtype": {
+          "type": "string"
+        },
         "flags": {
           "type": "array",
-          "items": {"type": "string"},
+          "items": {
+            "type": "string"
+          },
           "uniqueItems": true
         },
-        "width": {"type": "integer", "minimum": 0},
-        "height": {"type": "integer", "minimum": 0},
-        "samples_per_pixel": {"type": "integer", "minimum": 1},
-        "planar_configuration": {"$ref": "#/$defs/nullableString"},
-        "photometric": {"$ref": "#/$defs/nullableString"},
-        "compression": {"$ref": "#/$defs/nullableString"},
-        "is_tiled": {"type": "boolean"},
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "samples_per_pixel": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "planar_configuration": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "photometric": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "compression": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "is_tiled": {
+          "type": "boolean"
+        },
         "tile_shape": {
           "oneOf": [
-            {"type": "null"},
+            {
+              "type": "null"
+            },
             {
               "type": "array",
               "prefixItems": [
-                {"type": "integer", "minimum": 1},
-                {"type": "integer", "minimum": 1}
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "integer",
+                  "minimum": 1
+                }
               ],
               "minItems": 2,
               "maxItems": 2
             }
           ]
         },
-        "rows_per_strip": {"$ref": "#/$defs/nullableInteger"},
-        "subifd_count": {"type": "integer", "minimum": 0},
-        "uncompressed_bytes": {"type": ["integer", "null"], "minimum": 0},
-        "stored_bytes": {"type": "integer", "minimum": 0},
-        "description": {"$ref": "#/$defs/description"},
+        "rows_per_strip": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "subifd_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncompressed_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "stored_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "description": {
+          "$ref": "#/$defs/description"
+        },
         "tags": {
           "type": "array",
-          "items": {"$ref": "#/$defs/tag"}
+          "items": {
+            "$ref": "#/$defs/tag"
+          }
         },
         "frames": {
           "type": "array",
-          "items": {"$ref": "#/$defs/frame"}
+          "items": {
+            "$ref": "#/$defs/frame"
+          }
         }
       }
     },
@@ -409,17 +711,45 @@
         "pages"
       ],
       "properties": {
-        "index": {"type": "integer", "minimum": 0},
-        "name": {"$ref": "#/$defs/nullableString"},
-        "axes": {"type": "string"},
-        "shape": {"$ref": "#/$defs/shape"},
-        "dtype": {"type": "string"},
-        "page_count": {"type": "integer", "minimum": 0},
-        "tiff_page_count": {"type": ["integer", "null"], "minimum": 0},
-        "tiff_frame_count": {"type": ["integer", "null"], "minimum": 0},
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "axes": {
+          "type": "string"
+        },
+        "shape": {
+          "$ref": "#/$defs/shape"
+        },
+        "dtype": {
+          "type": "string"
+        },
+        "page_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tiff_page_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tiff_frame_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
         "pages": {
           "type": "array",
-          "items": {"$ref": "#/$defs/page"}
+          "items": {
+            "$ref": "#/$defs/page"
+          }
         }
       }
     },
@@ -442,29 +772,127 @@
         "levels"
       ],
       "properties": {
-        "index": {"type": "integer", "minimum": 0},
-        "name": {"$ref": "#/$defs/nullableString"},
-        "kind": {"$ref": "#/$defs/nullableString"},
-        "axes": {"type": "string"},
-        "shape": {"$ref": "#/$defs/shape"},
-        "dtype": {"type": "string"},
-        "is_pyramidal": {"type": "boolean"},
-        "level_count": {"type": "integer", "minimum": 1},
-        "ome_image_index": {"$ref": "#/$defs/nullableInteger"},
-        "ome_image_id": {"$ref": "#/$defs/nullableString"},
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "kind": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "axes": {
+          "type": "string"
+        },
+        "shape": {
+          "$ref": "#/$defs/shape"
+        },
+        "dtype": {
+          "type": "string"
+        },
+        "is_pyramidal": {
+          "type": "boolean"
+        },
+        "level_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ome_image_index": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "ome_image_id": {
+          "$ref": "#/$defs/nullableString"
+        },
         "channel_names": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "physical_size": {
           "oneOf": [
-            {"type": "null"},
-            {"$ref": "#/$defs/physicalSize"}
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/physicalSize"
+            }
           ]
         },
         "levels": {
           "type": "array",
-          "items": {"$ref": "#/$defs/level"}
+          "items": {
+            "$ref": "#/$defs/level"
+          }
+        }
+      }
+    },
+    "mitiAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "source",
+        "schema_resource",
+        "status",
+        "is_valid",
+        "errors",
+        "missing_fields",
+        "warnings",
+        "has_extra_metadata",
+        "extra_metadata"
+      ],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schema_resource": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "is_valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "has_extra_metadata": {
+          "type": "boolean"
+        },
+        "extra_metadata": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
         }
       }
     }

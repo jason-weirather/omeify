@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Literal
+from typing import Any, Literal
 
 from lxml import etree
 from tifffile import OmeXml
 
-from omeify import __version__
-from omeify.utils.tiff_image_features import ImageMetadata
+from omeify._version import __version__
 
 _OME_NAMESPACE = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
 _PYRAMID_NAMESPACE = "openmicroscopy.org/PyramidResolution"
@@ -21,7 +20,7 @@ def _level_yx(shape: Sequence[int], axes: str) -> tuple[int, int]:
 
 
 def generate_ome_xml(
-    tiff_features: ImageMetadata,
+    tiff_features: Any,
     level_shapes: Sequence[Sequence[int]],
     *,
     display_uuid: bool = True,

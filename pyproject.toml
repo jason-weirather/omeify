@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omeify"
-version = "0.6.0"
+version = "0.7.0"
 description = "Convert tissue images into deidentified, pyramidal OME-TIFF"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
@@ -44,6 +44,7 @@ dependencies = [
   "imagecodecs>=2024.1.1,<2025.8.2; python_version == '3.10'",
   "imagecodecs>=2024.1.1,<2026.5.10; python_version == '3.11'",
   "imagecodecs>=2024.1.1,<2027; python_version >= '3.12'",
+  # Keep segmentation and image-analysis stacks (for example scikit-image) out of omeify.
   "lxml>=5,<7",
   "jsonschema>=4.20,<5",
   # Supplies a local OME 2016-06 XSD, avoiding validation-time network access.

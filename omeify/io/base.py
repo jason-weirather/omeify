@@ -48,27 +48,63 @@ class Image(ABC):
 
 
 class MultichannelImage(Image):
-    """Generic interface for images with one or more logical channels."""
+    """Generic interface for images with one or more logical OME channels.
+
+    Logical channels and stored samples are deliberately distinct. A planar
+    multiplex image normally has one sample per logical channel. RGB has one
+    logical OME channel with three samples per pixel.
+    """
 
     @property
     @abstractmethod
     def channel_names(self) -> tuple[str, ...]:
-        """Logical channel names in image order."""
+        """Logical OME channel names in image order."""
+
+    @property
+    def logical_channel_names(self) -> tuple[str, ...]:
+        return self.channel_names
+
+    @property
+    def logical_channel_count(self) -> int:
+        return len(self.logical_channel_names)
 
     @property
     def channel_count(self) -> int:
-        return len(self.channel_names)
+        """Compatibility alias for :attr:`logical_channel_count`."""
+
+        return self.logical_channel_count
+
+    @property
+    def samples_per_pixel(self) -> int:
+        return 1
+
+    @property
+    def sample_count(self) -> int:
+        return self.logical_channel_count * self.samples_per_pixel
+
+    @property
+    def sample_names(self) -> tuple[str, ...]:
+        if self.samples_per_pixel == 1:
+            return self.logical_channel_names
+        return tuple(f"Sample {index + 1}" for index in range(self.sample_count))
 
 
-class RGBImage(Image):
+class RGBImage(MultichannelImage):
     """Generic interface for contiguous three-sample RGB images."""
 
-    channel_names: tuple[str, str, str] = ("Red", "Green", "Blue")
+    channel_names: tuple[str] = ("RGB",)
+    sample_names: tuple[str, str, str] = ("Red", "Green", "Blue")
     samples_per_pixel: int = 3
 
 
 class LabelImage(Image):
-    """Generic interface for categorical label rasters."""
+    """Generic interface for one categorical label raster.
+
+    The interface intentionally exposes image access only. It does not infer
+    cell-versus-tissue semantics, compute region properties, or promise a
+    label count. An exact generic label count requires scanning the raster and
+    cannot be obtained reliably from ``max(label)`` when IDs are sparse.
+    """
 
     background_label: int = 0
 

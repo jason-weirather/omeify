@@ -9,16 +9,12 @@ import numpy as np
 import tifffile
 
 from omeify.inspection import TiffInspector
-from omeify.io.base import ChannelSelection, MultichannelImage
-from omeify.utils.tiff_image_features import TiffPlaneReader
+from omeify.io.base import ChannelSelection, LabelImage, MultichannelImage
+from omeify.io.tiff import TiffPlaneReader
 
 
-class OMETiffReader(MultichannelImage):
-    """Context-managed reader for one OME-TIFF image series.
-
-    The TIFF file remains open for the lifetime of the context. ``print(reader)``
-    uses the same default renderer as ``omeify inspect PATH``.
-    """
+class _OMETiffReaderCore:
+    """Shared context management and TIFF access for concrete OME readers."""
 
     def __init__(self, path: str | Path, *, series: int = 0) -> None:
         self._path = Path(path)
@@ -37,7 +33,7 @@ class OMETiffReader(MultichannelImage):
     def is_open(self) -> bool:
         return self._tiff is not None
 
-    def open(self) -> "OMETiffReader":
+    def open(self):
         if self._tiff is not None:
             return self
         tiff = tifffile.TiffFile(self.path)
@@ -62,7 +58,7 @@ class OMETiffReader(MultichannelImage):
         self._tiff = None
         self._inspection = None
 
-    def __enter__(self) -> "OMETiffReader":
+    def __enter__(self):
         return self.open()
 
     def __exit__(self, exc_type, exc, traceback) -> None:
@@ -70,7 +66,7 @@ class OMETiffReader(MultichannelImage):
 
     def _require_open(self) -> tifffile.TiffFile:
         if self._tiff is None:
-            raise RuntimeError("OMETiffReader must be opened with 'with' or open()")
+            raise RuntimeError(f"{type(self).__name__} must be opened with 'with' or open()")
         return self._tiff
 
     @property
@@ -96,32 +92,6 @@ class OMETiffReader(MultichannelImage):
     @property
     def dtype(self) -> np.dtype:
         return np.dtype(self.series.dtype).newbyteorder("=")
-
-    @property
-    def size_c(self) -> int:
-        image = self._ome_image_summary()
-        value = image["size"].get("c") if image is not None else None
-        if value is not None:
-            return int(value)
-        if "C" in self.axes:
-            return int(self.shape[self.axes.index("C")])
-        if "S" in self.axes:
-            return int(self.shape[self.axes.index("S")])
-        return 1
-
-    @property
-    def channel_names(self) -> tuple[str, ...]:
-        image = self._ome_image_summary()
-        if image is not None:
-            labels = [
-                channel.get("name")
-                or channel.get("id")
-                or f"Channel {int(channel['index']) + 1}"
-                for channel in image["channels"]
-            ]
-            if labels:
-                return tuple(str(item) for item in labels)
-        return tuple(f"Channel {index + 1}" for index in range(self.size_c))
 
     @property
     def level_count(self) -> int:
@@ -188,7 +158,7 @@ class OMETiffReader(MultichannelImage):
                 raise IndexError(f"Channel {index} is outside the available range 0..{size - 1}")
         return selected
 
-    def read_region(
+    def _read_region(
         self,
         y0: int,
         y1: int,
@@ -198,12 +168,6 @@ class OMETiffReader(MultichannelImage):
         level: int = 0,
         channels: ChannelSelection = None,
     ) -> np.ndarray:
-        """Read a Y/X window from common planar or interleaved OME-TIFF layouts.
-
-        ``CYX``, ``YX``, and ``YXS`` layouts are read tile-by-tile or strip-by-strip.
-        Additional Z/T axes are accepted only when they are singleton.
-        """
-
         selected_level = self._selected_level(level)
         axes = str(selected_level.axes)
         shape = tuple(int(value) for value in selected_level.shape)
@@ -268,4 +232,185 @@ class OMETiffReader(MultichannelImage):
     def __repr__(self) -> str:
         if self.is_open:
             return self.inspection.render_text()
-        return f"OMETiffReader(path={str(self.path)!r}, series={self.series_index}, closed=True)"
+        return (
+            f"{type(self).__name__}(path={str(self.path)!r}, "
+            f"series={self.series_index}, closed=True)"
+        )
+
+
+class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
+    """Context-managed reader for one multichannel or RGB OME-TIFF series.
+
+    ``print(reader)`` uses the same default renderer as ``omeify inspect PATH``.
+    ``channel_names`` are logical OME channels. For RGB this is normally
+    ``('RGB',)`` while ``sample_names`` are red, green, and blue.
+    """
+
+    @property
+    def size_c(self) -> int:
+        image = self._ome_image_summary()
+        value = image["size"].get("c") if image is not None else None
+        if value is not None:
+            return int(value)
+        if "C" in self.axes:
+            return int(self.shape[self.axes.index("C")])
+        if "S" in self.axes:
+            return int(self.shape[self.axes.index("S")])
+        return 1
+
+    @property
+    def channel_names(self) -> tuple[str, ...]:
+        image = self._ome_image_summary()
+        if image is not None:
+            labels = [
+                channel.get("name")
+                or channel.get("id")
+                or f"Channel {int(channel['index']) + 1}"
+                for channel in image["channels"]
+            ]
+            if labels:
+                return tuple(str(item) for item in labels)
+        count = self.shape[self.axes.index("C")] if "C" in self.axes else 1
+        return tuple(f"Channel {index + 1}" for index in range(int(count)))
+
+    @property
+    def samples_per_pixel(self) -> int:
+        image = self._ome_image_summary()
+        if image is not None:
+            samples = [
+                int(item["samples_per_pixel"])
+                for item in image.get("channels", [])
+                if item.get("samples_per_pixel") is not None
+            ]
+            if samples and len(set(samples)) == 1:
+                return samples[0]
+        if "S" in self.axes:
+            return int(self.shape[self.axes.index("S")])
+        return 1
+
+    @property
+    def sample_count(self) -> int:
+        return self.size_c
+
+    @property
+    def is_rgb(self) -> bool:
+        return self.samples_per_pixel == 3 and self.size_c == 3 and len(self.channel_names) == 1
+
+    @property
+    def sample_names(self) -> tuple[str, ...]:
+        if self.is_rgb:
+            return ("Red", "Green", "Blue")
+        if self.samples_per_pixel == 1:
+            return self.channel_names
+        return tuple(f"Sample {index + 1}" for index in range(self.sample_count))
+
+    def read_region(
+        self,
+        y0: int,
+        y1: int,
+        x0: int,
+        x1: int,
+        *,
+        level: int = 0,
+        channels: ChannelSelection = None,
+    ) -> np.ndarray:
+        """Read a Y/X window from common planar or interleaved layouts.
+
+        For planar ``CYX`` images, ``channels`` selects logical channels. For
+        interleaved ``YXS`` RGB images it selects stored samples.
+        """
+
+        return self._read_region(
+            y0,
+            y1,
+            x0,
+            x1,
+            level=level,
+            channels=channels,
+        )
+
+
+class OMETiffLabelReader(_OMETiffReaderCore, LabelImage):
+    """Virtual-access reader for one integer OME-TIFF label raster.
+
+    The caller explicitly chooses label semantics by using this class. OME-TIFF
+    does not intrinsically distinguish intensity rasters from label rasters.
+    No region measurements or label counting are performed.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        series: int = 0,
+        background_label: int = 0,
+    ) -> None:
+        super().__init__(path, series=series)
+        self.background_label = int(background_label)
+
+    def open(self) -> "OMETiffLabelReader":
+        super().open()
+        try:
+            self.validate_label_dtype()
+            axis_sizes = dict(zip(self.axes, self.shape))
+            unsupported = {
+                axis: size
+                for axis, size in axis_sizes.items()
+                if axis not in {"C", "Y", "X"} and size != 1
+            }
+            if unsupported:
+                raise ValueError(
+                    "Label OME-TIFF requires singleton non-spatial axes; "
+                    f"found {unsupported} in axes {self.axes!r}"
+                )
+            if "S" in axis_sizes or int(axis_sizes.get("C", 1)) != 1:
+                raise ValueError(
+                    "Label OME-TIFF reader requires one grayscale label plane; "
+                    f"found axes={self.axes!r}, shape={self.shape}."
+                )
+        except Exception:
+            self.close()
+            raise
+        return self
+
+    def asarray(self, *, level: int = 0) -> np.ndarray:
+        value = super().asarray(level=level)
+        axes = list(str(self._selected_level(level).axes))
+        for axis_index in range(len(axes) - 1, -1, -1):
+            if axes[axis_index] in {"Y", "X"}:
+                continue
+            if value.shape[axis_index] != 1:
+                raise ValueError(
+                    "Label image contains a non-singleton non-spatial axis: "
+                    f"axes={''.join(axes)!r}, shape={value.shape}"
+                )
+            value = np.take(value, 0, axis=axis_index)
+            axes.pop(axis_index)
+        if axes != ["Y", "X"] or value.ndim != 2:
+            raise ValueError(
+                f"Label image did not resolve to one YX raster: axes={axes}, shape={value.shape}"
+            )
+        return np.ascontiguousarray(value)
+
+    def read_region(
+        self,
+        y0: int,
+        y1: int,
+        x0: int,
+        x1: int,
+        *,
+        level: int = 0,
+    ) -> np.ndarray:
+        value = self._read_region(
+            y0,
+            y1,
+            x0,
+            x1,
+            level=level,
+            channels=0,
+        )
+        if value.ndim == 3 and value.shape[0] == 1:
+            value = value[0]
+        if value.ndim != 2:
+            raise ValueError(f"Label region did not resolve to one YX raster: {value.shape}")
+        return np.ascontiguousarray(value)

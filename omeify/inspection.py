@@ -15,8 +15,10 @@ import tifffile
 from jsonschema import Draft202012Validator
 from lxml import etree
 
+from omeify.utils.miti_header_validator import validate_miti_ome_tiff_header
+
 _INSPECTION_SCHEMA_RESOURCE = "omeify.schemas/tiff_inspection.schema.json"
-_INSPECTION_SCHEMA_VERSION = "1.0"
+_INSPECTION_SCHEMA_VERSION = "1.1"
 _DEFAULT_DETAIL = 1
 _DEFAULT_MAX_TEXT_LENGTH = 240
 _MAX_XML_CHILDREN = 100
@@ -339,6 +341,7 @@ def _ome_summary(xml: str, max_text_length: int | None) -> dict[str, Any]:
         "uuid": root.get("UUID"),
         "image_count": len(image_elements),
         "images": images,
+        "miti": validate_miti_ome_tiff_header(xml).as_dict(),
         "xml": {
             "length": len(xml),
             "value": xml_value,
@@ -813,6 +816,32 @@ class TiffInspector:
             if ome.get("uuid"):
                 ome_bits.append(f"UUID={ome['uuid']}")
             ome_node = _TreeNode(", ".join(ome_bits))
+            miti = ome["miti"]
+            miti_node = _TreeNode(
+                f"MITI header profile: {str(miti['status']).upper()}"
+            )
+            if self.detail >= 1:
+                if miti["missing_fields"]:
+                    missing_node = _TreeNode(
+                        f"Missing fields ({len(miti['missing_fields'])})"
+                    )
+                    missing_node.children.extend(
+                        _TreeNode(item) for item in miti["missing_fields"]
+                    )
+                    miti_node.children.append(missing_node)
+                if miti["errors"]:
+                    errors_node = _TreeNode(f"Validation findings ({len(miti['errors'])})")
+                    errors_node.children.extend(_TreeNode(item) for item in miti["errors"])
+                    miti_node.children.append(errors_node)
+                if miti["extra_metadata"]:
+                    extra_node = _TreeNode(
+                        f"Additional OME metadata ({len(miti['extra_metadata'])})"
+                    )
+                    extra_node.children.extend(
+                        _TreeNode(item) for item in miti["extra_metadata"]
+                    )
+                    miti_node.children.append(extra_node)
+            ome_node.children.append(miti_node)
             if self.detail >= 1:
                 for image in ome["images"]:
                     size = image["size"]

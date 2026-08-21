@@ -4,12 +4,13 @@ from typing import Any
 
 from .miti_header_validator import MITIHeaderValidation, validate_miti_ome_tiff_header
 from .ome_schema_validator import OMESchemaValidator
+from omeify.io.tiff import TiffPlaneReader
+
 from .tiff_image_features import (
     ImageMetadata,
     TiffImageFeatures,
     TiffImageSource,
     TiffMIFSource,
-    TiffPlaneReader,
 )
 
 __all__ = [
