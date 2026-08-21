@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from lxml import etree
@@ -24,7 +24,6 @@ def generate_ome_xml(
     level_shapes: Sequence[Sequence[int]],
     *,
     display_uuid: bool = True,
-    rename_channels: Mapping[str, str] | None = None,
     output_byteorder: Literal["<", ">"] = "<",
 ) -> dict[str, str | None]:
     """Generate minimal OME-XML for one planar mIF or interleaved RGB image."""
@@ -32,8 +31,7 @@ def generate_ome_xml(
     if output_byteorder not in {"<", ">"}:
         raise ValueError("output_byteorder must be '<' or '>'")
 
-    rename_channels = dict(rename_channels or {})
-    channel_names = [rename_channels.get(name, name) for name in tiff_features.channel_names]
+    channel_names = list(tiff_features.channel_names)
     file_uuid = str(uuid.uuid4())
 
     ome = OmeXml(

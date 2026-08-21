@@ -3,15 +3,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from numbers import Integral
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 
 from .tiff import PlaneReader
-
-RenameChannelsBy = Literal["name", "index"]
-ChannelRenameMapping = Mapping[str, str] | Mapping[int, str]
-
 
 def normalize_channel_indices(
     selection: int | Sequence[int] | None,
@@ -34,88 +30,6 @@ def normalize_channel_indices(
         if index < 0 or index >= size:
             raise IndexError(f"Channel {index} is outside the available range 0..{size - 1}")
     return selected
-
-
-def validate_channel_rename_mapping(
-    mapping: ChannelRenameMapping | None,
-    by: RenameChannelsBy | None,
-) -> tuple[dict[str, str] | dict[int, str], RenameChannelsBy | None]:
-    """Validate an explicit Python channel-rename mapping."""
-
-    if not mapping:
-        if by is not None and by not in {"name", "index"}:
-            raise ValueError("rename_channels_by must be 'name' or 'index'")
-        return {}, by
-    if by not in {"name", "index"}:
-        raise ValueError(
-            "rename_channels_by must be explicitly set to 'name' or 'index' "
-            "when rename_channels is provided"
-        )
-    values = list(mapping.values())
-    if not all(isinstance(value, str) and value.strip() for value in values):
-        raise TypeError("Channel rename values must be non-empty strings")
-
-    if by == "name":
-        normalized: dict[str, str] = {}
-        for key, value in mapping.items():
-            if not isinstance(key, str):
-                raise TypeError("Name-based channel rename keys must be strings")
-            if key.strip().lstrip("+").isdigit():
-                raise ValueError(
-                    f"Ambiguous name-based rename key {key!r}; integer-like keys belong "
-                    "in rename_channels_by='index' mappings"
-                )
-            normalized[key] = value.strip()
-        return normalized, by
-
-    normalized_index: dict[int, str] = {}
-    for key, value in mapping.items():
-        if isinstance(key, bool) or not isinstance(key, Integral):
-            raise TypeError("Index-based Python channel rename keys must be integers")
-        index = int(key)
-        if index < 0:
-            raise ValueError("Index-based channel rename keys must be zero or greater")
-        normalized_index[index] = value.strip()
-    return normalized_index, by
-
-
-def apply_channel_renames(
-    channel_names: Sequence[str],
-    mapping: ChannelRenameMapping | None,
-    by: RenameChannelsBy | None,
-) -> tuple[str, ...]:
-    normalized, normalized_by = validate_channel_rename_mapping(mapping, by)
-    names = tuple(str(item) for item in channel_names)
-    if not normalized:
-        return names
-
-    if normalized_by == "name":
-        name_mapping = normalized
-        unknown = sorted(set(name_mapping) - set(names))
-        if unknown:
-            raise ValueError(
-                "Name-based channel rename mapping contains unknown source names: "
-                + ", ".join(repr(item) for item in unknown)
-            )
-        ambiguous = sorted(
-            name for name in name_mapping if names.count(name) > 1
-        )
-        if ambiguous:
-            raise ValueError(
-                "Name-based channel rename mapping is ambiguous for duplicate source names: "
-                + ", ".join(repr(item) for item in ambiguous)
-                + "; use rename_channels_by='index'"
-            )
-        return tuple(name_mapping.get(name, name) for name in names)
-
-    index_mapping = normalized
-    out_of_range = sorted(index for index in index_mapping if index >= len(names))
-    if out_of_range:
-        raise IndexError(
-            "Index-based channel rename mapping contains out-of-range indices: "
-            + ", ".join(str(item) for item in out_of_range)
-        )
-    return tuple(index_mapping.get(index, name) for index, name in enumerate(names))
 
 
 class Channel:

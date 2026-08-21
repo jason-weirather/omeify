@@ -16,7 +16,7 @@ guidelines (Schapiro et. al. Nat Methods. 2022).
 - Keep peak memory bounded by processing strips and tiles instead of materializing a whole slide
 - Fail on unsupported layouts or dtypes rather than silently coercing data
 - Inspect the hierarchy and metadata of any TIFF without decoding the image raster
-- Provide context-managed Python readers for multichannel and label OME-TIFF images
+- Provide context-managed Python readers for every supported conversion source plus OME-TIFF labels
 - Provide one standards-enforcing OME-TIFF writer used by both the Python API and `convert`
 - Keep image analysis, segmentation, patch generation, stitching, and region measurements outside omeify
 
@@ -26,7 +26,7 @@ guidelines (Schapiro et. al. Nat Methods. 2022).
 
 - Akoya mIF QPTIFF
 - Akoya Fusion multiplex QPTIFF, with explicit `Name`, `Biomarker`, or `auto` channel naming
-- HALO planar mIF TIFF / OME-TIFF
+- Planar OME-TIFF, including HALO mIF OME-TIFF
 - Akoya component TIFF
 - Native `uint8`, `uint16`, `uint32`, `int8`, `int16`, `int32`, `float32`, and
   `float64` pixels
@@ -38,6 +38,7 @@ The planar profile writes `CYX`: one grayscale top-level IFD per logical channel
 
 - Akoya H&E QPTIFF from PhenoImager HT or PhenoCycler Fusion
 - Aperio SVS
+- Interleaved RGB OME-TIFF
 - Interleaved `uint8` RGB with source axes `YXS`, `SamplesPerPixel=3`, and contiguous samples
 
 The RGB profile writes one top-level interleaved RGB IFD, not three grayscale pages. Its OME
@@ -52,6 +53,13 @@ channel name. Aperio pixel size is read from `MPP`, with standard TIFF resolutio
 fallback. A source ICC profile is preserved when present. Arbitrary vendor descriptions,
 filenames, user names, scanner identifiers, dates, and other free text are not copied into the
 output OME-XML.
+
+OME-TIFF is also a first-class conversion input. `omeify convert --type ome_tiff` reads the
+source pixels and the minimum structural metadata needed to interpret them, then writes a fresh
+OME header through the same standards-enforcing writer used for every other input. This is useful
+for taking a valid but non-canonical OME-TIFF and producing one that satisfies the omeify MITI
+header profile while dropping arbitrary extra OME metadata. The conversion report records the
+source OME header's MITI status before normalization.
 
 Unsupported dtypes and image layouts fail before conversion. `omeify` does not automatically
 cast or rescale unsupported pixel data.
@@ -258,6 +266,15 @@ omeify convert CMU-1.svs CMU-1.ome.tif \
   --jpeg-subsampling 444
 ```
 
+Normalize an existing OME-TIFF into the omeify contract:
+
+```bash
+omeify convert source.ome.tif normalized.ome.tif \
+  --type ome_tiff
+```
+
+HALO OME-TIFFs use the same `--type ome_tiff` path; there is no separate HALO conversion profile.
+
 Channel renaming is deliberately explicit. Name mode interprets JSON keys as normalized source
 channel names:
 
@@ -270,7 +287,7 @@ channel names:
 
 ```bash
 omeify convert input.ome.tif output.ome.tif \
-  --type halo_mif \
+  --type ome_tiff \
   --rename-channels-json renames.json \
   --rename-channels-by name
 ```
@@ -287,13 +304,15 @@ Index mode uses zero-based integer strings because JSON object keys are strings:
 
 ```bash
 omeify convert input.ome.tif output.ome.tif \
-  --type halo_mif \
+  --type ome_tiff \
   --rename-channels-json renames.json \
   --rename-channels-by index
 ```
 
-Mixed or malformed mappings fail instead of being inferred. Component TIFF calibration uses the
-same `PixelSize` vocabulary as the Python API:
+The mode is authoritative. In `name` mode a source channel literally named `"0"` is still a
+name; in `index` mode JSON keys such as `"0"` are validated and converted to integer index `0`.
+Malformed mappings fail instead of being guessed. Component TIFF calibration uses the same
+`PixelSize` vocabulary as the Python API:
 
 ```bash
 omeify convert component.tif component.ome.tif \
@@ -313,6 +332,7 @@ Useful conversion options:
 --channel-name-field      name, biomarker, or auto for Fusion QPTIFF
 --rename-channels-json    JSON map used with --rename-channels-by
 --rename-channels-by      name or index
+--pixel-size-x/y/unit     Explicit physical-size override; required for component TIFF
 --omit-uuid               Omit the optional OME root UUID
 --workers N               TIFF compression workers
 --no-checksums            Skip the final whole-file checksum pass
@@ -377,58 +397,57 @@ imagecodecs, NumPy, Click, XML, and schema-library versions used by the installa
 
 ## Python API
 
-### Conversion profiles
+### Conversion
 
-Channel renaming in Python is explicit in the same way as the CLI:
+The Python conversion API mirrors the CLI with one `convert()` helper. The former parallel
+`omeify.inputs` conversion classes have been removed; source interpretation now lives only in the
+`omeify.io` reader classes, and every conversion is written through `OMETiffWriter`.
 
 ```python
-from omeify.inputs import AkoyaMIFQptiff
+from omeify import convert
 
-converter = AkoyaMIFQptiff(
+report = convert(
     "input.qptiff",
-    series=0,
+    "output.ome.tif",
+    input_type="qptiff_mif",
     rename_channels={"FITC": "PanCK"},
     rename_channels_by="name",
-)
-converter.cache_directory = "/fast/scratch"
-
-report = converter.convert(
-    "output.ome.tif",
     compression="LZW",
     tile_size=1024,
-    downsample="mean",
+    cache_directory="/fast/scratch",
 )
 ```
 
-Fusion conversion selects the vendor field used as the normalized channel name:
+Fusion channel interpretation and index-based renaming remain explicit:
 
 ```python
-from omeify.inputs import AkoyaFusionQPTiff
-
-report = AkoyaFusionQPTiff(
+report = convert(
     "fusion.qptiff",
+    "fusion.ome.tif",
+    input_type="qptiff_fusion",
     channel_name_field="auto",
     rename_channels={0: "DNA"},
     rename_channels_by="index",
-).convert("fusion.ome.tif")
+)
 ```
 
-Brightfield RGB profiles remain separate:
+Python index mappings use actual integer keys. JSON has no integer object keys, so the CLI accepts
+`{"0": "DNA"}` and converts that key to integer `0` only when `--rename-channels-by index` was
+selected. Writer APIs do not accept rename mappings at all: they receive the final ordered
+`channel_names`, keeping source renaming separate from OME serialization.
+
+Existing OME-TIFFs use the same helper:
 
 ```python
-from omeify.inputs import AkoyaHEQptiff, AperioSVS
-
-qptiff_report = AkoyaHEQptiff("H32_HE.qptiff").convert(
-    "H32_HE.ome.tif",
-    jpeg_quality=90,
-    jpeg_subsampling="444",
-)
-
-svs_report = AperioSVS("CMU-1.svs").convert(
-    "CMU-1.ome.tif",
-    compression="JPEG",
+report = convert(
+    "source.ome.tif",
+    "normalized.ome.tif",
+    input_type="ome_tiff",
 )
 ```
+
+If an otherwise usable source lacks physical calibration, an explicit `PixelSize` can be supplied
+as an override. Component TIFF input requires one because omeify will not invent calibration.
 
 ### Pixel size
 
@@ -451,6 +470,22 @@ unit is a supported physical-length unit. A reader returns `None` only when the 
 contains no usable calibration rather than inventing one.
 
 ### Readers and lazy channels
+
+The supported conversion sources now have corresponding I/O readers:
+
+```text
+AkoyaMIFQPTiffReader
+AkoyaFusionQPTiffReader
+AkoyaHEQPTiffReader
+AperioSVSReader
+AkoyaComponentTiffReader
+OMETiffReader
+```
+
+These readers own source-format interpretation and implement the same random-access plane contract
+consumed by the writer. The conversion helper therefore does not maintain a second source parser.
+Readers expose source channel names and metadata; channel renaming happens only at the conversion
+boundary or by supplying replacement final names to a writer.
 
 `OMETiffReader` keeps the TIFF open and exposes ordered lazy `Channel` objects. Looking at channel
 metadata does not decode the full image:
@@ -499,6 +534,21 @@ with AkoyaFusionQPTiffReader(
 Fusion `auto` prefers `Biomarker` and falls back to `Name`. Explicit `name` or `biomarker` mode
 fails if the requested field is absent. Pixel calibration is checked across every channel page.
 
+For custom workflows, readers can be handed directly to the same writer path without materializing
+the whole image:
+
+```python
+from omeify import AkoyaMIFQPTiffReader, write_ometiff
+
+with AkoyaMIFQPTiffReader("input.qptiff") as source:
+    assert source.pixel_size is not None
+    write_ometiff(
+        "output.ome.tif",
+        channels=source.channels,
+        pixel_size=source.pixel_size,
+    )
+```
+
 A label raster uses the same virtual-access boundary without inventing biological semantics:
 
 ```python
@@ -539,8 +589,8 @@ writer policy, not a private TIFF tag. OME-TIFF itself does not intrinsically di
 values from intensity values.
 
 Advanced streaming sources can implement the small `PlaneReaderSource` contract and call
-`write_source`. The converter uses that path directly, so there is no second private writer
-quietly drifting away from the public API.
+`write_source`. The public `convert()` helper uses that path directly with the source readers, so
+there is no second private writer or conversion-only I/O stack drifting away from the public API.
 
 ### Convenience writers
 

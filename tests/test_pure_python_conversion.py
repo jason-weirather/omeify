@@ -6,11 +6,8 @@ import numpy as np
 import pytest
 import tifffile
 
-from omeify.converters.tifffile_converter import (
-    _compression_settings,
-    _mean_downsample_2x,
-)
-from omeify.inputs import AkoyaHEQptiff, AkoyaMIFQptiff, AperioSVS, HaloMIFTiff
+from omeify import OMETiffReader, convert
+from omeify.io.ome_tiff_writer import _compression_settings, _mean_downsample_2x
 
 
 def _write_source(
@@ -181,9 +178,10 @@ def test_conversion_preserves_dtype_and_rebuilds_pyramid(tmp_path: Path, dtype) 
     output = tmp_path / "output.ome.tif"
     _write_source(source, data)
 
-    processor = HaloMIFTiff(source)
-    report = processor.convert(
+    report = convert(
+        source,
         output,
+        input_type="ome_tiff",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=2,
@@ -239,13 +237,12 @@ def test_channel_rename_and_omit_uuid(tmp_path: Path) -> None:
     output = tmp_path / "output.ome.tif"
     _write_source(source, data)
 
-    processor = HaloMIFTiff(
+    report = convert(
         source,
+        output,
+        input_type="ome_tiff",
         rename_channels={"Marker 1": "DAPI"},
         rename_channels_by="name",
-    )
-    report = processor.convert(
-        output,
         display_uuid=False,
         compression="Uncompressed",
         tile_size=16,
@@ -264,8 +261,10 @@ def test_akoya_qptiff_profile_ignores_source_pyramid(tmp_path: Path) -> None:
     output = tmp_path / "output.ome.tif"
     _write_synthetic_qptiff(source, data)
 
-    report = AkoyaMIFQptiff(source).convert(
+    report = convert(
+        source,
         output,
+        input_type="qptiff_mif",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=1,
@@ -296,8 +295,10 @@ def test_akoya_he_qptiff_writes_one_interleaved_rgb_ifd(tmp_path: Path) -> None:
     with tifffile.TiffFile(source) as tif:
         assert tif.is_qpi
 
-    report = AkoyaHEQptiff(source).convert(
+    report = convert(
+        source,
         output,
+        input_type="qptiff_he",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=1,
@@ -358,8 +359,10 @@ def test_aperio_svs_reads_mpp_and_drops_vendor_description(tmp_path: Path) -> No
     with tifffile.TiffFile(source) as tif:
         assert tif.is_svs
 
-    report = AperioSVS(source).convert(
+    report = convert(
+        source,
         output,
+        input_type="svs",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
@@ -392,8 +395,6 @@ def test_brightfield_profiles_default_to_conservative_jpeg_policy() -> None:
         jpeg_subsampling="444",
     )
 
-    assert AkoyaHEQptiff.default_compression == "JPEG"
-    assert AperioSVS.default_compression == "JPEG"
     assert settings.name == "JPEG"
     assert settings.tifffile_value == "jpeg"
     assert settings.compression_args == {"level": 90}
@@ -408,8 +409,10 @@ def test_jpeg_411_requires_tile_size_divisible_by_32(tmp_path: Path) -> None:
     _write_synthetic_rgb_qptiff(source, data)
 
     with pytest.raises(ValueError, match="tile size divisible by 32"):
-        AkoyaHEQptiff(source).convert(
+        convert(
+            source,
             output,
+            input_type="qptiff_he",
             compression="JPEG",
             jpeg_subsampling="411",
             tile_size=16,
@@ -428,8 +431,10 @@ def test_he_default_jpeg_when_imagecodecs_is_available(tmp_path: Path) -> None:
     output = tmp_path / "output-he.ome.tif"
     _write_synthetic_rgb_qptiff(source, data)
 
-    report = AkoyaHEQptiff(source).convert(
+    report = convert(
+        source,
         output,
+        input_type="qptiff_he",
         tile_size=16,
         pyramid_levels=0,
         calculate_checksums=False,
@@ -456,8 +461,10 @@ def test_zero_pyramid_levels_writes_base_only(tmp_path: Path) -> None:
     output = tmp_path / "output.ome.tif"
     _write_source(source, data)
 
-    report = HaloMIFTiff(source).convert(
+    report = convert(
+        source,
         output,
+        input_type="ome_tiff",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
@@ -477,8 +484,10 @@ def test_strip_source_and_mismatched_output_grid(tmp_path: Path) -> None:
     output = tmp_path / "output.ome.tif"
     _write_source(source, data, tile=None, rowsperstrip=7)
 
-    report = HaloMIFTiff(source).convert(
+    report = convert(
+        source,
         output,
+        input_type="ome_tiff",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=2,
@@ -497,8 +506,10 @@ def test_float32_dtype_and_miti_type_are_preserved(tmp_path: Path) -> None:
     output = tmp_path / "output.ome.tif"
     _write_source(source, data)
 
-    report = HaloMIFTiff(source).convert(
+    report = convert(
+        source,
         output,
+        input_type="ome_tiff",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=1,
@@ -518,8 +529,10 @@ def test_significant_bits_matches_dtype_width(tmp_path: Path) -> None:
     output = tmp_path / "output.ome.tif"
     _write_source(source, data, significant_bits=12)
 
-    report = HaloMIFTiff(source).convert(
+    report = convert(
+        source,
         output,
+        input_type="ome_tiff",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
@@ -538,8 +551,10 @@ def test_deflate_is_lossless_and_uses_the_same_streaming_path(tmp_path: Path) ->
     output = tmp_path / "output.ome.tif"
     _write_source(source, data)
 
-    report = HaloMIFTiff(source).convert(
+    report = convert(
+        source,
         output,
+        input_type="ome_tiff",
         compression="Deflate",
         tile_size=16,
         pyramid_levels=1,
@@ -554,13 +569,15 @@ def test_deflate_is_lossless_and_uses_the_same_streaming_path(tmp_path: Path) ->
 
 def test_unsupported_dtype_fails_without_casting(tmp_path: Path) -> None:
     data = np.arange(2 * 16 * 16, dtype=np.uint64).reshape(2, 16, 16)
-    source = tmp_path / "source-uint64.tif"
+    source = tmp_path / "source-uint64.qptiff"
     output = tmp_path / "output.ome.tif"
-    tifffile.imwrite(source, data, photometric="minisblack", metadata={"axes": "CYX"})
+    _write_synthetic_qptiff(source, data)
 
-    with pytest.raises(TypeError, match="Unsupported mIF source dtype uint64"):
-        HaloMIFTiff(source).convert(
+    with pytest.raises(TypeError, match="Unsupported planar source dtype uint64"):
+        convert(
+            source,
             output,
+            input_type="qptiff_mif",
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
@@ -575,8 +592,10 @@ def test_input_and_output_must_differ(tmp_path: Path) -> None:
     _write_source(source, data)
 
     with pytest.raises(ValueError, match="must be different"):
-        HaloMIFTiff(source).convert(
+        convert(
             source,
+            source,
+            input_type="ome_tiff",
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
@@ -592,8 +611,10 @@ def test_big_endian_input_is_written_little_endian_without_value_change(
     output = tmp_path / "output.ome.tif"
     _write_source(source, data, byteorder=">")
 
-    report = HaloMIFTiff(source).convert(
+    report = convert(
+        source,
         output,
+        input_type="ome_tiff",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
@@ -616,8 +637,10 @@ def test_explicit_pyramid_level_count_must_be_possible(tmp_path: Path) -> None:
     _write_source(source, data)
 
     with pytest.raises(ValueError, match="already reached 1x1"):
-        HaloMIFTiff(source).convert(
+        convert(
+            source,
             output,
+            input_type="ome_tiff",
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=10,
@@ -633,30 +656,19 @@ def test_mean_downsample_preserves_signed_integer_dtype() -> None:
     assert result[0, 0] == 0
 
 
-def test_compatibility_features_expose_old_metadata_properties(tmp_path: Path) -> None:
-    from omeify.utils import TiffImageFeatures
-
+def test_ome_reader_is_the_python_source_interface(tmp_path: Path) -> None:
     data = np.arange(2 * 32 * 32, dtype=np.uint16).reshape(2, 32, 32)
     source = tmp_path / "source.ome.tif"
     _write_source(source, data, byteorder=">")
 
-    features = TiffImageFeatures(
-        source,
-        profile="halo_mif",
-        input_type="HALO mIF TIFF",
-    )
-
-    assert features.image_id == "Image:0"
-    assert features.pixel_id == "Pixels:0"
-    assert features.big_endian == "true"
-    assert features.dimension_order == "XYZCT"
-    assert features.interleaved == "false"
-    assert features.physical_size_x_unit == "µm"
-    assert features.physical_size_y_unit == "µm"
-    assert features.size_z == 1
-    assert features.size_t == 1
-    assert features.plane_count == 2
-    assert features.type == "uint16"
+    with OMETiffReader(source) as reader:
+        assert reader.source_byte_order == "big"
+        assert reader.output_axes == "CYX"
+        assert reader.output_shape == (2, 32, 32)
+        assert reader.pixel_size is not None
+        assert reader.pixel_size.to_tuple() == (0.5, 0.6, "µm")
+        assert reader.channel_names == ("Marker 1", "Marker 2")
+        assert len(reader.plane_readers()) == 2
 
 
 def test_click_group_exposes_version_inspect_and_convert() -> None:
@@ -669,7 +681,7 @@ def test_click_group_exposes_version_inspect_and_convert() -> None:
     result = CliRunner().invoke(main, ["version", "--json"])
     assert result.exit_code == 0
     version_info = json.loads(result.output)
-    assert version_info["omeify"] == "0.8.0"
+    assert version_info["omeify"] == "0.9.0"
     assert "tifffile" in version_info
 
     eager_result = CliRunner().invoke(main, ["--version"])
@@ -744,7 +756,7 @@ def test_pyproject_is_the_version_authority() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with pyproject.open("rb") as handle:
         project_version = tomllib.load(handle)["project"]["version"]
-    assert __version__ == project_version == "0.8.0"
+    assert __version__ == project_version == "0.9.0"
 
 
 def test_bundled_miti_json_schema_is_available() -> None:
@@ -758,11 +770,11 @@ def test_bundled_miti_json_schema_is_available() -> None:
     assert "image_name" not in schema["properties"]
 
 
-def test_converter_dogfoods_public_ome_tiff_writer(
+def test_convert_helper_dogfoods_public_ome_tiff_writer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import omeify.converters.tifffile_converter as converter_module
+    import omeify.conversion as conversion_module
     from omeify import OMETiffWriter
 
     called = {"value": False}
@@ -772,14 +784,16 @@ def test_converter_dogfoods_public_ome_tiff_writer(
             called["value"] = True
             return super().write_source(*args, **kwargs)
 
-    monkeypatch.setattr(converter_module, "OMETiffWriter", RecordingWriter)
+    monkeypatch.setattr(conversion_module, "OMETiffWriter", RecordingWriter)
     data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
     source = tmp_path / "source.ome.tif"
     output = tmp_path / "output.ome.tif"
     _write_source(source, data)
 
-    HaloMIFTiff(source).convert(
+    convert(
+        source,
         output,
+        input_type="ome_tiff",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,

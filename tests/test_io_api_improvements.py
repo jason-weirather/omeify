@@ -16,10 +16,10 @@ from omeify import (
     OMETiffReader,
     PixelSize,
     TemporaryOMETiffWriter,
+    convert,
     write_ometiff,
 )
 from omeify.cli import main
-from omeify.inputs import AkoyaFusionQPTiff, HaloMIFTiff
 
 
 def _fusion_description(
@@ -170,6 +170,52 @@ def test_fusion_auto_falls_back_to_name_when_biomarker_is_missing(tmp_path: Path
             pass
 
 
+def test_fusion_reader_reports_missing_calibration_and_convert_accepts_override(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "fusion-uncalibrated.qptiff"
+    output = tmp_path / "fusion-normalized.ome.tif"
+    data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
+    _write_fusion_qptiff(source, data, pixel_sizes=[None, None])
+
+    with AkoyaFusionQPTiffReader(source) as reader:
+        assert reader.pixel_size is None
+
+    with pytest.raises(ValueError, match="does not provide a usable physical pixel size"):
+        convert(
+            source,
+            output,
+            input_type="qptiff_fusion",
+            compression="Uncompressed",
+            tile_size=16,
+            pyramid_levels=0,
+            calculate_checksums=False,
+        )
+
+    report = convert(
+        source,
+        output,
+        input_type="qptiff_fusion",
+        pixel_size=PixelSize(0.51, 0.51, "µm"),
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+    assert report["input_file"]["pixel_size"] is None
+    assert report["image"]["pixel_size"] == [0.51, 0.51, "µm"]
+
+
+def test_fusion_reader_rejects_partially_missing_pixel_sizes(tmp_path: Path) -> None:
+    source = tmp_path / "fusion-partial-calibration.qptiff"
+    data = np.zeros((3, 32, 48), dtype=np.uint16)
+    _write_fusion_qptiff(source, data, pixel_sizes=[0.5068, None, 0.5068])
+
+    with pytest.raises(ValueError, match="present on only some"):
+        with AkoyaFusionQPTiffReader(source):
+            pass
+
+
 def test_fusion_reader_rejects_inconsistent_pixel_sizes(tmp_path: Path) -> None:
     source = tmp_path / "fusion.qptiff"
     data = np.zeros((3, 32, 48), dtype=np.uint16)
@@ -181,8 +227,10 @@ def test_fusion_reader_rejects_inconsistent_pixel_sizes(tmp_path: Path) -> None:
 
     output = tmp_path / "output.ome.tif"
     with pytest.raises(ValueError, match="inconsistent PixelSizeMicrons"):
-        AkoyaFusionQPTiff(source).convert(
+        convert(
+            source,
             output,
+            input_type="qptiff_fusion",
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
@@ -204,11 +252,11 @@ def test_fusion_conversion_profile_preserves_source_fields_but_writes_selected_n
         biomarkers=["CD3", "PanCK"],
     )
 
-    report = AkoyaFusionQPTiff(
+    report = convert(
         source,
-        channel_name_field="biomarker",
-    ).convert(
         output,
+        input_type="qptiff_fusion",
+        channel_name_field="biomarker",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
@@ -217,8 +265,9 @@ def test_fusion_conversion_profile_preserves_source_fields_but_writes_selected_n
 
     assert report["image"]["channel_names"] == ["CD3", "PanCK"]
     assert report["input_file"]["pixel_size"] == [0.5068, 0.5068, "µm"]
-    assert report["image"]["source_channel_metadata"][0]["name"] == "Opal 520"
-    assert report["image"]["source_channel_metadata"][0]["biomarker"] == "CD3"
+    source_metadata = report["input_file"]["channels"][0]["source_metadata"]
+    assert source_metadata["name"] == "Opal 520"
+    assert source_metadata["biomarker"] == "CD3"
     assert _read_ome_channel_names(output) == ["CD3", "PanCK"]
 
 
@@ -231,14 +280,23 @@ def test_python_channel_renames_require_explicit_mode_and_support_indices(
     _write_planar_ome(source, data, names=["A", "B", "C"])
 
     with pytest.raises(ValueError, match="explicitly set"):
-        HaloMIFTiff(source, rename_channels={"A": "Alpha"})
+        convert(
+            source,
+            output,
+            input_type="ome_tiff",
+            rename_channels={"A": "Alpha"},
+            compression="Uncompressed",
+            tile_size=16,
+            pyramid_levels=0,
+            calculate_checksums=False,
+        )
 
-    report = HaloMIFTiff(
+    report = convert(
         source,
+        output,
+        input_type="ome_tiff",
         rename_channels={0: "Alpha", 2: "Gamma"},
         rename_channels_by="index",
-    ).convert(
-        output,
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
@@ -247,21 +305,27 @@ def test_python_channel_renames_require_explicit_mode_and_support_indices(
     assert report["image"]["channel_names"] == ["Alpha", "B", "Gamma"]
 
     with pytest.raises(TypeError, match="must be integers"):
-        HaloMIFTiff(
+        convert(
             source,
+            tmp_path / "bad.ome.tif",
+            input_type="ome_tiff",
             rename_channels={0: "Alpha", "B": "Beta"},  # type: ignore[dict-item]
             rename_channels_by="index",
+            compression="Uncompressed",
+            tile_size=16,
+            pyramid_levels=0,
+            calculate_checksums=False,
         )
 
     duplicate_source = tmp_path / "duplicate-source.ome.tif"
     _write_planar_ome(duplicate_source, data, names=["A", "A", "C"])
     with pytest.raises(ValueError, match="ambiguous for duplicate"):
-        HaloMIFTiff(
+        convert(
             duplicate_source,
+            tmp_path / "duplicate-output.ome.tif",
+            input_type="ome_tiff",
             rename_channels={"A": "Alpha"},
             rename_channels_by="name",
-        ).convert(
-            tmp_path / "duplicate-output.ome.tif",
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
@@ -285,7 +349,7 @@ def test_cli_channel_rename_json_by_name_and_index(tmp_path: Path) -> None:
             str(source),
             str(name_output),
             "--type",
-            "halo_mif",
+            "ome_tiff",
             "--rename-channels-json",
             str(name_map),
             "--rename-channels-by",
@@ -312,7 +376,7 @@ def test_cli_channel_rename_json_by_name_and_index(tmp_path: Path) -> None:
             str(source),
             str(index_output),
             "--type",
-            "halo_mif",
+            "ome_tiff",
             "--rename-channels-json",
             str(index_map),
             "--rename-channels-by",
@@ -346,7 +410,7 @@ def test_cli_rejects_missing_malformed_and_mixed_channel_rename_modes(tmp_path: 
             str(source),
             str(tmp_path / "missing.ome.tif"),
             "--type",
-            "halo_mif",
+            "ome_tiff",
             "--rename-channels-json",
             str(mapping),
         ],
@@ -361,7 +425,7 @@ def test_cli_rejects_missing_malformed_and_mixed_channel_rename_modes(tmp_path: 
             str(source),
             str(tmp_path / "mixed-index.ome.tif"),
             "--type",
-            "halo_mif",
+            "ome_tiff",
             "--rename-channels-json",
             str(mapping),
             "--rename-channels-by",
@@ -371,24 +435,34 @@ def test_cli_rejects_missing_malformed_and_mixed_channel_rename_modes(tmp_path: 
     assert mixed_index.exit_code != 0
     assert "integer strings" in mixed_index.output
 
+    numeric_source = tmp_path / "numeric-source.ome.tif"
+    _write_planar_ome(numeric_source, data, names=["0", "PanCK"])
     numeric_name = tmp_path / "numeric-name.json"
     numeric_name.write_text(json.dumps({"0": "DNA"}), encoding="utf-8")
-    mixed_name = runner.invoke(
+    numeric_output = tmp_path / "numeric-name.ome.tif"
+    numeric_name_result = runner.invoke(
         main,
         [
             "convert",
-            str(source),
-            str(tmp_path / "mixed-name.ome.tif"),
+            str(numeric_source),
+            str(numeric_output),
             "--type",
-            "halo_mif",
+            "ome_tiff",
             "--rename-channels-json",
             str(numeric_name),
             "--rename-channels-by",
             "name",
+            "--compression",
+            "Uncompressed",
+            "--tile-size",
+            "16",
+            "--pyramid-levels",
+            "0",
+            "--no-checksums",
         ],
     )
-    assert mixed_name.exit_code != 0
-    assert "integer-like keys" in mixed_name.output
+    assert numeric_name_result.exit_code == 0, numeric_name_result.output
+    assert _read_ome_channel_names(numeric_output) == ["DNA", "PanCK"]
 
 
 def test_channel_metadata_lookup_region_and_array_are_lazy(
@@ -664,3 +738,81 @@ def test_writer_serializes_pixel_size_unit_without_forcing_micrometers(
         assert 'PhysicalSizeXUnit="nm"' in tiff.ome_metadata
         assert 'PhysicalSizeY="600.0"' in tiff.ome_metadata
         assert 'PhysicalSizeYUnit="nm"' in tiff.ome_metadata
+
+
+def test_ome_tiff_input_is_rewritten_to_minimized_miti_contract(tmp_path: Path) -> None:
+    from omeify import TiffInspector
+
+    source = tmp_path / "source.ome.tif"
+    output = tmp_path / "normalized.ome.tif"
+    data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
+    _write_planar_ome(source, data, names=["DAPI", "PanCK"])
+
+    report = convert(
+        source,
+        output,
+        input_type="ome_tiff",
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+
+    source_miti = report["input_file"]["source_miti_header"]
+    assert source_miti["status"] == "fail"
+    assert "OME/Image[0]/@Name" in source_miti["extra_metadata"]
+    assert report["miti_header"]["is_valid"] is True
+
+    output_miti = TiffInspector(output).report["ome"]["miti"]
+    assert output_miti["status"] == "pass"
+    assert "OME/Image[0]/@Name" not in output_miti["extra_metadata"]
+    with OMETiffReader(output) as reader:
+        assert reader.channel_names == ("DAPI", "PanCK")
+        np.testing.assert_array_equal(reader.asarray(), data)
+
+
+def test_ome_tiff_normalization_can_supply_missing_pixel_size_explicitly(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "uncalibrated.ome.tif"
+    output = tmp_path / "normalized.ome.tif"
+    data = np.arange(2 * 16 * 16, dtype=np.uint16).reshape(2, 16, 16)
+    tifffile.imwrite(
+        source,
+        data,
+        ome=True,
+        tile=(16, 16),
+        photometric="minisblack",
+        metadata={"axes": "CYX", "Channel": {"Name": ["A", "B"]}},
+    )
+
+    with pytest.raises(ValueError, match="does not provide a usable physical pixel size"):
+        convert(
+            source,
+            output,
+            input_type="ome_tiff",
+            compression="Uncompressed",
+            tile_size=16,
+            pyramid_levels=0,
+            calculate_checksums=False,
+        )
+
+    report = convert(
+        source,
+        output,
+        input_type="ome_tiff",
+        pixel_size=PixelSize(0.75, 0.8, "µm"),
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+    assert report["image"]["pixel_size"] == [0.75, 0.8, "µm"]
+    assert report["options"]["pixel_size_override"] == [0.75, 0.8, "µm"]
+
+
+def test_conversion_api_no_longer_has_parallel_inputs_or_converters_packages() -> None:
+    import importlib.util
+
+    assert importlib.util.find_spec("omeify.inputs") is None
+    assert importlib.util.find_spec("omeify.converters") is None

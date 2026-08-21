@@ -9,16 +9,8 @@ from typing import Any
 import click
 
 from omeify import __version__, get_version_info
-from omeify.inputs import (
-    AkoyaComponentTiff,
-    AkoyaFusionQPTiff,
-    AkoyaHEQptiff,
-    AkoyaMIFQptiff,
-    AperioSVS,
-    HaloMIFTiff,
-)
+from omeify.conversion import INPUT_TYPES, RenameChannelsBy, convert
 from omeify.inspection import TiffInspector
-from omeify.io.channel import RenameChannelsBy
 from omeify.io.pixel_size import PixelSize
 
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
@@ -64,13 +56,8 @@ def _load_channel_renames(
         raise click.ClickException("Channel rename values must be non-empty strings")
 
     if by == "name":
-        ambiguous = [key for key in value if _INDEX_KEY.fullmatch(str(key))]
-        if ambiguous:
-            raise click.ClickException(
-                "Name-based channel rename JSON contains integer-like keys "
-                f"({', '.join(repr(item) for item in ambiguous)}); use "
-                "--rename-channels-by index for numerical channel indices"
-            )
+        # JSON object keys are strings. Because --rename-channels-by is
+        # explicit, even a source channel literally named "0" is unambiguous.
         return {str(key): str(item).strip() for key, item in value.items()}, by
 
     invalid = [str(key) for key in value if not _INDEX_KEY.fullmatch(str(key))]
@@ -107,16 +94,7 @@ def main() -> None:
 @click.option(
     "--type",
     "input_type",
-    type=click.Choice(
-        [
-            "qptiff_mif",
-            "qptiff_fusion",
-            "qptiff_he",
-            "svs",
-            "halo_mif",
-            "component",
-        ]
-    ),
+    type=click.Choice(INPUT_TYPES),
     required=True,
     help="Input image profile.",
 )
@@ -200,7 +178,7 @@ def main() -> None:
     "--pixel-size-unit",
     type=str,
     default=None,
-    help="Physical-size unit for explicit component-image calibration; default µm.",
+    help="Unit for an explicit physical pixel-size override; default µm.",
 )
 @click.option("--overwrite/--no-overwrite", default=True, show_default=True)
 @click.option("--checksums/--no-checksums", default=True, show_default=True)
@@ -248,63 +226,43 @@ def convert_command(
         raise click.UsageError("--channel-name-field is only valid with --type qptiff_fusion")
 
     explicit_pixel_values = (pixel_size_x, pixel_size_y, pixel_size_unit)
-    if input_type != "component" and any(item is not None for item in explicit_pixel_values):
-        raise click.UsageError(
-            "--pixel-size-x/--pixel-size-y/--pixel-size-unit are only valid for component TIFFs"
-        )
-
-    common = {
-        "series": series,
-        "rename_channels": rename_channels,
-        "rename_channels_by": rename_mode,
-    }
-    if input_type == "qptiff_mif":
-        processor = AkoyaMIFQptiff(input_path, **common)
-    elif input_type == "qptiff_fusion":
-        processor = AkoyaFusionQPTiff(
-            input_path,
-            channel_name_field=channel_name_field or "auto",  # type: ignore[arg-type]
-            **common,
-        )
-    elif input_type == "qptiff_he":
-        processor = AkoyaHEQptiff(input_path, **common)
-    elif input_type == "svs":
-        processor = AperioSVS(input_path, **common)
-    elif input_type == "halo_mif":
-        processor = HaloMIFTiff(input_path, **common)
-    elif input_type == "component":
+    pixel_size = None
+    if any(item is not None for item in explicit_pixel_values):
         if pixel_size_x is None or pixel_size_y is None:
             raise click.UsageError(
-                "--pixel-size-x and --pixel-size-y are required for component TIFFs"
+                "--pixel-size-x and --pixel-size-y must be supplied together"
             )
-        processor = AkoyaComponentTiff(
-            input_path,
-            pixel_size=PixelSize(
-                pixel_size_x,
-                pixel_size_y,
-                pixel_size_unit or "µm",
-            ),
-            **common,
+        pixel_size = PixelSize(
+            pixel_size_x,
+            pixel_size_y,
+            pixel_size_unit or "µm",
         )
-    else:
-        raise AssertionError(input_type)
-
-    if cache_directory is not None:
-        processor.cache_directory = cache_directory
+    if input_type == "component" and pixel_size is None:
+        raise click.UsageError(
+            "--pixel-size-x and --pixel-size-y are required for component TIFFs"
+        )
 
     try:
-        report = processor.convert(
+        report = convert(
+            input_path,
             output_path,
+            input_type=input_type,  # type: ignore[arg-type]
+            series=series,
+            channel_name_field=channel_name_field,  # type: ignore[arg-type]
+            rename_channels=rename_channels,
+            rename_channels_by=rename_mode,
+            pixel_size=pixel_size,
             display_uuid=not omit_uuid,
             compression=compression,
             jpeg_quality=jpeg_quality,
-            jpeg_subsampling=jpeg_subsampling,
+            jpeg_subsampling=jpeg_subsampling,  # type: ignore[arg-type]
             tile_size=tile_size,
             pyramid_levels=pyramid_levels,
-            downsample=downsample,
+            downsample=downsample,  # type: ignore[arg-type]
             max_workers=workers,
             overwrite=overwrite,
             calculate_checksums=checksums,
+            cache_directory=cache_directory,
         )
     except Exception as exc:
         if verbose >= 2:

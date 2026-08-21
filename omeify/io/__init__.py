@@ -3,13 +3,24 @@ from __future__ import annotations
 from typing import Any
 
 from .base import Image, LabelImage, MultichannelImage, RGBImage
-from .channel import Channel, RenameChannelsBy
+from .channel import Channel
 from .pixel_size import PixelSize
 from .spec import ImageType, OMEImageSpec
 from .tiff import ArrayPlaneReader, PlaneReader, TiffPlaneReader
+from .vendor_tiff_readers import (
+    AkoyaComponentTiffReader,
+    AkoyaFusionQPTiffReader,
+    AkoyaHEQPTiffReader,
+    AkoyaMIFQPTiffReader,
+    AperioSVSReader,
+)
 
 __all__ = [
+    "AkoyaComponentTiffReader",
     "AkoyaFusionQPTiffReader",
+    "AkoyaHEQPTiffReader",
+    "AkoyaMIFQPTiffReader",
+    "AperioSVSReader",
     "ArrayPlaneReader",
     "Channel",
     "Image",
@@ -24,7 +35,6 @@ __all__ = [
     "PlaneReader",
     "PlaneReaderSource",
     "RGBImage",
-    "RenameChannelsBy",
     "TemporaryOMETiffWriter",
     "TiffPlaneReader",
     "write_ometiff",
@@ -32,10 +42,6 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
-    if name == "AkoyaFusionQPTiffReader":
-        from .akoya_fusion_qptiff_reader import AkoyaFusionQPTiffReader
-
-        return AkoyaFusionQPTiffReader
     if name in {"OMETiffReader", "OMETiffLabelReader"}:
         from .ome_tiff_reader import OMETiffLabelReader, OMETiffReader
 

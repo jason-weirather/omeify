@@ -1,7 +1,12 @@
 from ._version import __version__, get_version_info
+from .conversion import convert
 from .inspection import TiffInspector
 from .io import (
+    AkoyaComponentTiffReader,
     AkoyaFusionQPTiffReader,
+    AkoyaHEQPTiffReader,
+    AkoyaMIFQPTiffReader,
+    AperioSVSReader,
     Channel,
     Image,
     LabelImage,
@@ -17,7 +22,11 @@ from .io import (
 )
 
 __all__ = [
+    "AkoyaComponentTiffReader",
     "AkoyaFusionQPTiffReader",
+    "AkoyaHEQPTiffReader",
+    "AkoyaMIFQPTiffReader",
+    "AperioSVSReader",
     "Channel",
     "Image",
     "LabelImage",
@@ -31,6 +40,7 @@ __all__ = [
     "TemporaryOMETiffWriter",
     "TiffInspector",
     "__version__",
+    "convert",
     "get_version_info",
     "write_ometiff",
 ]

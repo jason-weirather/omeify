@@ -89,6 +89,14 @@ class _OMETiffReaderCore:
         return str(self.series.axes)
 
     @property
+    def source_axes(self) -> str:
+        return self.axes
+
+    @property
+    def source_byte_order(self) -> str:
+        return "big" if self.tiff.byteorder == ">" else "little"
+
+    @property
     def shape(self) -> tuple[int, ...]:
         return tuple(int(value) for value in self.series.shape)
 
@@ -268,6 +276,8 @@ class _OMETiffReaderCore:
 class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
     """Context-managed reader for one multichannel or RGB OME-TIFF series."""
 
+    input_type_description = "OME-TIFF"
+
     def __init__(self, path: str | Path, *, series: int = 0) -> None:
         super().__init__(path, series=series)
         self._channels: tuple[Channel, ...] | None = None
@@ -375,17 +385,20 @@ class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
                 summary = summaries[index] if index < len(summaries) else {}
                 source_id = summary.get("id")
                 channel_id = str(source_id) if source_id else f"Channel:0:{index}"
-                name = (
-                    summary.get("name")
-                    or source_id
-                    or f"Channel {index + 1}"
-                )
                 page = pages[index] if "C" in self.axes else pages[0]
                 samples_per_pixel = int(
                     summary.get("samples_per_pixel")
                     or page.samplesperpixel
                     or 1
                 )
+                name = summary.get("name")
+                if not name and logical_count == 1 and samples_per_pixel == 3:
+                    name = "RGB"
+                if not name:
+                    # Keep a source Channel ID as provenance, not as a synthesized
+                    # display name. IDs can contain arbitrary source vocabulary and
+                    # should not leak into a minimized output merely because Name is absent.
+                    name = f"Channel {index + 1}"
                 result.append(
                     Channel(
                         index=index,
@@ -435,6 +448,92 @@ class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
         if self.samples_per_pixel == 1:
             return self.channel_names
         return tuple(f"Sample {index + 1}" for index in range(self.sample_count))
+
+    @property
+    def image_type(self) -> str:
+        return "rgb" if self.is_rgb else "multichannel"
+
+    def _normalized_output_layout(self) -> tuple[str, tuple[int, ...]]:
+        axis_sizes = dict(zip(self.axes, self.shape))
+        if "Y" not in axis_sizes or "X" not in axis_sizes:
+            raise NotImplementedError(
+                f"OME-TIFF conversion requires spatial Y/X axes, found {self.axes!r}"
+            )
+        unsupported = {
+            axis: size
+            for axis, size in axis_sizes.items()
+            if axis not in {"C", "S", "Y", "X"} and size != 1
+        }
+        if unsupported:
+            raise NotImplementedError(
+                "OME-TIFF normalization currently supports singleton Z/T and other "
+                f"non-spatial axes only; found {unsupported} in axes {self.axes!r}"
+            )
+        height = int(axis_sizes["Y"])
+        width = int(axis_sizes["X"])
+        if self.is_rgb:
+            if int(axis_sizes.get("S", 0)) != 3:
+                raise NotImplementedError(
+                    f"RGB OME-TIFF normalization requires YXS storage, found {self.axes!r}"
+                )
+            return "YXS", (height, width, 3)
+        if "S" in axis_sizes and int(axis_sizes["S"]) != 1:
+            raise NotImplementedError(
+                "Non-RGB OME-TIFFs with multiple stored samples per pixel are unsupported"
+            )
+        if "C" in axis_sizes:
+            return "CYX", (len(self.channels), height, width)
+        return "YX", (height, width)
+
+    @property
+    def output_axes(self) -> str:
+        return self._normalized_output_layout()[0]
+
+    @property
+    def output_shape(self) -> tuple[int, ...]:
+        return self._normalized_output_layout()[1]
+
+    @property
+    def icc_profile(self) -> bytes | None:
+        self._require_open()
+        if not self.is_rgb:
+            return None
+        pages = self._level_pages(0)
+        if len(pages) != 1:
+            return None
+        profile = pages[0].iccprofile
+        return None if profile is None else bytes(profile)
+
+    @property
+    def source_channel_metadata(self) -> tuple[dict[str, Any], ...]:
+        return tuple(dict(channel.source_metadata) for channel in self.channels)
+
+    def plane_readers(self, *, cache_mib: int = 64) -> list[TiffPlaneReader]:
+        self._require_open()
+        if self.output_axes == "YXS":
+            return [
+                TiffPlaneReader(
+                    self._channel_page(0, 0),
+                    lock=self._read_lock,
+                    cache_mib=cache_mib,
+                )
+            ]
+        if self.output_axes == "YX":
+            return [
+                TiffPlaneReader(
+                    self._channel_page(0, 0),
+                    lock=self._read_lock,
+                    cache_mib=cache_mib,
+                )
+            ]
+        return [
+            TiffPlaneReader(
+                self._channel_page(index, 0),
+                lock=self._read_lock,
+                cache_mib=cache_mib,
+            )
+            for index in range(len(self.channels))
+        ]
 
     def read_region(
         self,
