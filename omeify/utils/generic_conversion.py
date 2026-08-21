@@ -5,6 +5,13 @@ from pathlib import Path
 from typing import ClassVar
 
 from omeify.converters import JPEGSubsampling, TifffileConverter
+from omeify.io.akoya_qptiff import ChannelNameField
+from omeify.io.channel import (
+    ChannelRenameMapping,
+    RenameChannelsBy,
+    validate_channel_rename_mapping,
+)
+from omeify.io.pixel_size import PixelSize
 from omeify.utils.tiff_image_features import InputProfile, TiffImageFeatures
 
 
@@ -12,20 +19,31 @@ class GenericConversion:
     profile: ClassVar[InputProfile]
     image_name: ClassVar[str] = "WholeSlideMIF"
     default_compression: ClassVar[str] = "LZW"
+    default_channel_name_field: ClassVar[ChannelNameField] = "name"
 
     def __init__(
         self,
         input_file_path: str | Path,
         series: int = 0,
-        rename_channels: dict[str, str] | None = None,
+        rename_channels: ChannelRenameMapping | None = None,
+        *,
+        rename_channels_by: RenameChannelsBy | None = None,
+        channel_name_field: ChannelNameField | None = None,
     ) -> None:
+        normalized_renames, normalized_by = validate_channel_rename_mapping(
+            rename_channels,
+            rename_channels_by,
+        )
         self.input_file_path = str(input_file_path)
-        self._rename_channels = dict(rename_channels or {})
+        self._rename_channels = normalized_renames
+        self._rename_channels_by = normalized_by
         self._series = int(series)
         self._cache_directory: str | None = None
         self.logger = logging.getLogger(__name__)
-        self._physical_size_x_um: float | None = None
-        self._physical_size_y_um: float | None = None
+        self._pixel_size_override: PixelSize | None = None
+        self.channel_name_field: ChannelNameField = (
+            channel_name_field or self.default_channel_name_field
+        )
 
     @property
     def cache_directory(self) -> str | None:
@@ -44,12 +62,22 @@ class GenericConversion:
         self._series = int(value)
 
     @property
-    def rename_channels(self) -> dict[str, str]:
-        return self._rename_channels
+    def rename_channels(self) -> dict[str, str] | dict[int, str]:
+        return dict(self._rename_channels)
 
-    @rename_channels.setter
-    def rename_channels(self, value: dict[str, str] | None) -> None:
-        self._rename_channels = dict(value or {})
+    @property
+    def rename_channels_by(self) -> RenameChannelsBy | None:
+        return self._rename_channels_by
+
+    def set_channel_renames(
+        self,
+        mapping: ChannelRenameMapping | None,
+        *,
+        by: RenameChannelsBy | None,
+    ) -> None:
+        normalized, normalized_by = validate_channel_rename_mapping(mapping, by)
+        self._rename_channels = normalized
+        self._rename_channels_by = normalized_by
 
     @property
     def input_type(self) -> str:
@@ -62,8 +90,8 @@ class GenericConversion:
             profile=self.profile,
             input_type=self.input_type,
             image_name=self.image_name,
-            physical_size_x_um=self._physical_size_x_um,
-            physical_size_y_um=self._physical_size_y_um,
+            pixel_size=self._pixel_size_override,
+            channel_name_field=self.channel_name_field,
         )
 
     def convert(
@@ -98,8 +126,9 @@ class GenericConversion:
             image_name=self.image_name,
             series=self.series,
             rename_channels=self.rename_channels,
-            physical_size_x_um=self._physical_size_x_um,
-            physical_size_y_um=self._physical_size_y_um,
+            rename_channels_by=self.rename_channels_by,
+            pixel_size_override=self._pixel_size_override,
+            channel_name_field=self.channel_name_field,
             cache_directory=self.cache_directory,
             compression=compression or self.default_compression,
             jpeg_quality=jpeg_quality,

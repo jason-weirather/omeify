@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Literal, Sequence
 
 import numpy as np
+
+from .pixel_size import PixelSize, normalize_ome_pixel_size
 
 ImageType = Literal["multichannel", "rgb", "label"]
 
@@ -33,8 +34,7 @@ class OMEImageSpec:
     shape: tuple[int, ...]
     dtype: np.dtype
     channel_names: tuple[str, ...]
-    physical_size_x_um: float
-    physical_size_y_um: float
+    pixel_size: PixelSize
     icc_profile: bytes | None = None
 
     def __post_init__(self) -> None:
@@ -53,6 +53,7 @@ class OMEImageSpec:
             "channel_names",
             tuple(str(item) for item in self.channel_names),
         )
+        object.__setattr__(self, "pixel_size", normalize_ome_pixel_size(self.pixel_size))
         if self.icc_profile is not None:
             object.__setattr__(self, "icc_profile", bytes(self.icc_profile))
 
@@ -67,12 +68,8 @@ class OMEImageSpec:
             raise TypeError(
                 f"Unsupported OME-TIFF dtype {self.dtype}. Supported dtypes are: {supported}."
             )
-        for name, value in (
-            ("physical_size_x_um", self.physical_size_x_um),
-            ("physical_size_y_um", self.physical_size_y_um),
-        ):
-            if not math.isfinite(float(value)) or float(value) <= 0:
-                raise ValueError(f"{name} must be a positive finite value, found {value!r}")
+        if any(not name for name in self.channel_names):
+            raise ValueError("OME logical channel names must be non-empty")
 
         if image_type == "rgb":
             if self.axes != "YXS" or self.shape[-1] != 3:
@@ -124,8 +121,7 @@ class OMEImageSpec:
         shape: Sequence[int],
         dtype: np.dtype | str | type,
         channel_names: Sequence[str] | None,
-        physical_size_x_um: float,
-        physical_size_y_um: float,
+        pixel_size: PixelSize,
         icc_profile: bytes | None = None,
     ) -> "OMEImageSpec":
         normalized_shape = tuple(int(item) for item in shape)
@@ -145,8 +141,7 @@ class OMEImageSpec:
             shape=normalized_shape,
             dtype=np.dtype(dtype),
             channel_names=names,
-            physical_size_x_um=float(physical_size_x_um),
-            physical_size_y_um=float(physical_size_y_um),
+            pixel_size=pixel_size,
             icc_profile=icc_profile,
         )
 

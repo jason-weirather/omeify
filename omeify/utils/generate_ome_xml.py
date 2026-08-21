@@ -41,12 +41,13 @@ def generate_ome_xml(
         UUID=file_uuid,
     )
 
+    pixel_size = tiff_features.pixel_size
     image_metadata: dict[str, object] = {
         "SignificantBits": tiff_features.significant_bits,
-        "PhysicalSizeX": tiff_features.physical_size_x_um,
-        "PhysicalSizeXUnit": "µm",
-        "PhysicalSizeY": tiff_features.physical_size_y_um,
-        "PhysicalSizeYUnit": "µm",
+        "PhysicalSizeX": pixel_size.x,
+        "PhysicalSizeXUnit": pixel_size.unit,
+        "PhysicalSizeY": pixel_size.y,
+        "PhysicalSizeYUnit": pixel_size.unit,
         "Channel": {"Name": channel_names},
     }
 

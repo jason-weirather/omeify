@@ -8,6 +8,13 @@ from pathlib import Path
 from typing import Literal
 
 from omeify._version import get_version_info
+from omeify.io.akoya_qptiff import ChannelNameField
+from omeify.io.channel import (
+    ChannelRenameMapping,
+    RenameChannelsBy,
+    apply_channel_renames,
+    validate_channel_rename_mapping,
+)
 from omeify.io.ome_tiff_writer import (
     CompressionSettings,
     JPEGSubsampling,
@@ -15,6 +22,7 @@ from omeify.io.ome_tiff_writer import (
     _compression_settings,
     _mean_downsample_2x,
 )
+from omeify.io.pixel_size import PixelSize
 from omeify.utils.tiff_image_features import InputProfile, TiffMIFSource
 
 LOGGER = logging.getLogger(__name__)
@@ -63,9 +71,10 @@ class TifffileConverter:
         input_type: str,
         image_name: str = "WholeSlideMIF",
         series: int = 0,
-        rename_channels: dict[str, str] | None = None,
-        physical_size_x_um: float | None = None,
-        physical_size_y_um: float | None = None,
+        rename_channels: ChannelRenameMapping | None = None,
+        rename_channels_by: RenameChannelsBy | None = None,
+        pixel_size_override: PixelSize | None = None,
+        channel_name_field: ChannelNameField = "name",
         cache_directory: str | Path | None = None,
         compression: str = "LZW",
         jpeg_quality: int = 90,
@@ -78,15 +87,20 @@ class TifffileConverter:
         overwrite: bool = True,
         calculate_checksums: bool = True,
     ) -> None:
+        normalized_renames, normalized_by = validate_channel_rename_mapping(
+            rename_channels,
+            rename_channels_by,
+        )
         self.input_path = Path(input_path)
         self.output_path = Path(output_path)
         self.profile = profile
         self.input_type = input_type
         self.image_name = image_name
         self.series = int(series)
-        self.rename_channels = dict(rename_channels or {})
-        self.physical_size_x_um = physical_size_x_um
-        self.physical_size_y_um = physical_size_y_um
+        self.rename_channels = normalized_renames
+        self.rename_channels_by = normalized_by
+        self.pixel_size_override = pixel_size_override
+        self.channel_name_field: ChannelNameField = channel_name_field
         self.cache_directory = Path(cache_directory) if cache_directory is not None else None
         self.compression_name = compression
         self.jpeg_quality = int(jpeg_quality)
@@ -119,19 +133,20 @@ class TifffileConverter:
             profile=self.profile,
             input_type=self.input_type,
             image_name=self.image_name,
-            physical_size_x_um=self.physical_size_x_um,
-            physical_size_y_um=self.physical_size_y_um,
+            pixel_size_override=self.pixel_size_override,
+            channel_name_field=self.channel_name_field,
         ) as source:
             features = source.features
-            renamed_channels = tuple(
-                self.rename_channels.get(name, name) for name in features.channel_names
+            renamed_channels = apply_channel_renames(
+                features.channel_names,
+                self.rename_channels,
+                self.rename_channels_by,
             )
             writer = OMETiffWriter(
                 self.output_path,
                 image_type="rgb" if features.is_rgb else "multichannel",
                 channel_names=renamed_channels,
-                physical_size_x_um=features.physical_size_x_um,
-                physical_size_y_um=features.physical_size_y_um,
+                pixel_size=features.pixel_size,
                 compression=self.compression_name,
                 jpeg_quality=self.jpeg_quality,
                 jpeg_subsampling=self.jpeg_subsampling,
@@ -150,6 +165,10 @@ class TifffileConverter:
                 dtype=features.dtype,
                 icc_profile=features.icc_profile,
             )
+            source_channel_metadata = [
+                {"index": index, **dict(item)}
+                for index, item in enumerate(features.channel_source_metadata)
+            ]
 
         input_size = self.input_path.stat().st_size
         output_size = self.output_path.stat().st_size
@@ -157,13 +176,16 @@ class TifffileConverter:
 
         output_file = dict(write_report["output_file"])
         image = dict(write_report["image"])
+        image["source_channel_metadata"] = source_channel_metadata
         pyramid = dict(write_report["pyramid"])
         options = dict(write_report["options"])
         options.update(
             {
                 "deidentify_ome": True,
                 "series": self.series,
-                "rename_channels": self.rename_channels,
+                "rename_channels": dict(self.rename_channels),
+                "rename_channels_by": self.rename_channels_by,
+                "channel_name_field": self.channel_name_field,
             }
         )
 
@@ -180,6 +202,8 @@ class TifffileConverter:
                 "source_axes": features.source_axes,
                 "output_axes": features.output_axes,
                 "byte_order": features.source_byte_order,
+                "pixel_size": list(features.pixel_size.to_tuple()),
+                "channels": source_channel_metadata,
             },
             "output_file": output_file,
             "image": image,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-from numbers import Integral
 from pathlib import Path
 from typing import Any
 
@@ -9,8 +8,11 @@ import numpy as np
 import tifffile
 
 from omeify.inspection import TiffInspector
-from omeify.io.base import ChannelSelection, LabelImage, MultichannelImage
-from omeify.io.tiff import TiffPlaneReader
+
+from .base import ChannelSelection, LabelImage, MultichannelImage
+from .channel import Channel, normalize_channel_indices
+from .pixel_size import PixelSize, pixel_size_from_xy_units
+from .tiff import TiffPlaneReader
 
 
 class _OMETiffReaderCore:
@@ -79,7 +81,8 @@ class _OMETiffReaderCore:
 
     @property
     def levels(self) -> tuple[tifffile.TiffPageSeries, ...]:
-        return tuple(self.series.levels)
+        values = tuple(getattr(self.series, "levels", ()) or ())
+        return values or (self.series,)
 
     @property
     def axes(self) -> str:
@@ -125,6 +128,43 @@ class _OMETiffReaderCore:
             return None
         return images[self.series_index]
 
+    @property
+    def pixel_size(self) -> PixelSize | None:
+        image = self._ome_image_summary()
+        if image is None:
+            return None
+        physical = image.get("physical_size") or {}
+        x = physical.get("x")
+        y = physical.get("y")
+        if not x or not y:
+            return None
+        if x.get("value") is None or y.get("value") is None:
+            return None
+        x_unit = x.get("unit")
+        y_unit = y.get("unit")
+        if not x_unit or not y_unit:
+            return None
+        return pixel_size_from_xy_units(
+            float(x["value"]),
+            str(x_unit),
+            float(y["value"]),
+            str(y_unit),
+        )
+
+    def pixel_size_at_level(self, level: int) -> PixelSize | None:
+        selected = self._selected_level(level)
+        base_size = self.pixel_size
+        if base_size is None:
+            return None
+        base_shape = dict(zip(self.axes, self.shape))
+        level_shape = dict(zip(str(selected.axes), tuple(int(item) for item in selected.shape)))
+        if not {"X", "Y"}.issubset(base_shape) or not {"X", "Y"}.issubset(level_shape):
+            raise ValueError("Cannot calculate level pixel size without X and Y axes")
+        return base_size.scaled(
+            base_shape["X"] / level_shape["X"],
+            base_shape["Y"] / level_shape["Y"],
+        )
+
     def _selected_level(self, level: int) -> tifffile.TiffPageSeries:
         level_index = int(level)
         if level_index < 0 or level_index >= len(self.levels):
@@ -132,6 +172,9 @@ class _OMETiffReaderCore:
                 f"Pyramid level {level_index} does not exist; series has {len(self.levels)} levels"
             )
         return self.levels[level_index]
+
+    def _level_pages(self, level: int) -> list[tifffile.TiffPage]:
+        return [item.aspage() for item in self._selected_level(level).pages]
 
     def asarray(self, *, level: int = 0) -> np.ndarray:
         """Materialize one pyramid level.
@@ -141,22 +184,6 @@ class _OMETiffReaderCore:
         """
 
         return np.asarray(self._selected_level(level).asarray())
-
-    @staticmethod
-    def _normalize_channels(channels: ChannelSelection, size: int) -> list[int]:
-        if channels is None:
-            return list(range(size))
-        selected = (
-            [int(channels)]
-            if isinstance(channels, Integral)
-            else [int(item) for item in channels]
-        )
-        if not selected:
-            raise ValueError("channels must contain at least one index")
-        for index in selected:
-            if index < 0 or index >= size:
-                raise IndexError(f"Channel {index} is outside the available range 0..{size - 1}")
-        return selected
 
     def _read_region(
         self,
@@ -193,10 +220,10 @@ class _OMETiffReaderCore:
                 f"with axes {axes!r}"
             )
 
-        pages = [item.aspage() for item in selected_level.pages]
+        pages = self._level_pages(level)
         if "C" in axes:
             size_c = axis_sizes["C"]
-            selected_channels = self._normalize_channels(channels, size_c)
+            selected_channels = normalize_channel_indices(channels, size_c)
             if len(pages) != size_c:
                 raise NotImplementedError(
                     f"CYX region reading expects one TIFF page per channel; found "
@@ -218,10 +245,10 @@ class _OMETiffReaderCore:
         reader = TiffPlaneReader(pages[0], lock=self._read_lock)
         result = reader.read_region(y0, y1, x0, x1)
         if "S" in axes:
-            selected_samples = self._normalize_channels(channels, axis_sizes["S"])
+            selected_samples = normalize_channel_indices(channels, axis_sizes["S"])
             return np.ascontiguousarray(result[..., selected_samples])
         if channels is not None:
-            selected = self._normalize_channels(channels, 1)
+            selected = normalize_channel_indices(channels, 1)
             if selected != [0]:
                 raise IndexError("Single-channel YX images only accept channel 0")
         return result
@@ -239,12 +266,23 @@ class _OMETiffReaderCore:
 
 
 class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
-    """Context-managed reader for one multichannel or RGB OME-TIFF series.
+    """Context-managed reader for one multichannel or RGB OME-TIFF series."""
 
-    ``print(reader)`` uses the same default renderer as ``omeify inspect PATH``.
-    ``channel_names`` are logical OME channels. For RGB this is normally
-    ``('RGB',)`` while ``sample_names`` are red, green, and blue.
-    """
+    def __init__(self, path: str | Path, *, series: int = 0) -> None:
+        super().__init__(path, series=series)
+        self._channels: tuple[Channel, ...] | None = None
+
+    def open(self) -> "OMETiffReader":
+        super().open()
+        self._channels = None
+        return self
+
+    def close(self) -> None:
+        if self._channels is not None:
+            for channel in self._channels:
+                channel.clear_cache()
+        self._channels = None
+        super().close()
 
     @property
     def size_c(self) -> int:
@@ -258,35 +296,129 @@ class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
             return int(self.shape[self.axes.index("S")])
         return 1
 
+    def _logical_channel_count_from_layout(self) -> int:
+        if "C" in self.axes:
+            return int(self.shape[self.axes.index("C")])
+        return 1
+
+    def _channel_page(self, channel_index: int, level: int) -> tifffile.TiffPage:
+        selected = self._selected_level(level)
+        axes = str(selected.axes)
+        pages = self._level_pages(level)
+        if "C" in axes:
+            size_c = int(selected.shape[axes.index("C")])
+            if len(pages) != size_c:
+                raise NotImplementedError(
+                    f"OME planar level {level} has {len(pages)} pages for C={size_c}"
+                )
+            return pages[channel_index]
+        if channel_index != 0 or len(pages) != 1:
+            raise IndexError(f"Logical channel {channel_index} is unavailable at level {level}")
+        return pages[0]
+
+    def _channel_plane_reader(self, channel_index: int, level: int) -> TiffPlaneReader:
+        return TiffPlaneReader(
+            self._channel_page(channel_index, level),
+            lock=self._read_lock,
+        )
+
+    def _channel_array(self, channel_index: int, level: int) -> np.ndarray:
+        page = self._channel_page(channel_index, level)
+        value = np.asarray(page.asarray())
+        if int(page.samplesperpixel) == 1:
+            if value.ndim == 3 and value.shape[0] == 1:
+                value = value[0]
+            if value.ndim == 3 and value.shape[-1] == 1:
+                value = value[..., 0]
+            if value.ndim != 2:
+                raise ValueError(
+                    f"OME channel {channel_index} did not materialize as YX: {value.shape}"
+                )
+        elif value.ndim != 3 or value.shape[-1] != int(page.samplesperpixel):
+            raise ValueError(
+                f"OME channel {channel_index} did not materialize as YXS: {value.shape}"
+            )
+        return np.ascontiguousarray(value)
+
     @property
-    def channel_names(self) -> tuple[str, ...]:
-        image = self._ome_image_summary()
-        if image is not None:
-            labels = [
-                channel.get("name")
-                or channel.get("id")
-                or f"Channel {int(channel['index']) + 1}"
-                for channel in image["channels"]
-            ]
-            if labels:
-                return tuple(str(item) for item in labels)
-        count = self.shape[self.axes.index("C")] if "C" in self.axes else 1
-        return tuple(f"Channel {index + 1}" for index in range(int(count)))
+    def channels(self) -> tuple[Channel, ...]:
+        self._require_open()
+        if self._channels is None:
+            image = self._ome_image_summary()
+            summaries = list(image.get("channels", [])) if image is not None else []
+            logical_count = len(summaries) or self._logical_channel_count_from_layout()
+            pages = self._level_pages(0)
+            if "C" in self.axes and logical_count != len(pages):
+                raise ValueError(
+                    f"OME metadata declares {logical_count} logical channels, but the "
+                    f"selected series has {len(pages)} full-resolution pages"
+                )
+            if "C" not in self.axes and logical_count != 1:
+                raise ValueError(
+                    f"OME series axes {self.axes!r} can expose one logical channel, but "
+                    f"metadata contains {logical_count}"
+                )
+
+            axis_sizes = dict(zip(self.axes, self.shape))
+            channel_shape: tuple[int, ...]
+            if "S" in self.axes:
+                channel_shape = (
+                    int(axis_sizes["Y"]),
+                    int(axis_sizes["X"]),
+                    int(axis_sizes["S"]),
+                )
+            else:
+                channel_shape = (int(axis_sizes["Y"]), int(axis_sizes["X"]))
+
+            result: list[Channel] = []
+            for index in range(logical_count):
+                summary = summaries[index] if index < len(summaries) else {}
+                source_id = summary.get("id")
+                channel_id = str(source_id) if source_id else f"Channel:0:{index}"
+                name = (
+                    summary.get("name")
+                    or source_id
+                    or f"Channel {index + 1}"
+                )
+                page = pages[index] if "C" in self.axes else pages[0]
+                samples_per_pixel = int(
+                    summary.get("samples_per_pixel")
+                    or page.samplesperpixel
+                    or 1
+                )
+                result.append(
+                    Channel(
+                        index=index,
+                        channel_id=channel_id,
+                        name=str(name),
+                        dtype=page.dtype,
+                        shape=channel_shape,
+                        samples_per_pixel=samples_per_pixel,
+                        plane_reader_factory=(
+                            lambda level, channel_index=index: self._channel_plane_reader(
+                                channel_index,
+                                level,
+                            )
+                        ),
+                        array_reader=(
+                            lambda level, channel_index=index: self._channel_array(
+                                channel_index,
+                                level,
+                            )
+                        ),
+                        ensure_available=lambda: self._require_open(),
+                        source_id=None if source_id is None else str(source_id),
+                        id_is_generated=source_id is None,
+                        source_metadata=summary,
+                    )
+                )
+            self._channels = tuple(result)
+        return self._channels
 
     @property
     def samples_per_pixel(self) -> int:
-        image = self._ome_image_summary()
-        if image is not None:
-            samples = [
-                int(item["samples_per_pixel"])
-                for item in image.get("channels", [])
-                if item.get("samples_per_pixel") is not None
-            ]
-            if samples and len(set(samples)) == 1:
-                return samples[0]
-        if "S" in self.axes:
-            return int(self.shape[self.axes.index("S")])
-        return 1
+        values = {channel.samples_per_pixel for channel in self.channels}
+        return values.pop() if len(values) == 1 else 1
 
     @property
     def sample_count(self) -> int:
@@ -294,7 +426,7 @@ class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
 
     @property
     def is_rgb(self) -> bool:
-        return self.samples_per_pixel == 3 and self.size_c == 3 and len(self.channel_names) == 1
+        return self.samples_per_pixel == 3 and self.size_c == 3 and len(self.channels) == 1
 
     @property
     def sample_names(self) -> tuple[str, ...]:
@@ -317,7 +449,8 @@ class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
         """Read a Y/X window from common planar or interleaved layouts.
 
         For planar ``CYX`` images, ``channels`` selects logical channels. For
-        interleaved ``YXS`` RGB images it selects stored samples.
+        interleaved ``YXS`` RGB images it retains the historical sample-selection
+        behavior; logical RGB channel access is available through ``reader[0]``.
         """
 
         return self._read_region(
@@ -331,12 +464,7 @@ class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
 
 
 class OMETiffLabelReader(_OMETiffReaderCore, LabelImage):
-    """Virtual-access reader for one integer OME-TIFF label raster.
-
-    The caller explicitly chooses label semantics by using this class. OME-TIFF
-    does not intrinsically distinguish intensity rasters from label rasters.
-    No region measurements or label counting are performed.
-    """
+    """Virtual-access reader for one integer OME-TIFF label raster."""
 
     def __init__(
         self,

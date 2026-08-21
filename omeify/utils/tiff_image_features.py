@@ -4,20 +4,31 @@ import logging
 import math
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from types import MappingProxyType
+from typing import Any, Literal, Mapping
 from xml.etree import ElementTree
 
 import numpy as np
 import tifffile
 
+from omeify.io.akoya_qptiff import (
+    AkoyaQPIChannelMetadata,
+    ChannelNameField,
+    consistent_akoya_pixel_size,
+    parse_akoya_qpi_channel_metadata,
+    pixel_size_from_tiff_resolution,
+    select_akoya_channel_name,
+)
+from omeify.io.pixel_size import PixelSize, pixel_size_from_xy_units
 from omeify.io.tiff import TiffPlaneReader
 
 LOGGER = logging.getLogger(__name__)
 
 InputProfile = Literal[
     "akoya_mif_qptiff",
+    "akoya_fusion_qptiff",
     "akoya_he_qptiff",
     "svs",
     "halo_mif",
@@ -36,7 +47,6 @@ _SUPPORTED_MIF_DTYPES = {
     "float32",
     "float64",
 }
-
 _SUPPORTED_RGB_DTYPES = {"uint8"}
 _APERIO_MPP_PATTERN = re.compile(
     r"(?:^|\|)\s*MPP\s*=\s*"
@@ -87,59 +97,6 @@ def _ome_pixels(image: ElementTree.Element) -> ElementTree.Element | None:
     return None
 
 
-def _unit_to_micrometers(value: float, unit: str | None) -> float:
-    normalized = (unit or "µm").strip().lower().replace("μ", "µ")
-    factors = {
-        "µm": 1.0,
-        "um": 1.0,
-        "micrometer": 1.0,
-        "micrometre": 1.0,
-        "nm": 1e-3,
-        "nanometer": 1e-3,
-        "nanometre": 1e-3,
-        "mm": 1e3,
-        "millimeter": 1e3,
-        "millimetre": 1e3,
-        "cm": 1e4,
-        "centimeter": 1e4,
-        "centimetre": 1e4,
-        "m": 1e6,
-        "meter": 1e6,
-        "metre": 1e6,
-    }
-    if normalized not in factors:
-        raise ValueError(f"Unsupported physical-size unit {unit!r}")
-    return float(value) * factors[normalized]
-
-
-def _resolution_value(value: object) -> float:
-    """Normalize tifffile rational-tag values across API versions."""
-
-    if isinstance(value, (tuple, list, np.ndarray)) and len(value) == 2:
-        numerator, denominator = value
-        return float(numerator) / float(denominator)
-    return float(value)
-
-
-def _resolution_tag_to_um(page: tifffile.TiffPage) -> tuple[float, float] | None:
-    """Return pixel size from standard TIFF resolution tags, when trustworthy."""
-
-    try:
-        x_ppu = _resolution_value(page.tags["XResolution"].value)
-        y_ppu = _resolution_value(page.tags["YResolution"].value)
-        unit_value = int(page.tags["ResolutionUnit"].value)
-    except (KeyError, TypeError, ValueError, ZeroDivisionError):
-        return None
-
-    if x_ppu <= 0 or y_ppu <= 0:
-        return None
-    if unit_value == 3:  # centimeter
-        return 1e4 / x_ppu, 1e4 / y_ppu
-    if unit_value == 2:  # inch
-        return 25400.0 / x_ppu, 25400.0 / y_ppu
-    return None
-
-
 @dataclass(frozen=True)
 class ImageMetadata:
     input_path: Path
@@ -152,13 +109,22 @@ class ImageMetadata:
     dtype: np.dtype
     significant_bits: int
     channel_names: tuple[str, ...]
-    physical_size_x_um: float
-    physical_size_y_um: float
+    pixel_size: PixelSize
     source_axes: str
     source_byte_order: str
     pixel_layout: PixelLayout = "planar"
     samples_per_pixel: int = 1
     icc_profile: bytes | None = None
+    channel_source_metadata: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "dtype", np.dtype(self.dtype).newbyteorder("="))
+        object.__setattr__(self, "channel_names", tuple(str(item) for item in self.channel_names))
+        object.__setattr__(
+            self,
+            "channel_source_metadata",
+            tuple(MappingProxyType(dict(item)) for item in self.channel_source_metadata),
+        )
 
     @property
     def shape_cyx(self) -> tuple[int, int, int]:
@@ -198,16 +164,18 @@ class TiffMIFSource:
         profile: InputProfile,
         input_type: str,
         image_name: str = "WholeSlideMIF",
-        physical_size_x_um: float | None = None,
-        physical_size_y_um: float | None = None,
+        pixel_size_override: PixelSize | None = None,
+        channel_name_field: ChannelNameField = "name",
     ) -> None:
+        if channel_name_field not in {"name", "biomarker", "auto"}:
+            raise ValueError("channel_name_field must be 'name', 'biomarker', or 'auto'")
         self.input_path = Path(input_path)
         self.series_index = int(series)
         self.profile = profile
         self.input_type = input_type
         self.image_name = image_name
-        self.physical_size_x_override = physical_size_x_um
-        self.physical_size_y_override = physical_size_y_um
+        self.pixel_size_override = pixel_size_override
+        self.channel_name_field: ChannelNameField = channel_name_field
         self.tiff: tifffile.TiffFile | None = None
         self.series = None
         self.level0 = None
@@ -227,10 +195,6 @@ class TiffMIFSource:
             self.series = series_collection[self.series_index]
             levels = getattr(self.series, "levels", None)
             self.level0 = levels[0] if levels else self.series
-            # TiffPageSeries.pages may contain lightweight TiffFrame objects.
-            # Materialize their IFD metadata so per-page tags (including Akoya
-            # channel descriptions) and structural fields are available.  This
-            # reads only TIFF directory metadata, not image pixels.
             self.pages = [page.aspage() for page in self.level0.pages]
             self.metadata = self._inspect()
             return self
@@ -262,7 +226,6 @@ class TiffMIFSource:
     def _inspect(self) -> ImageMetadata:
         if self.tiff is None or self.level0 is None or not self.pages:
             raise ValueError("Selected series contains no readable TIFF pages")
-
         if self.profile in {"akoya_he_qptiff", "svs"}:
             return self._inspect_rgb()
         return self._inspect_planar()
@@ -270,6 +233,10 @@ class TiffMIFSource:
     def _inspect_planar(self) -> ImageMetadata:
         if self.tiff is None or self.level0 is None or not self.pages:
             raise ValueError("Selected series contains no readable TIFF pages")
+        if self.profile in {"akoya_mif_qptiff", "akoya_fusion_qptiff"} and not self.tiff.is_qpi:
+            raise ValueError(
+                f"The {self.profile} profile requires a PerkinElmer/Akoya QPI TIFF source."
+            )
 
         page0 = self.pages[0]
         size_y = int(page0.imagelength)
@@ -317,7 +284,6 @@ class TiffMIFSource:
                 break
         size_c = candidate_channel_size or len(self.pages)
         if len(self.pages) != size_c:
-            # For planar mIF data, the physical page count is the strongest signal.
             if len(self.pages) > 1:
                 LOGGER.warning(
                     "Series axes %s imply %s channels but the level contains %s pages; "
@@ -332,9 +298,17 @@ class TiffMIFSource:
                     f"Cannot map series axes {axes!r} and shape {shape} onto planar channels."
                 )
 
-        channel_names = self._channel_names(size_c)
-        physical_x, physical_y = self._physical_sizes(page0)
-        significant_bits = self._significant_bits(dtype)
+        # Fusion gets the stricter exact-path metadata parser and cross-page
+        # calibration check. Keep the established qptiff_mif profile tolerant
+        # of older Akoya descriptions that only expose Name through a nested
+        # path or report calibration on the first page.
+        akoya_metadata = (
+            self._akoya_metadata()
+            if self.profile == "akoya_fusion_qptiff"
+            else ()
+        )
+        channel_names, source_metadata = self._channel_names(size_c, akoya_metadata)
+        pixel_size = self._pixel_size(page0, akoya_metadata)
 
         return ImageMetadata(
             input_path=self.input_path,
@@ -345,14 +319,14 @@ class TiffMIFSource:
             size_y=size_y,
             size_x=size_x,
             dtype=dtype,
-            significant_bits=significant_bits,
+            significant_bits=self._significant_bits(dtype),
             channel_names=tuple(channel_names),
-            physical_size_x_um=physical_x,
-            physical_size_y_um=physical_y,
+            pixel_size=pixel_size,
             source_axes=axes,
             source_byte_order="big" if self.tiff.byteorder == ">" else "little",
             pixel_layout="planar",
             samples_per_pixel=1,
+            channel_source_metadata=tuple(source_metadata),
         )
 
     def _inspect_rgb(self) -> ImageMetadata:
@@ -406,7 +380,7 @@ class TiffMIFSource:
                 f"(Y, X, 3); found axes={axes!r}, shape={shape}."
             )
 
-        physical_x, physical_y = self._physical_sizes(page0)
+        pixel_size = self._pixel_size(page0, ())
         icc_profile = page0.iccprofile
         if icc_profile is not None:
             icc_profile = bytes(icc_profile)
@@ -422,8 +396,7 @@ class TiffMIFSource:
             dtype=dtype,
             significant_bits=self._significant_bits(dtype),
             channel_names=("RGB",),
-            physical_size_x_um=physical_x,
-            physical_size_y_um=physical_y,
+            pixel_size=pixel_size,
             source_axes=axes,
             source_byte_order="big" if self.tiff.byteorder == ">" else "little",
             pixel_layout="rgb",
@@ -431,19 +404,41 @@ class TiffMIFSource:
             icc_profile=icc_profile,
         )
 
-    def _channel_names(self, size_c: int) -> list[str]:
-        if self.profile in {"akoya_mif_qptiff", "component"}:
-            names = [self._akoya_page_name(page) for page in self.pages]
+    def _akoya_metadata(self) -> tuple[AkoyaQPIChannelMetadata, ...]:
+        return tuple(
+            parse_akoya_qpi_channel_metadata(page.description, channel_index=index)
+            for index, page in enumerate(self.pages)
+        )
+
+    def _channel_names(
+        self,
+        size_c: int,
+        akoya_metadata: tuple[AkoyaQPIChannelMetadata, ...],
+    ) -> tuple[list[str], list[Mapping[str, Any]]]:
+        names: list[str] = []
+        source_metadata: list[Mapping[str, Any]] = []
+        if self.profile == "akoya_fusion_qptiff":
+            for index, metadata in enumerate(akoya_metadata):
+                name, selected_field = select_akoya_channel_name(
+                    metadata,
+                    self.channel_name_field,
+                    channel_index=index,
+                )
+                item = metadata.as_dict()
+                item["selected_name_field"] = selected_field
+                names.append(name)
+                source_metadata.append(item)
+        elif self.profile in {"akoya_mif_qptiff", "component"}:
+            names = [
+                self._akoya_page_name(page) or f"Channel {index + 1}"
+                for index, page in enumerate(self.pages)
+            ]
         elif self.profile == "halo_mif":
             names = self._ome_channel_names()
-        else:
-            names = []
 
-        result: list[str] = []
-        for index in range(size_c):
-            name = names[index] if index < len(names) else None
-            result.append(name or f"Channel {index + 1}")
-        return result
+        while len(names) < size_c:
+            names.append(f"Channel {len(names) + 1}")
+        return names[:size_c], source_metadata[:size_c]
 
     @staticmethod
     def _akoya_page_name(page: tifffile.TiffPage) -> str | None:
@@ -461,9 +456,7 @@ class TiffMIFSource:
         if root is None:
             return None
         images = _ome_images(root)
-        if not images:
-            return None
-        if self.series_index >= len(images):
+        if not images or self.series_index >= len(images):
             return None
         return _ome_pixels(images[self.series_index])
 
@@ -471,77 +464,94 @@ class TiffMIFSource:
         pixels = self._selected_ome_pixels()
         if pixels is None:
             return []
-        names: list[str] = []
-        for element in pixels:
-            if _local_name(element.tag) == "Channel":
-                names.append(element.attrib.get("Name") or "")
-        return names
+        return [
+            element.attrib.get("Name") or ""
+            for element in pixels
+            if _local_name(element.tag) == "Channel"
+        ]
 
-    def _physical_sizes(self, page0: tifffile.TiffPage) -> tuple[float, float]:
-        if self.physical_size_x_override is not None or self.physical_size_y_override is not None:
-            if self.physical_size_x_override is None or self.physical_size_y_override is None:
-                raise ValueError("Both physical_size_x_um and physical_size_y_um are required")
-            x_um = float(self.physical_size_x_override)
-            y_um = float(self.physical_size_y_override)
-        elif self.profile in {"akoya_mif_qptiff", "akoya_he_qptiff", "component"}:
+    def _pixel_size(
+        self,
+        page0: tifffile.TiffPage,
+        akoya_metadata: tuple[AkoyaQPIChannelMetadata, ...],
+    ) -> PixelSize:
+        if self.pixel_size_override is not None:
+            return self.pixel_size_override
+
+        if self.profile == "akoya_fusion_qptiff":
+            value = consistent_akoya_pixel_size(akoya_metadata, self.pages)
+            if value is None:
+                raise ValueError(
+                    "Akoya metadata does not contain PixelSizeMicrons and TIFF resolution "
+                    "tags do not define a physical unit."
+                )
+            return value
+
+        if self.profile == "akoya_mif_qptiff":
             root = _parse_xml(page0.description)
-            pixel_size = (
-                _first_descendant_text(root, "PixelSizeMicrons")
-                if root is not None
-                else None
-            )
-            if pixel_size is not None:
-                x_um = y_um = float(pixel_size)
-            else:
-                fallback = _resolution_tag_to_um(page0)
-                if fallback is None:
-                    raise ValueError(
-                        "Akoya metadata does not contain PixelSizeMicrons and TIFF resolution "
-                        "tags do not define a physical unit."
-                    )
-                x_um, y_um = fallback
-        elif self.profile == "svs":
+            raw = _first_descendant_text(root, "PixelSizeMicrons") if root is not None else None
+            if raw is not None:
+                value = float(raw)
+                if not math.isfinite(value) or value <= 0:
+                    raise ValueError(f"Invalid Akoya PixelSizeMicrons={raw!r}")
+                return PixelSize(value, value, "µm")
+            fallback = pixel_size_from_tiff_resolution(page0)
+            if fallback is None:
+                raise ValueError(
+                    "Akoya metadata does not contain PixelSizeMicrons and TIFF resolution "
+                    "tags do not define a physical unit."
+                )
+            return fallback
+
+        if self.profile in {"akoya_he_qptiff", "component"}:
+            try:
+                metadata = parse_akoya_qpi_channel_metadata(page0.description, channel_index=0)
+            except ValueError:
+                metadata = None
+            if metadata is not None and metadata.pixel_size_microns is not None:
+                value = metadata.pixel_size_microns
+                return PixelSize(value, value, "µm")
+            fallback = pixel_size_from_tiff_resolution(page0)
+            if fallback is None:
+                raise ValueError(
+                    "Akoya metadata does not contain PixelSizeMicrons and TIFF resolution "
+                    "tags do not define a physical unit."
+                )
+            return fallback
+
+        if self.profile == "svs":
             match = _APERIO_MPP_PATTERN.search(page0.description or "")
             if match is not None:
-                x_um = y_um = float(match.group("value"))
-            else:
-                fallback = _resolution_tag_to_um(page0)
-                if fallback is None:
-                    raise ValueError(
-                        "Aperio SVS metadata does not contain MPP and TIFF resolution tags "
-                        "do not define a physical unit."
-                    )
-                x_um, y_um = fallback
-        elif self.profile == "halo_mif":
+                value = float(match.group("value"))
+                return PixelSize(value, value, "µm")
+            fallback = pixel_size_from_tiff_resolution(page0)
+            if fallback is None:
+                raise ValueError(
+                    "Aperio SVS metadata does not contain MPP and TIFF resolution tags "
+                    "do not define a physical unit."
+                )
+            return fallback
+
+        if self.profile == "halo_mif":
             pixels = self._selected_ome_pixels()
             if pixels is None:
                 raise ValueError("HALO mIF TIFF does not contain readable OME-XML Pixels metadata")
             try:
-                x_um = _unit_to_micrometers(
+                return pixel_size_from_xy_units(
                     float(pixels.attrib["PhysicalSizeX"]),
-                    pixels.attrib.get("PhysicalSizeXUnit"),
-                )
-                y_um = _unit_to_micrometers(
+                    pixels.attrib.get("PhysicalSizeXUnit") or "µm",
                     float(pixels.attrib["PhysicalSizeY"]),
-                    pixels.attrib.get("PhysicalSizeYUnit"),
+                    pixels.attrib.get("PhysicalSizeYUnit") or "µm",
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 raise ValueError(
                     "HALO OME metadata must contain valid PhysicalSizeX and PhysicalSizeY."
                 ) from exc
-        else:
-            raise AssertionError(f"Unhandled input profile {self.profile}")
 
-        if not math.isfinite(x_um) or not math.isfinite(y_um) or x_um <= 0 or y_um <= 0:
-            raise ValueError(
-                f"Physical pixel sizes must be positive finite values, got {x_um}, {y_um}"
-            )
-        return x_um, y_um
+        raise AssertionError(f"Unhandled input profile {self.profile}")
 
     @staticmethod
     def _significant_bits(dtype: np.dtype) -> int:
-        """Return the storage width represented by the output pixel type."""
-
         return int(dtype.itemsize * 8)
 
 
@@ -549,11 +559,7 @@ TiffImageSource = TiffMIFSource
 
 
 class TiffImageFeatures:
-    """Compatibility metadata facade for code that imported the old class.
-
-    The class now uses tifffile directly and does not depend on tiff-inspector.
-    For conversion, use the input classes in :mod:`omeify.inputs`.
-    """
+    """Compatibility metadata facade for code that imported the old class."""
 
     def __init__(
         self,
@@ -563,8 +569,8 @@ class TiffImageFeatures:
         profile: InputProfile = "akoya_mif_qptiff",
         input_type: str = "TIFF mIF",
         image_name: str = "WholeSlideMIF",
-        physical_size_x_um: float | None = None,
-        physical_size_y_um: float | None = None,
+        pixel_size: PixelSize | None = None,
+        channel_name_field: ChannelNameField = "name",
     ) -> None:
         with TiffMIFSource(
             tiff_file_path,
@@ -572,8 +578,8 @@ class TiffImageFeatures:
             profile=profile,
             input_type=input_type,
             image_name=image_name,
-            physical_size_x_um=physical_size_x_um,
-            physical_size_y_um=physical_size_y_um,
+            pixel_size_override=pixel_size,
+            channel_name_field=channel_name_field,
         ) as source:
             self._metadata = source.features
 
@@ -606,12 +612,16 @@ class TiffImageFeatures:
         return "true" if self._metadata.is_rgb else "false"
 
     @property
+    def pixel_size(self) -> PixelSize:
+        return self._metadata.pixel_size
+
+    @property
     def physical_size_x(self) -> float:
-        return self._metadata.physical_size_x_um
+        return self._metadata.pixel_size.converted_to("µm").x
 
     @property
     def physical_size_y(self) -> float:
-        return self._metadata.physical_size_y_um
+        return self._metadata.pixel_size.converted_to("µm").y
 
     @property
     def physical_size_x_unit(self) -> str:

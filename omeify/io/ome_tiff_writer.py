@@ -6,13 +6,14 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal, Protocol, Sequence, runtime_checkable
+from typing import Any, Iterable, Literal, Protocol, Sequence, runtime_checkable
 
 import numpy as np
 import tifffile
 from lxml import etree
 
 from omeify._version import __version__
+from omeify.io.pixel_size import PixelSize
 from omeify.io.spec import ImageType, OMEImageSpec
 from omeify.io.tiff import ArrayPlaneReader, PlaneReader, TiffPlaneReader
 from omeify.utils.generate_ome_xml import generate_ome_xml
@@ -317,11 +318,9 @@ def _page_readers(tiff: tifffile.TiffFile, plane_count: int) -> list[TiffPlaneRe
     return [TiffPlaneReader(page, lock=lock) for page in pages]
 
 
-def _resolution(pixel_size_x_um: float, pixel_size_y_um: float, scale: int) -> tuple[float, float]:
-    return (
-        1e4 / (pixel_size_x_um * scale),
-        1e4 / (pixel_size_y_um * scale),
-    )
+def _resolution(pixel_size: PixelSize, scale: int) -> tuple[float, float]:
+    scaled = pixel_size.scaled(scale).converted_to("cm")
+    return (1.0 / scaled.x, 1.0 / scaled.y)
 
 
 def _series_layout_matches(
@@ -363,8 +362,7 @@ class OMETiffWriter:
         *,
         image_type: ImageType = "multichannel",
         channel_names: Sequence[str] | None = None,
-        physical_size_x_um: float,
-        physical_size_y_um: float,
+        pixel_size: PixelSize,
         compression: str | None = None,
         jpeg_quality: int = 90,
         jpeg_subsampling: JPEGSubsampling = "444",
@@ -384,8 +382,9 @@ class OMETiffWriter:
         self.channel_names = (
             None if channel_names is None else tuple(str(item) for item in channel_names)
         )
-        self.physical_size_x_um = float(physical_size_x_um)
-        self.physical_size_y_um = float(physical_size_y_um)
+        if not isinstance(pixel_size, PixelSize):
+            raise TypeError("pixel_size must be a PixelSize instance")
+        self.pixel_size = pixel_size
         self.compression_name = compression or ("JPEG" if image_type == "rgb" else "LZW")
         self.jpeg_quality = int(jpeg_quality)
         if not 1 <= self.jpeg_quality <= 100:
@@ -414,6 +413,10 @@ class OMETiffWriter:
             Path(cache_directory) if cache_directory is not None else None
         )
         self.icc_profile = None if icc_profile is None else bytes(icc_profile)
+
+    @property
+    def path(self) -> Path:
+        return self.output_path
 
     def write(self, image: np.ndarray, *, axes: str | None = None) -> dict[str, object]:
         """Write an in-memory array.
@@ -480,8 +483,7 @@ class OMETiffWriter:
             shape=shape,
             dtype=dtype,
             channel_names=self.channel_names,
-            physical_size_x_um=self.physical_size_x_um,
-            physical_size_y_um=self.physical_size_y_um,
+            pixel_size=self.pixel_size,
             icc_profile=icc_profile,
         )
 
@@ -613,8 +615,7 @@ class OMETiffWriter:
                 "logical_channel_count": spec.logical_channel_count,
                 "samples_per_pixel": spec.samples_per_pixel,
                 "interleaved": spec.is_rgb,
-                "physical_size_x_um": spec.physical_size_x_um,
-                "physical_size_y_um": spec.physical_size_y_um,
+                "pixel_size": list(spec.pixel_size.to_tuple()),
                 "significant_bits": spec.significant_bits,
                 "icc_profile_present": spec.icc_profile is not None,
             },
@@ -783,11 +784,7 @@ class OMETiffWriter:
                 description=omexml.encode("utf-8"),
                 software=software,
                 subifds=len(level_paths),
-                resolution=_resolution(
-                    spec.physical_size_x_um,
-                    spec.physical_size_y_um,
-                    1,
-                ),
+                resolution=_resolution(spec.pixel_size, 1),
                 resolutionunit="CENTIMETER",
                 **common_options,
             )
@@ -809,11 +806,7 @@ class OMETiffWriter:
                         shape=level_shape,
                         software=False,
                         subfiletype=1,
-                        resolution=_resolution(
-                            spec.physical_size_x_um,
-                            spec.physical_size_y_um,
-                            2**level_index,
-                        ),
+                        resolution=_resolution(spec.pixel_size, 2**level_index),
                         resolutionunit="CENTIMETER",
                         **common_options,
                     )
@@ -1150,3 +1143,93 @@ class OMETiffWriter:
                             )
                 verification["base_pixel_values_match"] = True
         return verification
+
+
+class TemporaryOMETiffWriter:
+    """Context-managed temporary-file wrapper around :class:`OMETiffWriter`.
+
+    The class owns only temporary-path lifecycle. All image construction,
+    validation, verification, and atomic writing remain delegated to
+    ``OMETiffWriter``.
+    """
+
+    def __init__(
+        self,
+        *,
+        directory: str | Path | None = None,
+        prefix: str = "omeify-",
+        suffix: str = ".ome.tif",
+        **writer_options: Any,
+    ) -> None:
+        self.directory = None if directory is None else Path(directory)
+        self.prefix = str(prefix)
+        self.suffix = str(suffix)
+        if not self.suffix:
+            raise ValueError("Temporary OME-TIFF suffix must be non-empty")
+        self.writer_options = dict(writer_options)
+        self._temporary_directory: tempfile.TemporaryDirectory[str] | None = None
+        self._path: Path | None = None
+        self._writer: OMETiffWriter | None = None
+
+    @property
+    def path(self) -> Path:
+        if self._path is None:
+            raise RuntimeError("TemporaryOMETiffWriter must be entered before path is available")
+        return self._path
+
+    @property
+    def writer(self) -> OMETiffWriter:
+        if self._writer is None:
+            raise RuntimeError("TemporaryOMETiffWriter must be entered before writing")
+        return self._writer
+
+    def __enter__(self) -> "TemporaryOMETiffWriter":
+        if self._temporary_directory is not None:
+            raise RuntimeError("TemporaryOMETiffWriter context is already active")
+        if self.directory is not None:
+            self.directory.mkdir(parents=True, exist_ok=True)
+        temporary = tempfile.TemporaryDirectory(
+            prefix=self.prefix,
+            dir=str(self.directory) if self.directory is not None else None,
+        )
+        self._temporary_directory = temporary
+        self._path = Path(temporary.name) / f"image{self.suffix}"
+        options = dict(self.writer_options)
+        options.setdefault("cache_directory", Path(temporary.name))
+        options.setdefault("overwrite", True)
+        try:
+            self._writer = OMETiffWriter(self._path, **options)
+        except Exception:
+            self.close()
+            raise
+        return self
+
+    def write(self, image: np.ndarray, *, axes: str | None = None) -> dict[str, object]:
+        return self.writer.write(image, axes=axes)
+
+    def write_source(
+        self,
+        source: PlaneReaderSource,
+        *,
+        axes: str,
+        shape: Sequence[int],
+        dtype: np.dtype | str | type,
+        icc_profile: bytes | None = None,
+    ) -> dict[str, object]:
+        return self.writer.write_source(
+            source,
+            axes=axes,
+            shape=shape,
+            dtype=dtype,
+            icc_profile=icc_profile,
+        )
+
+    def close(self) -> None:
+        self._writer = None
+        self._path = None
+        if self._temporary_directory is not None:
+            self._temporary_directory.cleanup()
+        self._temporary_directory = None
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self.close()

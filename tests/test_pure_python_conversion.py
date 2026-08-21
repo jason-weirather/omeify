@@ -239,7 +239,11 @@ def test_channel_rename_and_omit_uuid(tmp_path: Path) -> None:
     output = tmp_path / "output.ome.tif"
     _write_source(source, data)
 
-    processor = HaloMIFTiff(source, rename_channels={"Marker 1": "DAPI"})
+    processor = HaloMIFTiff(
+        source,
+        rename_channels={"Marker 1": "DAPI"},
+        rename_channels_by="name",
+    )
     report = processor.convert(
         output,
         display_uuid=False,
@@ -270,7 +274,7 @@ def test_akoya_qptiff_profile_ignores_source_pyramid(tmp_path: Path) -> None:
 
     assert report["input_file"]["source_axes"] == "CYX"
     assert report["image"]["channel_names"] == ["Akoya 1", "Akoya 2"]
-    assert report["image"]["physical_size_x_um"] == pytest.approx(0.5)
+    assert report["image"]["pixel_size"] == [0.5, 0.5, "µm"]
     with tifffile.TiffFile(output) as tif:
         np.testing.assert_array_equal(tif.series[0].levels[0].asarray(), data)
         np.testing.assert_array_equal(tif.series[0].levels[1].asarray(), _mean2(data))
@@ -308,7 +312,7 @@ def test_akoya_he_qptiff_writes_one_interleaved_rgb_ifd(tmp_path: Path) -> None:
     assert report["image"]["channel_names"] == ["RGB"]
     assert report["image"]["samples_per_pixel"] == 3
     assert report["image"]["interleaved"] is True
-    assert report["image"]["physical_size_x_um"] == pytest.approx(0.25)
+    assert report["image"]["pixel_size"] == [0.25, 0.25, "µm"]
     assert report["verification"]["channel_sample_layout_matches"] is True
     assert report["verification"]["top_level_ifd_count_matches"] is True
     assert report["verification"]["compression_matches_requested"] is True
@@ -363,8 +367,7 @@ def test_aperio_svs_reads_mpp_and_drops_vendor_description(tmp_path: Path) -> No
     )
 
     assert report["input_file"]["source_axes"] == "YXS"
-    assert report["image"]["physical_size_x_um"] == pytest.approx(0.4990)
-    assert report["image"]["physical_size_y_um"] == pytest.approx(0.4990)
+    assert report["image"]["pixel_size"] == [0.499, 0.499, "µm"]
     assert report["image"]["icc_profile_present"] is True
     assert report["verification"]["icc_profile_preserved"] is True
     assert report["verification"]["base_pixel_values_match"] is True
@@ -666,12 +669,16 @@ def test_click_group_exposes_version_inspect_and_convert() -> None:
     result = CliRunner().invoke(main, ["version", "--json"])
     assert result.exit_code == 0
     version_info = json.loads(result.output)
-    assert version_info["omeify"] == "0.7.0"
+    assert version_info["omeify"] == "0.8.0"
     assert "tifffile" in version_info
 
     eager_result = CliRunner().invoke(main, ["--version"])
-    assert eager_result.exit_code == 0
-    assert eager_result.output.strip() == "omeify 0.7.0"
+    assert eager_result.exit_code != 0
+    assert "No such option" in eager_result.output
+
+    empty_result = CliRunner().invoke(main, [])
+    assert empty_result.exit_code == 0
+    assert "Commands:" in empty_result.output
 
     help_result = CliRunner().invoke(main, ["--help"])
     assert help_result.exit_code == 0
@@ -737,7 +744,7 @@ def test_pyproject_is_the_version_authority() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with pyproject.open("rb") as handle:
         project_version = tomllib.load(handle)["project"]["version"]
-    assert __version__ == project_version == "0.7.0"
+    assert __version__ == project_version == "0.8.0"
 
 
 def test_bundled_miti_json_schema_is_available() -> None:

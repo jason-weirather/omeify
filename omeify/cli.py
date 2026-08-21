@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,37 +11,75 @@ import click
 from omeify import __version__, get_version_info
 from omeify.inputs import (
     AkoyaComponentTiff,
+    AkoyaFusionQPTiff,
     AkoyaHEQptiff,
     AkoyaMIFQptiff,
     AperioSVS,
     HaloMIFTiff,
 )
 from omeify.inspection import TiffInspector
+from omeify.io.channel import RenameChannelsBy
+from omeify.io.pixel_size import PixelSize
 
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+_INDEX_KEY = re.compile(r"0|[1-9][0-9]*")
 
 
-def _root_version_callback(ctx: click.Context, param: click.Parameter, value: bool) -> None:
-    if not value or ctx.resilient_parsing:
-        return
-    click.echo(f"omeify {__version__}")
-    ctx.exit()
+class _SubcommandOnlyGroup(click.Group):
+    """Show help when empty, but reject every non-subcommand first token.
+
+    Click treats absolute POSIX paths as option-like tokens while resolving a
+    group and can otherwise turn the legacy ``omeify INPUT OUTPUT`` form into
+    a successful help display. Resolve the command name before Click's option
+    parser gets that opportunity.
+    """
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        if args and not args[0].startswith("-") and args[0] not in self.commands:
+            ctx.fail(f"No such command {args[0]!r}.")
+        return super().parse_args(ctx, args)
 
 
-def _load_channel_renames(path: Path | None) -> dict[str, str]:
+def _load_channel_renames(
+    path: Path | None,
+    by: RenameChannelsBy | None,
+) -> tuple[dict[str, str] | dict[int, str], RenameChannelsBy | None]:
     if path is None:
-        return {}
+        if by is not None:
+            raise click.UsageError(
+                "--rename-channels-by requires --rename-channels-json"
+            )
+        return {}, None
+    if by is None:
+        raise click.UsageError(
+            "--rename-channels-by name|index is required with --rename-channels-json"
+        )
     try:
         value: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise click.ClickException(f"Unable to read channel rename JSON {path}: {exc}") from exc
-    if not isinstance(value, dict) or not all(
-        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
-    ):
+    if not isinstance(value, dict):
+        raise click.ClickException("Channel rename JSON must contain one JSON object")
+    if not all(isinstance(item, str) and item.strip() for item in value.values()):
+        raise click.ClickException("Channel rename values must be non-empty strings")
+
+    if by == "name":
+        ambiguous = [key for key in value if _INDEX_KEY.fullmatch(str(key))]
+        if ambiguous:
+            raise click.ClickException(
+                "Name-based channel rename JSON contains integer-like keys "
+                f"({', '.join(repr(item) for item in ambiguous)}); use "
+                "--rename-channels-by index for numerical channel indices"
+            )
+        return {str(key): str(item).strip() for key, item in value.items()}, by
+
+    invalid = [str(key) for key in value if not _INDEX_KEY.fullmatch(str(key))]
+    if invalid:
         raise click.ClickException(
-            "Channel rename JSON must be an object mapping strings to strings"
+            "Index-based channel rename keys must all be zero-based integer strings; "
+            f"invalid keys: {', '.join(repr(item) for item in invalid)}"
         )
-    return value
+    return {int(key): str(item).strip() for key, item in value.items()}, by
 
 
 def _write_or_echo(rendered: str, output: Path | None) -> None:
@@ -51,15 +90,7 @@ def _write_or_echo(rendered: str, output: Path | None) -> None:
     output.write_text(rendered.rstrip("\n") + "\n", encoding="utf-8")
 
 
-@click.group(context_settings=_CONTEXT_SETTINGS)
-@click.option(
-    "--version",
-    is_flag=True,
-    is_eager=True,
-    expose_value=False,
-    callback=_root_version_callback,
-    help="Display the omeify version and exit.",
-)
+@click.group(cls=_SubcommandOnlyGroup, context_settings=_CONTEXT_SETTINGS)
 def main() -> None:
     """Convert, inspect, and read standardized TIFF-family images."""
 
@@ -76,15 +107,36 @@ def main() -> None:
 @click.option(
     "--type",
     "input_type",
-    type=click.Choice(["qptiff_mif", "qptiff_he", "svs", "halo_mif", "component"]),
+    type=click.Choice(
+        [
+            "qptiff_mif",
+            "qptiff_fusion",
+            "qptiff_he",
+            "svs",
+            "halo_mif",
+            "component",
+        ]
+    ),
     required=True,
     help="Input image profile.",
 )
 @click.option("--series", type=click.IntRange(min=0), default=0, show_default=True)
 @click.option(
+    "--channel-name-field",
+    type=click.Choice(["name", "biomarker", "auto"]),
+    default=None,
+    help="Fusion QPTIFF field used for normalized channel names.",
+)
+@click.option(
     "--rename-channels-json",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="JSON object mapping source channel names to output names.",
+    help="JSON object mapping source names or zero-based indices to output names.",
+)
+@click.option(
+    "--rename-channels-by",
+    type=click.Choice(["name", "index"]),
+    default=None,
+    help="Interpret rename JSON keys explicitly as channel names or indices.",
 )
 @click.option("--omit-uuid", is_flag=True, help="Omit the optional OME root UUID.")
 @click.option(
@@ -101,7 +153,7 @@ def main() -> None:
     "--compression",
     type=click.Choice(["LZW", "Deflate", "ZSTD", "JPEG", "Uncompressed"], case_sensitive=False),
     default=None,
-    help="Default: JPEG for qptiff_he/svs; LZW for planar mIF/component inputs.",
+    help="Default: JPEG for qptiff_he/svs; LZW for planar inputs.",
 )
 @click.option(
     "--jpeg-quality",
@@ -142,15 +194,13 @@ def main() -> None:
     default=None,
     help="Maximum parallel TIFF compression workers.",
 )
+@click.option("--pixel-size-x", type=click.FloatRange(min=0, min_open=True), default=None)
+@click.option("--pixel-size-y", type=click.FloatRange(min=0, min_open=True), default=None)
 @click.option(
-    "--physical-size-x-um",
-    type=click.FloatRange(min=0, min_open=True),
+    "--pixel-size-unit",
+    type=str,
     default=None,
-)
-@click.option(
-    "--physical-size-y-um",
-    type=click.FloatRange(min=0, min_open=True),
-    default=None,
+    help="Physical-size unit for explicit component-image calibration; default µm.",
 )
 @click.option("--overwrite/--no-overwrite", default=True, show_default=True)
 @click.option("--checksums/--no-checksums", default=True, show_default=True)
@@ -160,7 +210,9 @@ def convert_command(
     output_path: Path,
     input_type: str,
     series: int,
+    channel_name_field: str | None,
     rename_channels_json: Path | None,
+    rename_channels_by: str | None,
     omit_uuid: bool,
     output_json: Path | None,
     cache_directory: Path | None,
@@ -171,8 +223,9 @@ def convert_command(
     pyramid_levels: int | None,
     downsample: str,
     workers: int | None,
-    physical_size_x_um: float | None,
-    physical_size_y_um: float | None,
+    pixel_size_x: float | None,
+    pixel_size_y: float | None,
+    pixel_size_unit: str | None,
     overwrite: bool,
     checksums: bool,
     verbose: int,
@@ -181,32 +234,57 @@ def convert_command(
 
     log_level = logging.DEBUG if verbose >= 2 else logging.INFO if verbose == 1 else logging.WARNING
     logging.basicConfig(level=log_level, format="%(levelname)s %(name)s: %(message)s")
-    rename_channels = _load_channel_renames(rename_channels_json)
+    rename_channels, rename_mode = _load_channel_renames(
+        rename_channels_json,
+        rename_channels_by,  # type: ignore[arg-type]
+    )
 
     if output_json is not None:
         report_path = output_json.resolve()
         if report_path in {input_path.resolve(), output_path.resolve()}:
             raise click.UsageError("--output-json must differ from both image paths")
 
+    if input_type != "qptiff_fusion" and channel_name_field is not None:
+        raise click.UsageError("--channel-name-field is only valid with --type qptiff_fusion")
+
+    explicit_pixel_values = (pixel_size_x, pixel_size_y, pixel_size_unit)
+    if input_type != "component" and any(item is not None for item in explicit_pixel_values):
+        raise click.UsageError(
+            "--pixel-size-x/--pixel-size-y/--pixel-size-unit are only valid for component TIFFs"
+        )
+
+    common = {
+        "series": series,
+        "rename_channels": rename_channels,
+        "rename_channels_by": rename_mode,
+    }
     if input_type == "qptiff_mif":
-        processor = AkoyaMIFQptiff(input_path, series=series, rename_channels=rename_channels)
+        processor = AkoyaMIFQptiff(input_path, **common)
+    elif input_type == "qptiff_fusion":
+        processor = AkoyaFusionQPTiff(
+            input_path,
+            channel_name_field=channel_name_field or "auto",  # type: ignore[arg-type]
+            **common,
+        )
     elif input_type == "qptiff_he":
-        processor = AkoyaHEQptiff(input_path, series=series, rename_channels=rename_channels)
+        processor = AkoyaHEQptiff(input_path, **common)
     elif input_type == "svs":
-        processor = AperioSVS(input_path, series=series, rename_channels=rename_channels)
+        processor = AperioSVS(input_path, **common)
     elif input_type == "halo_mif":
-        processor = HaloMIFTiff(input_path, series=series, rename_channels=rename_channels)
+        processor = HaloMIFTiff(input_path, **common)
     elif input_type == "component":
-        if physical_size_x_um is None or physical_size_y_um is None:
+        if pixel_size_x is None or pixel_size_y is None:
             raise click.UsageError(
-                "--physical-size-x-um and --physical-size-y-um are required for component TIFFs"
+                "--pixel-size-x and --pixel-size-y are required for component TIFFs"
             )
         processor = AkoyaComponentTiff(
             input_path,
-            series=series,
-            physical_size_x_um=physical_size_x_um,
-            physical_size_y_um=physical_size_y_um,
-            rename_channels=rename_channels,
+            pixel_size=PixelSize(
+                pixel_size_x,
+                pixel_size_y,
+                pixel_size_unit or "µm",
+            ),
+            **common,
         )
     else:
         raise AssertionError(input_type)
