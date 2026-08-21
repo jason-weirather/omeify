@@ -656,26 +656,36 @@ def test_compatibility_features_expose_old_metadata_properties(tmp_path: Path) -
     assert features.type == "uint16"
 
 
-def test_click_version_is_eager_and_json() -> None:
+def test_click_group_exposes_version_inspect_and_convert() -> None:
     import json
 
     from click.testing import CliRunner
 
     from omeify.cli import main
 
-    result = CliRunner().invoke(main, ["--version"])
+    result = CliRunner().invoke(main, ["version", "--json"])
     assert result.exit_code == 0
     version_info = json.loads(result.output)
-    assert version_info["omeify"] == "0.5.0"
+    assert version_info["omeify"] == "0.6.0"
     assert "tifffile" in version_info
+
+    eager_result = CliRunner().invoke(main, ["--version"])
+    assert eager_result.exit_code == 0
+    assert eager_result.output.strip() == "omeify 0.6.0"
 
     help_result = CliRunner().invoke(main, ["--help"])
     assert help_result.exit_code == 0
-    assert "--strict-miti" not in help_result.output
-    assert "qptiff_he" in help_result.output
-    assert "svs" in help_result.output
-    assert "--jpeg-quality" in help_result.output
-    assert "--jpeg-subsampling" in help_result.output
+    assert "convert" in help_result.output
+    assert "inspect" in help_result.output
+    assert "version" in help_result.output
+
+    convert_help = CliRunner().invoke(main, ["convert", "--help"])
+    assert convert_help.exit_code == 0
+    assert "--strict-miti" not in convert_help.output
+    assert "qptiff_he" in convert_help.output
+    assert "svs" in convert_help.output
+    assert "--jpeg-quality" in convert_help.output
+    assert "--jpeg-subsampling" in convert_help.output
 
 
 def test_cli_svs_type_routes_to_rgb_converter(tmp_path: Path) -> None:
@@ -693,6 +703,7 @@ def test_cli_svs_type_routes_to_rgb_converter(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         main,
         [
+            "convert",
             str(source),
             str(output),
             "--type",
@@ -726,7 +737,7 @@ def test_pyproject_is_the_version_authority() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with pyproject.open("rb") as handle:
         project_version = tomllib.load(handle)["project"]["version"]
-    assert __version__ == project_version == "0.5.0"
+    assert __version__ == project_version == "0.6.0"
 
 
 def test_bundled_miti_json_schema_is_available() -> None:

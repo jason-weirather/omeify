@@ -7,7 +7,7 @@ from typing import Any
 
 import click
 
-from omeify import get_version_info
+from omeify import __version__, get_version_info
 from omeify.inputs import (
     AkoyaComponentTiff,
     AkoyaHEQptiff,
@@ -15,12 +15,15 @@ from omeify.inputs import (
     AperioSVS,
     HaloMIFTiff,
 )
+from omeify.inspection import TiffInspector
+
+_CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 
-def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+def _root_version_callback(ctx: click.Context, param: click.Parameter, value: bool) -> None:
     if not value or ctx.resilient_parsing:
         return
-    click.echo(json.dumps(get_version_info(), indent=2))
+    click.echo(f"omeify {__version__}")
     ctx.exit()
 
 
@@ -40,7 +43,28 @@ def _load_channel_renames(path: Path | None) -> dict[str, str]:
     return value
 
 
-@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+def _write_or_echo(rendered: str, output: Path | None) -> None:
+    if output is None:
+        click.echo(rendered)
+        return
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(rendered.rstrip("\n") + "\n", encoding="utf-8")
+
+
+@click.group(context_settings=_CONTEXT_SETTINGS)
+@click.option(
+    "--version",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_root_version_callback,
+    help="Display the omeify version and exit.",
+)
+def main() -> None:
+    """Convert, inspect, and read standardized TIFF-family images."""
+
+
+@main.command("convert", context_settings=_CONTEXT_SETTINGS)
 @click.argument(
     "input_path",
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
@@ -104,7 +128,7 @@ def _load_channel_renames(path: Path | None) -> dict[str, str]:
     "--pyramid-levels",
     type=click.IntRange(min=0),
     default=None,
-    help="Number of subresolution levels.  By default, build until the image fits one tile.",
+    help="Number of subresolution levels. By default, build until the image fits one tile.",
 )
 @click.option(
     "--downsample",
@@ -131,15 +155,7 @@ def _load_channel_renames(path: Path | None) -> dict[str, str]:
 @click.option("--overwrite/--no-overwrite", default=True, show_default=True)
 @click.option("--checksums/--no-checksums", default=True, show_default=True)
 @click.option("-v", "--verbose", count=True, help="Increase logging verbosity.")
-@click.option(
-    "--version",
-    is_flag=True,
-    is_eager=True,
-    expose_value=False,
-    callback=_version_callback,
-    help="Display omeify and dependency versions as JSON.",
-)
-def main(
+def convert_command(
     input_path: Path,
     output_path: Path,
     input_type: str,
@@ -223,6 +239,77 @@ def main(
     else:
         output_json.parent.mkdir(parents=True, exist_ok=True)
         output_json.write_text(rendered + "\n", encoding="utf-8")
+
+
+@main.command("inspect", context_settings=_CONTEXT_SETTINGS)
+@click.argument(
+    "input_path",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "-d",
+    "--detail",
+    type=click.IntRange(min=0, max=3),
+    default=1,
+    show_default=True,
+    help="0=file/series, 1=levels+OME, 2=pages/frames, 3=tags/descriptions.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the schema-backed report as JSON instead of a text tree.",
+)
+@click.option(
+    "--max-text-length",
+    type=click.IntRange(min=0),
+    default=240,
+    show_default=True,
+    help="Maximum tag/description preview length; use 0 for no truncation.",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Write the report to a file instead of stdout.",
+)
+def inspect_command(
+    input_path: Path,
+    detail: int,
+    as_json: bool,
+    max_text_length: int,
+    output: Path | None,
+) -> None:
+    """Inspect any TIFF at INPUT_PATH without reading its image pixels."""
+
+    if output is not None and output.resolve() == input_path.resolve():
+        raise click.UsageError("--output must differ from INPUT_PATH")
+    try:
+        inspector = TiffInspector(
+            input_path,
+            detail=detail,
+            max_text_length=None if max_text_length == 0 else max_text_length,
+        )
+        rendered = inspector.to_json() if as_json else inspector.render_text()
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+    _write_or_echo(rendered, output)
+
+
+@main.command("version", context_settings=_CONTEXT_SETTINGS)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Include the Python and image-I/O dependency versions as JSON.",
+)
+def version_command(as_json: bool) -> None:
+    """Display the installed omeify version."""
+
+    if as_json:
+        click.echo(json.dumps(get_version_info(), indent=2))
+    else:
+        click.echo(f"omeify {__version__}")
 
 
 if __name__ == "__main__":

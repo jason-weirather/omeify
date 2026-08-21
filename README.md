@@ -15,6 +15,8 @@ guidelines (Schapiro et. al. Nat Methods. 2022).
 - Rebuild pyramid levels from full resolution rather than trusting source pyramids
 - Keep peak memory bounded by processing strips and tiles instead of materializing a whole slide
 - Fail on unsupported layouts or dtypes rather than silently coercing data
+- Inspect the hierarchy and metadata of any TIFF without decoding the image raster
+- Provide a context-managed Python reader for standardized OME-TIFF images
 
 ## Supported inputs
 
@@ -197,10 +199,23 @@ code reads it from distribution metadata; direct source-tree imports fall back t
 
 ## CLI
 
+`omeify` is a command group with three public subcommands:
+
+```text
+omeify convert   Convert a supported source into standardized OME-TIFF
+omeify inspect   Summarize any TIFF as a text tree or schema-backed JSON
+omeify version   Show the omeify version
+```
+
+### Convert
+
+Conversion behavior and options are unchanged; they now live under the explicit `convert`
+subcommand.
+
 Planar Akoya mIF:
 
 ```bash
-omeify input.qptiff output.ome.tif \
+omeify convert input.qptiff output.ome.tif \
   --type qptiff_mif \
   --compression LZW \
   --tile-size 1024 \
@@ -211,7 +226,7 @@ omeify input.qptiff output.ome.tif \
 Akoya H&E QPTIFF using the brightfield JPEG defaults:
 
 ```bash
-omeify H32_HE.qptiff H32_HE.ome.tif \
+omeify convert H32_HE.qptiff H32_HE.ome.tif \
   --type qptiff_he \
   --tile-size 1024
 ```
@@ -219,13 +234,13 @@ omeify H32_HE.qptiff H32_HE.ome.tif \
 Aperio SVS with an explicit quality setting:
 
 ```bash
-omeify CMU-1.svs CMU-1.ome.tif \
+omeify convert CMU-1.svs CMU-1.ome.tif \
   --type svs \
   --jpeg-quality 92 \
   --jpeg-subsampling 444
 ```
 
-Useful options:
+Useful conversion options:
 
 ```text
 --compression NAME        LZW, Deflate, ZSTD, JPEG, or Uncompressed
@@ -244,6 +259,47 @@ shows that the desired full-resolution image is elsewhere.
 
 The conversion report keeps separate `ome`, `miti_header`, and `verification` sections so XML
 validity, header-profile validity, and binary-image verification remain distinct.
+
+### Inspect
+
+The default report is a compact tree of the file, OME header when present, series, and pyramid
+levels. Inspection reads TIFF directories and metadata but does not materialize the image raster.
+It works for any TIFF layout understood by `tifffile`, not only formats accepted by `convert`.
+
+```bash
+omeify inspect image.tif
+omeify inspect image.tif --detail 2
+omeify inspect image.tif --detail 3 --max-text-length 500
+omeify inspect image.tif --json --output inspection.json
+```
+
+Detail levels are cumulative:
+
+```text
+0  file and series summaries
+1  pyramid levels plus OME image, dimension, channel, and physical-size metadata
+2  TIFF pages and lightweight frames
+3  TIFF tags and parsed XML or plain-text ImageDescription values
+```
+
+The JSON representation is defined by:
+
+```text
+omeify/schemas/tiff_inspection.schema.json
+```
+
+For an OME-TIFF, `inspect` parses the OME header rather than guessing channel names, dimension
+sizes, dimension order, or physical pixel sizes from TIFF pages alone.
+
+### Version
+
+```bash
+omeify version
+omeify version --json
+```
+
+The plain command prints only the omeify version. `--json` includes the Python, tifffile,
+imagecodecs, NumPy, Click, XML, and schema-library versions used by the installation.
 
 ## Python API
 
@@ -280,6 +336,33 @@ svs_report = AperioSVS("CMU-1.svs").convert(
     compression="JPEG",
 )
 ```
+
+### OME-TIFF reader and image interfaces
+
+The generic interfaces `MultichannelImage`, `RGBImage`, and `LabelImage` define the initial
+contracts for image readers. `OMETiffReader` is the first concrete multichannel reader and keeps
+the underlying TIFF open for efficient metadata and regional access:
+
+```python
+from omeify import OMETiffReader
+
+with OMETiffReader("output.ome.tif") as ome:
+    print(ome)  # same default tree as: omeify inspect output.ome.tif
+    print(ome.axes, ome.shape, ome.dtype)
+    print(ome.channel_names)
+
+    patch = ome.read_region(
+        y0=10_000,
+        y1=11_024,
+        x0=20_000,
+        x1=21_024,
+        channels=[0, 3, 7],
+    )
+```
+
+`read_region` supports the common planar `CYX`, grayscale `YX`, and interleaved `YXS` OME-TIFF
+layouts without materializing the whole slide. `asarray(level=N)` remains available when loading
+an entire pyramid level is intentional.
 
 ## I/O strategy
 
