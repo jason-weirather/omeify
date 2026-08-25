@@ -237,11 +237,6 @@ def convert_command(
             pixel_size_y,
             pixel_size_unit or "µm",
         )
-    if input_type == "component" and pixel_size is None:
-        raise click.UsageError(
-            "--pixel-size-x and --pixel-size-y are required for component TIFFs"
-        )
-
     try:
         report = convert(
             input_path,

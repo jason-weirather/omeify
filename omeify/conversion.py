@@ -175,8 +175,6 @@ def _reader_for_input(
     if input_type == "component":
         if channel_name_field is not None:
             raise ValueError("channel_name_field is only valid for qptiff_fusion input")
-        if component_pixel_size is None:
-            raise ValueError("component input requires an explicit pixel_size")
         return AkoyaComponentTiffReader(
             input_path,
             series=series,

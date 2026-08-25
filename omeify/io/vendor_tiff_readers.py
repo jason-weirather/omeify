@@ -30,7 +30,6 @@ from .indica_mif import (
 from .pixel_size import (
     PixelSize,
     consistent_tiff_resolution_pixel_size,
-    pixel_size_from_tiff_resolution,
 )
 from .tiff import TiffPlaneReader
 
@@ -362,6 +361,13 @@ class _VendorTiffReader(MultichannelImage):
                 names.append(normalized_name)
                 metadata.append(source)
             pixel_size = consistent_akoya_pixel_size(parsed, self._pages)
+            if pixel_size is not None and any(
+                item.pixel_size_microns is None for item in parsed
+            ):
+                self._warn_tiff_resolution_fallback(
+                    "Akoya PixelSizeMicrons",
+                    pixel_size=pixel_size,
+                )
             self._pixel_size = self.pixel_size_override or pixel_size
         elif self.profile == "indica_mif":
             metadata_value = getattr(self, "_indica_metadata", None)
@@ -377,9 +383,8 @@ class _VendorTiffReader(MultichannelImage):
             pixel_size = consistent_tiff_resolution_pixel_size(self._pages)
             self._pixel_size = self.pixel_size_override or pixel_size
         elif self.profile == "component":
-            if self.pixel_size_override is None:
-                raise ValueError("AkoyaComponentTiffReader requires an explicit pixel_size")
-            self._pixel_size = self.pixel_size_override
+            pixel_size = consistent_tiff_resolution_pixel_size(self._pages)
+            self._pixel_size = self.pixel_size_override or pixel_size
             for index, page in enumerate(self._pages):
                 name = self._tolerant_akoya_name(page) or f"Channel {index + 1}"
                 names.append(name)
@@ -389,7 +394,12 @@ class _VendorTiffReader(MultichannelImage):
                 name = self._tolerant_akoya_name(page) or f"Channel {index + 1}"
                 names.append(name)
                 metadata.append({"name": name})
-            self._pixel_size = self.pixel_size_override or self._akoya_pixel_size(page0)
+            source_pixel_size = self._akoya_description_pixel_size(page0)
+            if source_pixel_size is None:
+                source_pixel_size = self._warn_tiff_resolution_fallback(
+                    "Akoya PixelSizeMicrons"
+                )
+            self._pixel_size = self.pixel_size_override or source_pixel_size
 
         self._source_channel_metadata = tuple(metadata)
         self._normalized_names = tuple(names)
@@ -425,9 +435,15 @@ class _VendorTiffReader(MultichannelImage):
             )
 
         if self.profile == "svs":
-            source_pixel_size = self._svs_pixel_size(page)
+            source_pixel_size = self._svs_description_pixel_size(page)
+            if source_pixel_size is None:
+                source_pixel_size = self._warn_tiff_resolution_fallback("Aperio MPP")
         else:
-            source_pixel_size = self._akoya_pixel_size(page)
+            source_pixel_size = self._akoya_description_pixel_size(page)
+            if source_pixel_size is None:
+                source_pixel_size = self._warn_tiff_resolution_fallback(
+                    "Akoya PixelSizeMicrons"
+                )
         self._pixel_size = self.pixel_size_override or source_pixel_size
         self._icc_profile = bytes(page.iccprofile) if page.iccprofile is not None else None
         self._normalized_names = ("RGB",)
@@ -441,7 +457,7 @@ class _VendorTiffReader(MultichannelImage):
         return _first_child_text(root, "Name") or _first_descendant_text(root, "Name")
 
     @staticmethod
-    def _akoya_pixel_size(page: tifffile.TiffPage) -> PixelSize | None:
+    def _akoya_description_pixel_size(page: tifffile.TiffPage) -> PixelSize | None:
         try:
             parsed = parse_akoya_qpi_channel_metadata(page.description, channel_index=0)
         except ValueError:
@@ -456,15 +472,33 @@ class _VendorTiffReader(MultichannelImage):
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"Invalid Akoya PixelSizeMicrons={raw!r}")
             return PixelSize(value, value, "µm")
-        return pixel_size_from_tiff_resolution(page)
+        return None
 
     @staticmethod
-    def _svs_pixel_size(page: tifffile.TiffPage) -> PixelSize | None:
+    def _svs_description_pixel_size(page: tifffile.TiffPage) -> PixelSize | None:
         match = _APERIO_MPP_PATTERN.search(page.description or "")
         if match is not None:
             value = float(match.group("value"))
             return PixelSize(value, value, "µm")
-        return pixel_size_from_tiff_resolution(page)
+        return None
+
+    def _warn_tiff_resolution_fallback(
+        self,
+        expected_metadata: str,
+        *,
+        pixel_size: PixelSize | None = None,
+    ) -> PixelSize | None:
+        if pixel_size is None:
+            pixel_size = consistent_tiff_resolution_pixel_size(self._pages)
+        if pixel_size is not None:
+            LOGGER.warning(
+                "%s does not provide expected %s calibration; using TIFF "
+                "XResolution/YResolution/ResolutionUnit tags (%s).",
+                self.input_type_description,
+                expected_metadata,
+                pixel_size.to_tuple(),
+            )
+        return pixel_size
 
     def _selected_level(self, level: int) -> tifffile.TiffPageSeries:
         level_index = int(level)
@@ -731,6 +765,6 @@ class AkoyaComponentTiffReader(_VendorTiffReader):
         path: str | Path,
         *,
         series: int = 0,
-        pixel_size: PixelSize,
+        pixel_size: PixelSize | None = None,
     ) -> None:
         super().__init__(path, series=series, pixel_size=pixel_size)

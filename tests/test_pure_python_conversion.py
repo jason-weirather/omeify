@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
 import pytest
 import tifffile
 
-from omeify import IndicaMIFTiffReader, OMETiffReader, PixelSize, convert
+from omeify import (
+    AkoyaMIFQPTiffReader,
+    AperioSVSReader,
+    IndicaMIFTiffReader,
+    OMETiffReader,
+    PixelSize,
+    TiffInspector,
+    convert,
+)
 from omeify.io.ome_tiff_writer import _compression_settings, _mean_downsample_2x
 
 
@@ -63,18 +72,29 @@ def _mean2_rgb(array: np.ndarray) -> np.ndarray:
     return output
 
 
-def _akoya_description(channel_name: str, pixel_size_um: float = 0.5) -> str:
+def _akoya_description(channel_name: str, pixel_size_um: float | None = 0.5) -> str:
+    pixel_size = (
+        f"<PixelSizeMicrons>{pixel_size_um}</PixelSizeMicrons>"
+        if pixel_size_um is not None
+        else ""
+    )
     return (
         "<PerkinElmer-QPI-ImageDescription>"
         f"<Name>{channel_name}</Name>"
         "<ScanProfile><root><ScanResolution>"
-        f"<PixelSizeMicrons>{pixel_size_um}</PixelSizeMicrons>"
+        f"{pixel_size}"
         "</ScanResolution></root></ScanProfile>"
         "</PerkinElmer-QPI-ImageDescription>"
     )
 
 
-def _write_synthetic_qptiff(path: Path, base: np.ndarray) -> None:
+def _write_synthetic_qptiff(
+    path: Path,
+    base: np.ndarray,
+    *,
+    pixel_size_um: float | None = 0.5,
+    tiff_pixel_size: tuple[float, float] | None = None,
+) -> None:
     channel_names = [f"Akoya {index + 1}" for index in range(base.shape[0])]
     source_pyramid = np.full(
         (base.shape[0], base.shape[1] // 2, base.shape[2] // 2),
@@ -87,13 +107,22 @@ def _write_synthetic_qptiff(path: Path, base: np.ndarray) -> None:
     # thumbnail, and then channel IFDs for each reduced-resolution level.
     with tifffile.TiffWriter(path, bigtiff=True) as writer:
         for index, plane in enumerate(base):
-            writer.write(
-                plane,
-                tile=(16, 16),
-                description=_akoya_description(channel_names[index]),
-                software="PerkinElmer-QPI synthetic" if index == 0 else False,
-                metadata=None,
-            )
+            options = {
+                "tile": (16, 16),
+                "description": _akoya_description(
+                    channel_names[index],
+                    pixel_size_um=pixel_size_um,
+                ),
+                "software": "PerkinElmer-QPI synthetic" if index == 0 else False,
+                "metadata": None,
+            }
+            if tiff_pixel_size is not None:
+                options["resolution"] = (
+                    1e4 / tiff_pixel_size[0],
+                    1e4 / tiff_pixel_size[1],
+                )
+                options["resolutionunit"] = "CENTIMETER"
+            writer.write(plane, **options)
         writer.write(
             thumbnail,
             description=_akoya_description("Thumbnail"),
@@ -218,24 +247,32 @@ def _write_synthetic_svs(
     path: Path,
     base: np.ndarray,
     *,
-    mpp: float = 0.4990,
+    mpp: float | None = 0.4990,
     icc_profile: bytes | None = None,
+    tiff_pixel_size: tuple[float, float] | None = None,
 ) -> None:
+    mpp_text = f"|MPP = {mpp:.4f}" if mpp is not None else ""
     description = (
         f"Aperio Image Library v10.0.51 {base.shape[1]}x{base.shape[0]} "
         f"[0,0 {base.shape[1]}x{base.shape[0]}] (16x16) JPEG/RGB Q=30"
-        f"|AppMag = 20|MPP = {mpp:.4f}|Filename = secret-slide"
+        f"|AppMag = 20{mpp_text}|Filename = secret-slide"
         "|User = not-for-output|ImageID = 1004486|ICC Profile = ScanScope v1"
     )
-    with tifffile.TiffWriter(path) as writer:
-        writer.write(
-            base,
-            tile=(16, 16),
-            photometric="rgb",
-            description=description,
-            iccprofile=icc_profile,
-            metadata=None,
+    options = {
+        "tile": (16, 16),
+        "photometric": "rgb",
+        "description": description,
+        "iccprofile": icc_profile,
+        "metadata": None,
+    }
+    if tiff_pixel_size is not None:
+        options["resolution"] = (
+            1e4 / tiff_pixel_size[0],
+            1e4 / tiff_pixel_size[1],
         )
+        options["resolutionunit"] = "CENTIMETER"
+    with tifffile.TiffWriter(path) as writer:
+        writer.write(base, **options)
 
 
 @pytest.mark.parametrize("dtype", [np.uint8, np.uint16])
@@ -352,6 +389,27 @@ def test_akoya_qptiff_profile_ignores_source_pyramid(tmp_path: Path) -> None:
         )
 
 
+def test_akoya_mif_missing_pixel_size_uses_tiff_resolution_with_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
+    source = tmp_path / "source-resolution-fallback.qptiff"
+    _write_synthetic_qptiff(
+        source,
+        data,
+        pixel_size_um=None,
+        tiff_pixel_size=(0.5, 0.4),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with AkoyaMIFQPTiffReader(source) as reader:
+            assert reader.pixel_size == PixelSize(0.5, 0.4, "µm")
+
+    assert "does not provide expected Akoya PixelSizeMicrons calibration" in caplog.text
+    assert "using TIFF XResolution/YResolution/ResolutionUnit tags" in caplog.text
+
+
 def test_akoya_he_qptiff_writes_one_interleaved_rgb_ifd(tmp_path: Path) -> None:
     data = (
         np.arange(35 * 49 * 3, dtype=np.uint16).reshape(35, 49, 3) % 251
@@ -435,6 +493,25 @@ def test_indica_mif_reader_parses_channels_ifd_map_and_tiff_resolution(
             reader[1].read_region(3, 9, 4, 12),
             data[1, 3:9, 4:12],
         )
+
+
+def test_indica_inspection_reports_tiff_resolution_without_warning(
+    tmp_path: Path,
+) -> None:
+    data = np.arange(2 * 35 * 49, dtype=np.float32).reshape(2, 35, 49)
+    source = tmp_path / "halo-mif-inspect.tif"
+    _write_synthetic_indica_mif(source, data)
+
+    inspector = TiffInspector(source)
+    report = inspector.report
+
+    assert report["warnings"] == []
+    assert report["series"][0]["tiff_resolution_pixel_size"] == {
+        "x": {"value": 0.5, "unit": "µm"},
+        "y": {"value": 0.4, "unit": "µm"},
+        "z": None,
+    }
+    assert "TIFF resolution pixel size: X=0.5 µm, Y=0.4 µm" in inspector.render_text()
 
 
 def test_indica_mif_conversion_rebuilds_pyramid_and_writes_micrometer_scale(
@@ -553,6 +630,27 @@ def test_aperio_svs_reads_mpp_and_drops_vendor_description(tmp_path: Path) -> No
         assert "not-for-output" not in tif.ome_metadata
         assert "ImageID = 1004486" not in tif.pages[0].description
         assert bytes(tif.pages[0].iccprofile) == icc_profile
+
+
+def test_aperio_missing_mpp_uses_tiff_resolution_with_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    data = np.arange(32 * 48 * 3, dtype=np.uint8).reshape(32, 48, 3)
+    source = tmp_path / "source-resolution-fallback.svs"
+    _write_synthetic_svs(
+        source,
+        data,
+        mpp=None,
+        tiff_pixel_size=(0.5, 0.4),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with AperioSVSReader(source) as reader:
+            assert reader.pixel_size == PixelSize(0.5, 0.4, "µm")
+
+    assert "does not provide expected Aperio MPP calibration" in caplog.text
+    assert "using TIFF XResolution/YResolution/ResolutionUnit tags" in caplog.text
 
 
 def test_brightfield_profiles_default_to_conservative_jpeg_policy() -> None:

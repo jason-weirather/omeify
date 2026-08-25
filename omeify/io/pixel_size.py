@@ -8,6 +8,9 @@ import numpy as np
 import tifffile
 
 
+_TIFF_RESOLUTION_SIGNIFICANT_DIGITS = 6
+
+
 # Conversion factors are deliberately kept outside PixelSize validation. PixelSize
 # is a generic immutable value object; format-specific code decides whether a unit
 # is acceptable for serialization.
@@ -187,11 +190,20 @@ def _resolution_value(value: object) -> float:
     return float(value)
 
 
+def _round_significant(value: float, digits: int) -> float:
+    if not math.isfinite(value) or value == 0:
+        return value
+    decimal_places = digits - 1 - math.floor(math.log10(abs(value)))
+    return round(value, decimal_places)
+
+
 def pixel_size_from_tiff_resolution(page: tifffile.TiffPage) -> PixelSize | None:
     """Read physical X/Y pixel size from standard TIFF resolution tags.
 
     TIFF stores resolution as pixels per physical unit. Centimeter and inch
-    calibrations are normalized to micrometers for use by source readers.
+    calibrations are normalized to micrometers for use by source readers. The
+    derived values are rounded to six significant digits because TIFF rational
+    encodings often expose meaningless floating-point tails.
     """
 
     try:
@@ -200,12 +212,20 @@ def pixel_size_from_tiff_resolution(page: tifffile.TiffPage) -> PixelSize | None
         unit_value = int(page.tags["ResolutionUnit"].value)
     except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return None
-    if x_ppu <= 0 or y_ppu <= 0:
+    if not math.isfinite(x_ppu) or not math.isfinite(y_ppu) or x_ppu <= 0 or y_ppu <= 0:
         return None
     if unit_value == 3:  # centimeter
-        return PixelSize(1e4 / x_ppu, 1e4 / y_ppu, "µm")
+        return PixelSize(
+            _round_significant(1e4 / x_ppu, _TIFF_RESOLUTION_SIGNIFICANT_DIGITS),
+            _round_significant(1e4 / y_ppu, _TIFF_RESOLUTION_SIGNIFICANT_DIGITS),
+            "µm",
+        )
     if unit_value == 2:  # inch
-        return PixelSize(25400.0 / x_ppu, 25400.0 / y_ppu, "µm")
+        return PixelSize(
+            _round_significant(25400.0 / x_ppu, _TIFF_RESOLUTION_SIGNIFICANT_DIGITS),
+            _round_significant(25400.0 / y_ppu, _TIFF_RESOLUTION_SIGNIFICANT_DIGITS),
+            "µm",
+        )
     return None
 
 
@@ -220,8 +240,8 @@ def consistent_tiff_resolution_pixel_size(
     if not all(item is not None for item in values):
         missing = [str(index) for index, item in enumerate(values) if item is None]
         raise ValueError(
-            "TIFF resolution calibration is present on only some full-resolution channel "
-            f"pages; missing on channels {', '.join(missing)}"
+            "TIFF resolution calibration is present on only some full-resolution pages; "
+            f"missing on pages {', '.join(missing)}"
         )
 
     reference = values[0]
@@ -234,9 +254,8 @@ def consistent_tiff_resolution_pixel_size(
             and math.isclose(converted.y, reference.y, rel_tol=1e-9, abs_tol=1e-12)
         ):
             raise ValueError(
-                "TIFF resolution calibration is inconsistent across full-resolution channel "
-                f"pages; channel 0={reference.to_tuple()}, "
-                f"channel {index}={item.to_tuple()}"
+                "TIFF resolution calibration is inconsistent across full-resolution pages; "
+                f"page 0={reference.to_tuple()}, page {index}={item.to_tuple()}"
             )
     return reference
 

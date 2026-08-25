@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 from typing import Any
@@ -11,8 +12,14 @@ from omeify.inspection import TiffInspector
 
 from .base import ChannelSelection, LabelImage, MultichannelImage
 from .channel import Channel, normalize_channel_indices
-from .pixel_size import PixelSize, pixel_size_from_xy_units
+from .pixel_size import (
+    PixelSize,
+    consistent_tiff_resolution_pixel_size,
+    pixel_size_from_xy_units,
+)
 from .tiff import TiffPlaneReader
+
+LOGGER = logging.getLogger(__name__)
 
 
 class _OMETiffReaderCore:
@@ -139,25 +146,33 @@ class _OMETiffReaderCore:
     @property
     def pixel_size(self) -> PixelSize | None:
         image = self._ome_image_summary()
-        if image is None:
-            return None
-        physical = image.get("physical_size") or {}
-        x = physical.get("x")
-        y = physical.get("y")
-        if not x or not y:
-            return None
-        if x.get("value") is None or y.get("value") is None:
-            return None
-        x_unit = x.get("unit")
-        y_unit = y.get("unit")
-        if not x_unit or not y_unit:
-            return None
-        return pixel_size_from_xy_units(
-            float(x["value"]),
-            str(x_unit),
-            float(y["value"]),
-            str(y_unit),
-        )
+        if image is not None:
+            physical = image.get("physical_size") or {}
+            x = physical.get("x")
+            y = physical.get("y")
+            if (
+                x
+                and y
+                and x.get("value") is not None
+                and y.get("value") is not None
+                and x.get("unit")
+                and y.get("unit")
+            ):
+                return pixel_size_from_xy_units(
+                    float(x["value"]),
+                    str(x["unit"]),
+                    float(y["value"]),
+                    str(y["unit"]),
+                )
+
+        fallback = consistent_tiff_resolution_pixel_size(self._level_pages(0))
+        if fallback is not None:
+            LOGGER.warning(
+                "OME-TIFF does not provide complete PhysicalSizeX/PhysicalSizeY metadata; "
+                "using TIFF XResolution/YResolution/ResolutionUnit tags (%s).",
+                fallback.to_tuple(),
+            )
+        return fallback
 
     def pixel_size_at_level(self, level: int) -> PixelSize | None:
         selected = self._selected_level(level)

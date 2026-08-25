@@ -18,7 +18,7 @@ from lxml import etree
 from omeify.utils.miti_header_validator import validate_miti_ome_tiff_header
 
 _INSPECTION_SCHEMA_RESOURCE = "omeify.schemas/tiff_inspection.schema.json"
-_INSPECTION_SCHEMA_VERSION = "1.1"
+_INSPECTION_SCHEMA_VERSION = "1.2"
 _DEFAULT_DETAIL = 1
 _DEFAULT_MAX_TEXT_LENGTH = 240
 _MAX_XML_CHILDREN = 100
@@ -239,6 +239,14 @@ def _physical_size(value: Any, unit: Any) -> dict[str, Any] | None:
     if numeric is None:
         return None
     return {"value": numeric, "unit": str(unit) if unit not in {None, ""} else None}
+
+
+def _pixel_size_summary(pixel_size: Any) -> dict[str, Any]:
+    return {
+        "x": {"value": float(pixel_size.x), "unit": str(pixel_size.unit)},
+        "y": {"value": float(pixel_size.y), "unit": str(pixel_size.unit)},
+        "z": None,
+    }
 
 
 def _ome_summary(xml: str, max_text_length: int | None) -> dict[str, Any]:
@@ -526,6 +534,27 @@ def _series_summary(
         warnings.append(f"Series {series_index} reported no levels; using the series itself")
         levels = [series]
 
+    tiff_resolution_pixel_size = None
+    try:
+        from omeify.io.pixel_size import pixel_size_from_tiff_resolution
+
+        for item in levels[0].pages:
+            page = item.aspage()
+            if not all(
+                tag_name in page.tags
+                for tag_name in ("XResolution", "YResolution", "ResolutionUnit")
+            ):
+                continue
+            pixel_size = pixel_size_from_tiff_resolution(page)
+            if pixel_size is not None:
+                tiff_resolution_pixel_size = _pixel_size_summary(pixel_size)
+                break
+    except Exception:
+        # Inspection reports what can be read from the TIFF tags. Missing,
+        # malformed, or unusable calibration is represented as N/A rather
+        # than promoted to a diagnostic warning.
+        tiff_resolution_pixel_size = None
+
     rendered_levels = []
     if detail >= 1:
         rendered_levels = [
@@ -558,6 +587,7 @@ def _series_summary(
         "physical_size": (
             ome_image.get("physical_size") if ome_image is not None else None
         ),
+        "tiff_resolution_pixel_size": tiff_resolution_pixel_size,
         "levels": rendered_levels,
     }
 
@@ -891,6 +921,15 @@ class TiffInspector:
             physical = _format_physical_size(series.get("physical_size"))
             if physical:
                 series_node.children.append(_TreeNode(f"Physical pixel size: {physical}"))
+            tiff_resolution = _format_physical_size(
+                series.get("tiff_resolution_pixel_size")
+            )
+            series_node.children.append(
+                _TreeNode(
+                    "TIFF resolution pixel size: "
+                    + (tiff_resolution if tiff_resolution else "N/A")
+                )
+            )
 
             if self.detail >= 1:
                 for level in series["levels"]:

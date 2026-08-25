@@ -150,13 +150,7 @@ def consistent_akoya_pixel_size(
 
     declared = [item.pixel_size_microns for item in metadata]
     present = [value is not None for value in declared]
-    if any(present):
-        if not all(present):
-            missing = [str(index) for index, value in enumerate(declared) if value is None]
-            raise ValueError(
-                "Akoya PixelSizeMicrons is present on only some full-resolution channel "
-                f"pages; missing on channels {', '.join(missing)}"
-            )
+    if all(present):
         reference = float(declared[0])
         inconsistent = [
             (index, float(value))
@@ -171,4 +165,30 @@ def consistent_akoya_pixel_size(
             )
         return PixelSize(reference, reference, "µm")
 
-    return consistent_tiff_resolution_pixel_size(pages)
+    fallback = consistent_tiff_resolution_pixel_size(pages)
+    if fallback is not None:
+        fallback_microns = fallback.converted_to("µm")
+        inconsistent = [
+            (index, float(value))
+            for index, value in enumerate(declared)
+            if value is not None
+            and not (
+                math.isclose(float(value), fallback_microns.x, rel_tol=1e-6, abs_tol=1e-9)
+                and math.isclose(float(value), fallback_microns.y, rel_tol=1e-6, abs_tol=1e-9)
+            )
+        ]
+        if inconsistent:
+            values = ", ".join(f"channel {index}={value:g}" for index, value in inconsistent)
+            raise ValueError(
+                "Akoya PixelSizeMicrons disagrees with TIFF resolution calibration; "
+                f"TIFF={fallback_microns.to_tuple()}, {values}"
+            )
+        return fallback
+
+    if any(present):
+        missing = [str(index) for index, value in enumerate(declared) if value is None]
+        raise ValueError(
+            "Akoya PixelSizeMicrons is present on only some full-resolution channel "
+            f"pages; missing on channels {', '.join(missing)}"
+        )
+    return None

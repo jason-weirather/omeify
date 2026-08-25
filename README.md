@@ -47,17 +47,21 @@ model uses `SizeC=3`, one `Channel` with `SamplesPerPixel=3`, `Interleaved=true`
 physical TIFF plane in `TiffData`.
 
 Akoya physical pixel size is read from `PixelSizeMicrons` in the QPI description. Fusion
-multiplex inputs are checked across every full-resolution channel page; inconsistent or partially
-missing calibration is an error. Fusion `Name` and `Biomarker` values are both retained in the
-reader/source metadata, while an explicit policy selects the one used as the normalized OME
-channel name. Indica mIF channel names and the channel/level-to-IFD mapping are read from the
-`<indica>` ImageDescription. Physical scale is read from standard TIFF `XResolution`,
-`YResolution`, and `ResolutionUnit` tags and normalized to micrometers when the source unit is
-centimeters or inches. If those tags do not provide usable physical calibration, conversion
-requires an explicit pixel-size override. Aperio pixel size is read from `MPP`, with standard TIFF
-resolution tags used as a fallback. A source ICC profile is preserved when present. Arbitrary vendor
-descriptions, filenames, user names, scanner identifiers, dates, and other free text are not copied
-into the output OME-XML.
+multiplex inputs are checked across every full-resolution channel page. If expected QPI
+calibration is missing, standard TIFF `XResolution`, `YResolution`, and `ResolutionUnit` tags are
+used as a fallback and a warning is emitted; inconsistent calibration still fails. Fusion `Name`
+and `Biomarker` values are both retained in the reader/source metadata, while an explicit policy
+selects the one used as the normalized OME channel name. Indica mIF channel names and the
+channel/level-to-IFD mapping are read from the `<indica>` ImageDescription. TIFF resolution tags
+are the expected Indica physical-scale source, so using them does not emit a warning. Aperio uses
+`MPP` when available and warns before falling back to TIFF resolution tags. OME-TIFF similarly
+falls back with a warning when its OME `PhysicalSizeX`/`PhysicalSizeY` metadata is incomplete.
+Component TIFF uses an explicit override when supplied, otherwise standard TIFF resolution tags
+when available. TIFF resolution-derived values are normalized to micrometers for centimeter or
+inch source units and rounded to six significant digits. If no usable calibration source remains,
+conversion requires an explicit pixel-size override. A source ICC profile is preserved when
+present. Arbitrary vendor descriptions, filenames, user names, scanner identifiers, dates, and
+other free text are not copied into the output OME-XML.
 
 OME-TIFF is also a first-class conversion input. `omeify convert --type ome_tiff` reads the
 source pixels and the minimum structural metadata needed to interpret them, then writes a fresh
@@ -329,8 +333,8 @@ omeify convert input.ome.tif output.ome.tif \
 
 The mode is authoritative. In `name` mode a source channel literally named `"0"` is still a
 name; in `index` mode JSON keys such as `"0"` are validated and converted to integer index `0`.
-Malformed mappings fail instead of being guessed. Component TIFF calibration uses the same
-`PixelSize` vocabulary as the Python API:
+Malformed mappings fail instead of being guessed. Component TIFFs use standard TIFF resolution
+tags when available. An explicit override uses the same `PixelSize` vocabulary as the Python API:
 
 ```bash
 omeify convert component.tif component.ome.tif \
@@ -350,7 +354,7 @@ Useful conversion options:
 --channel-name-field      name, biomarker, or auto for Fusion QPTIFF
 --rename-channels-json    JSON map used with --rename-channels-by
 --rename-channels-by      name or index
---pixel-size-x/y/unit     Explicit physical-size override; required for component TIFF
+--pixel-size-x/y/unit     Explicit physical-size override; default unit µm
 --omit-uuid               Omit the optional OME root UUID
 --workers N               TIFF compression workers
 --no-checksums            Skip the final whole-file checksum pass
@@ -392,10 +396,15 @@ The JSON representation is defined by:
 omeify/schemas/tiff_inspection.schema.json
 ```
 
-For an OME-TIFF, `inspect` parses the OME header rather than guessing channel names, dimension
-sizes, dimension order, or physical pixel sizes from TIFF pages alone. It also reports whether
-each OME header satisfies the bundled omeify MITI header profile, lists missing or invalid fields,
-and identifies additional OME metadata outside omeify's minimized output vocabulary. Additional
+`inspect` reports pixel size calculated directly from standard TIFF `XResolution`,
+`YResolution`, and `ResolutionUnit` tags when those tags provide usable physical calibration.
+If the tags are absent or do not define a physical unit, the text summary reports `N/A` without
+adding a warning. For an OME-TIFF, inspection separately parses the OME header rather than
+guessing channel names, dimension sizes, dimension order, or OME physical pixel sizes from TIFF
+pages alone. This makes the OME-declared and TIFF-tag-derived calibrations independently visible.
+Inspection also reports whether each OME
+header satisfies the bundled omeify MITI header profile, lists missing or invalid fields, and
+identifies additional OME metadata outside omeify's minimized output vocabulary. Additional
 metadata is informational: MITI is a minimum-information profile, so extra fields do not by
 themselves make a header invalid.
 
@@ -465,7 +474,8 @@ report = convert(
 ```
 
 If an otherwise usable source lacks physical calibration, an explicit `PixelSize` can be supplied
-as an override. Component TIFF input requires one because omeify will not invent calibration.
+as an override. Standard TIFF resolution tags are used as a fallback where available rather than
+inventing calibration.
 
 ### Pixel size
 
@@ -485,7 +495,10 @@ nanometers = pixel_size.converted_to("nm")
 
 The value object itself does not impose a micrometer policy. OME serialization validates that its
 unit is a supported physical-length unit. A reader returns `None` only when the source genuinely
-contains no usable calibration rather than inventing one.
+contains no usable calibration rather than inventing one. Standard TIFF resolution tags are
+interpreted as pixels per physical unit and converted to micrometers for centimeter or inch units;
+the derived pixel size is rounded to six significant digits to avoid carrying rational-encoding
+noise into OME metadata.
 
 ### Readers and lazy channels
 

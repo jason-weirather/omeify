@@ -36,6 +36,17 @@ def _write_generic_tiff(path: Path) -> np.ndarray:
     return data
 
 
+def _write_resolution_tiff(path: Path) -> None:
+    tifffile.imwrite(
+        path,
+        np.zeros((24, 32), dtype=np.uint16),
+        tile=(16, 16),
+        resolution=(20056.913009774024, 20056.913009774024),
+        resolutionunit="CENTIMETER",
+        metadata=None,
+    )
+
+
 def _write_ome_tiff(path: Path) -> np.ndarray:
     data = np.arange(3 * 24 * 32, dtype=np.uint16).reshape(3, 24, 32)
     tifffile.imwrite(
@@ -89,8 +100,11 @@ def test_inspector_handles_non_ome_tiff_and_validates_schema(tmp_path: Path) -> 
     assert report["series"][0]["axes"] == "YX"
     assert report["series"][0]["levels"][0]["shape"] == [24, 32]
     assert report["ome"] is None
+    assert report["series"][0]["tiff_resolution_pixel_size"] is None
+    assert report["warnings"] == []
     assert inspector.validation_errors() == ()
     assert "Series 0" in inspector.render_text()
+    assert "TIFF resolution pixel size: N/A" in inspector.render_text()
     assert "Level 0" in inspector.render_text()
 
 
@@ -106,6 +120,28 @@ def test_detail_three_includes_tags_and_parsed_xml_description(tmp_path: Path) -
     assert page["description"]["parsed_xml"]["children"][0]["tag"] == "Name"
     assert any(tag["name"] == "ImageDescription" for tag in page["tags"])
     assert TiffInspector(source, detail=3).validation_errors() == ()
+
+
+def test_inspector_reports_pixel_size_calculated_from_tiff_resolution_tags(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "resolution.tif"
+    _write_resolution_tiff(source)
+
+    inspector = TiffInspector(source)
+    report = inspector.report
+    tiff_pixel_size = report["series"][0]["tiff_resolution_pixel_size"]
+
+    assert tiff_pixel_size == {
+        "x": {"value": 0.498581, "unit": "µm"},
+        "y": {"value": 0.498581, "unit": "µm"},
+        "z": None,
+    }
+    assert (
+        "TIFF resolution pixel size: X=0.498581 µm, Y=0.498581 µm"
+        in inspector.render_text()
+    )
+    assert inspector.validation_errors() == ()
 
 
 def test_ome_inspection_uses_header_for_channels_and_physical_size(tmp_path: Path) -> None:
@@ -225,7 +261,7 @@ def test_cli_inspect_text_json_and_output_file(tmp_path: Path) -> None:
     )
     assert output_result.exit_code == 0, output_result.output
     assert output_result.output == ""
-    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "1.1"
+    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "1.2"
 
 
 def test_ome_tiff_reader_reads_interleaved_rgb_regions(tmp_path: Path) -> None:

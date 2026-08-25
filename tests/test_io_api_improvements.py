@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import tifffile
 from click.testing import CliRunner
 
 from omeify import (
+    AkoyaComponentTiffReader,
     AkoyaFusionQPTiffReader,
     Channel,
     OMETiffLabelReader,
@@ -56,6 +58,7 @@ def _write_fusion_qptiff(
     names: list[str | None] | None = None,
     biomarkers: list[str | None] | None = None,
     pixel_sizes: list[float | None] | None = None,
+    tiff_pixel_size: tuple[float, float] | None = None,
 ) -> None:
     channel_count = int(data.shape[0])
     names = names or [f"Opal {index + 1}" for index in range(channel_count)]
@@ -63,18 +66,24 @@ def _write_fusion_qptiff(
     pixel_sizes = pixel_sizes or [0.5068] * channel_count
     with tifffile.TiffWriter(path, bigtiff=True) as writer:
         for index, plane in enumerate(data):
-            writer.write(
-                plane,
-                tile=(16, 16),
-                description=_fusion_description(
+            options = {
+                "tile": (16, 16),
+                "description": _fusion_description(
                     name=names[index],
                     biomarker=biomarkers[index],
                     pixel_size_microns=pixel_sizes[index],
                     stale_encoding=index == 0,
                 ),
-                software="PerkinElmer-QPI synthetic" if index == 0 else False,
-                metadata=None,
-            )
+                "software": "PerkinElmer-QPI synthetic" if index == 0 else False,
+                "metadata": None,
+            }
+            if tiff_pixel_size is not None:
+                options["resolution"] = (
+                    1e4 / tiff_pixel_size[0],
+                    1e4 / tiff_pixel_size[1],
+                )
+                options["resolutionunit"] = "CENTIMETER"
+            writer.write(plane, **options)
 
 
 def _write_planar_ome(
@@ -206,6 +215,27 @@ def test_fusion_reader_reports_missing_calibration_and_convert_accepts_override(
     assert report["image"]["pixel_size"] == [0.51, 0.51, "µm"]
 
 
+def test_fusion_missing_pixel_size_uses_tiff_resolution_with_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = tmp_path / "fusion-resolution-fallback.qptiff"
+    data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
+    _write_fusion_qptiff(
+        source,
+        data,
+        pixel_sizes=[None, None],
+        tiff_pixel_size=(0.5, 0.4),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with AkoyaFusionQPTiffReader(source) as reader:
+            assert reader.pixel_size == PixelSize(0.5, 0.4, "µm")
+
+    assert "does not provide expected Akoya PixelSizeMicrons calibration" in caplog.text
+    assert "using TIFF XResolution/YResolution/ResolutionUnit tags" in caplog.text
+
+
 def test_fusion_reader_rejects_partially_missing_pixel_sizes(tmp_path: Path) -> None:
     source = tmp_path / "fusion-partial-calibration.qptiff"
     data = np.zeros((3, 32, 48), dtype=np.uint16)
@@ -214,6 +244,26 @@ def test_fusion_reader_rejects_partially_missing_pixel_sizes(tmp_path: Path) -> 
     with pytest.raises(ValueError, match="present on only some"):
         with AkoyaFusionQPTiffReader(source):
             pass
+
+
+def test_fusion_partial_pixel_size_uses_matching_tiff_resolution_fallback(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = tmp_path / "fusion-partial-with-resolution.qptiff"
+    data = np.zeros((3, 32, 48), dtype=np.uint16)
+    _write_fusion_qptiff(
+        source,
+        data,
+        pixel_sizes=[0.5, None, 0.5],
+        tiff_pixel_size=(0.5, 0.5),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with AkoyaFusionQPTiffReader(source) as reader:
+            assert reader.pixel_size == PixelSize(0.5, 0.5, "µm")
+
+    assert "does not provide expected Akoya PixelSizeMicrons calibration" in caplog.text
 
 
 def test_fusion_reader_rejects_inconsistent_pixel_sizes(tmp_path: Path) -> None:
@@ -809,6 +859,75 @@ def test_ome_tiff_normalization_can_supply_missing_pixel_size_explicitly(
     )
     assert report["image"]["pixel_size"] == [0.75, 0.8, "µm"]
     assert report["options"]["pixel_size_override"] == [0.75, 0.8, "µm"]
+
+
+def test_ome_tiff_missing_physical_size_falls_back_to_tiff_resolution_with_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = tmp_path / "resolution-only.ome.tif"
+    output = tmp_path / "normalized.ome.tif"
+    data = np.arange(2 * 16 * 16, dtype=np.uint16).reshape(2, 16, 16)
+    tifffile.imwrite(
+        source,
+        data,
+        ome=True,
+        tile=(16, 16),
+        photometric="minisblack",
+        resolution=(20000.0, 25000.0),
+        resolutionunit="CENTIMETER",
+        metadata={"axes": "CYX", "Channel": {"Name": ["A", "B"]}},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with OMETiffReader(source) as reader:
+            assert reader.pixel_size == PixelSize(0.5, 0.4, "µm")
+
+    assert "does not provide complete PhysicalSizeX/PhysicalSizeY metadata" in caplog.text
+    assert "using TIFF XResolution/YResolution/ResolutionUnit tags" in caplog.text
+
+    report = convert(
+        source,
+        output,
+        input_type="ome_tiff",
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+    assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
+    assert report["image"]["pixel_size"] == [0.5, 0.4, "µm"]
+
+
+def test_component_reader_uses_tiff_resolution_when_no_override_is_supplied(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "component.tif"
+    output = tmp_path / "component.ome.tif"
+    tifffile.imwrite(
+        source,
+        np.zeros((16, 16), dtype=np.uint16),
+        tile=(16, 16),
+        description="<Component><Name>DAPI</Name></Component>",
+        resolution=(20000.0, 25000.0),
+        resolutionunit="CENTIMETER",
+        metadata=None,
+    )
+
+    with AkoyaComponentTiffReader(source) as reader:
+        assert reader.pixel_size == PixelSize(0.5, 0.4, "µm")
+
+    report = convert(
+        source,
+        output,
+        input_type="component",
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+    assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
+    assert report["image"]["pixel_size"] == [0.5, 0.4, "µm"]
 
 
 def test_conversion_api_no_longer_has_parallel_inputs_or_converters_packages() -> None:

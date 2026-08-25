@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jason-weirather/omeify/schemas/tiff_inspection.schema.json",
   "title": "omeify TIFF inspection report",
-  "description": "The stable JSON summary emitted by omeify inspect and TiffInspector for TIFF files. Higher detail levels add levels, pages, frames, TIFF tags, and parsed image descriptions while preserving the same top-level structure. OME-TIFF reports include an omeify MITI header assessment and a list of additional OME metadata outside omeify's minimized output vocabulary.",
+  "description": "The stable JSON summary emitted by omeify inspect and TiffInspector for TIFF files. Series include physical pixel size calculated from standard TIFF resolution tags when available. Higher detail levels add levels, pages, frames, TIFF tags, and parsed image descriptions while preserving the same top-level structure. OME-TIFF reports include an omeify MITI header assessment and a list of additional OME metadata outside omeify's minimized output vocabulary.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,7 +19,7 @@
       "const": "omeify.schemas/tiff_inspection.schema.json"
     },
     "schema_version": {
-      "const": "1.1"
+      "const": "1.2"
     },
     "detail": {
       "type": "integer",
@@ -769,6 +769,7 @@
         "ome_image_id",
         "channel_names",
         "physical_size",
+        "tiff_resolution_pixel_size",
         "levels"
       ],
       "properties": {
@@ -811,6 +812,16 @@
           }
         },
         "physical_size": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/physicalSize"
+            }
+          ]
+        },
+        "tiff_resolution_pixel_size": {
           "oneOf": [
             {
               "type": "null"
