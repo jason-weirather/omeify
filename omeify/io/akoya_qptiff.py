@@ -6,10 +6,9 @@ from dataclasses import dataclass
 from typing import Literal, Sequence
 from xml.etree import ElementTree
 
-import numpy as np
 import tifffile
 
-from .pixel_size import PixelSize
+from .pixel_size import PixelSize, consistent_tiff_resolution_pixel_size
 
 ChannelNameField = Literal["name", "biomarker", "auto"]
 _XML_ENCODING_DECLARATION = re.compile(
@@ -142,29 +141,6 @@ def select_akoya_channel_name(
     return f"Channel {channel_index + 1}", "generated"
 
 
-def _resolution_value(value: object) -> float:
-    if isinstance(value, (tuple, list, np.ndarray)) and len(value) == 2:
-        numerator, denominator = value
-        return float(numerator) / float(denominator)
-    return float(value)
-
-
-def pixel_size_from_tiff_resolution(page: tifffile.TiffPage) -> PixelSize | None:
-    try:
-        x_ppu = _resolution_value(page.tags["XResolution"].value)
-        y_ppu = _resolution_value(page.tags["YResolution"].value)
-        unit_value = int(page.tags["ResolutionUnit"].value)
-    except (KeyError, TypeError, ValueError, ZeroDivisionError):
-        return None
-    if x_ppu <= 0 or y_ppu <= 0:
-        return None
-    if unit_value == 3:  # centimeter
-        return PixelSize(1e4 / x_ppu, 1e4 / y_ppu, "µm")
-    if unit_value == 2:  # inch
-        return PixelSize(25400.0 / x_ppu, 25400.0 / y_ppu, "µm")
-    return None
-
-
 def consistent_akoya_pixel_size(
     metadata: Sequence[AkoyaQPIChannelMetadata],
     pages: Sequence[tifffile.TiffPage],
@@ -195,26 +171,4 @@ def consistent_akoya_pixel_size(
             )
         return PixelSize(reference, reference, "µm")
 
-    fallback = [pixel_size_from_tiff_resolution(page) for page in pages]
-    if not any(item is not None for item in fallback):
-        return None
-    if not all(item is not None for item in fallback):
-        missing = [str(index) for index, item in enumerate(fallback) if item is None]
-        raise ValueError(
-            "TIFF resolution calibration is present on only some Akoya channel pages; "
-            f"missing on channels {', '.join(missing)}"
-        )
-    reference = fallback[0]
-    assert reference is not None
-    for index, item in enumerate(fallback[1:], start=1):
-        assert item is not None
-        converted = item.converted_to(reference.unit)
-        if not (
-            math.isclose(converted.x, reference.x, rel_tol=1e-9, abs_tol=1e-12)
-            and math.isclose(converted.y, reference.y, rel_tol=1e-9, abs_tol=1e-12)
-        ):
-            raise ValueError(
-                "Akoya channel pages report inconsistent TIFF resolution calibration; "
-                f"channel 0={reference.to_tuple()}, channel {index}={item.to_tuple()}"
-            )
-    return reference
+    return consistent_tiff_resolution_pixel_size(pages)

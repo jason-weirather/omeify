@@ -13,6 +13,7 @@ from .vendor_tiff_readers import (
     AkoyaHEQPTiffReader,
     AkoyaMIFQPTiffReader,
     AperioSVSReader,
+    IndicaMIFTiffReader,
 )
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "Channel",
     "Image",
     "ImageType",
+    "IndicaMIFTiffReader",
     "LabelImage",
     "MultichannelImage",
     "OMEImageSpec",

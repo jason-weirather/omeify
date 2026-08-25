@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from omeify import OMETiffReader, convert
+from omeify import IndicaMIFTiffReader, OMETiffReader, PixelSize, convert
 from omeify.io.ome_tiff_writer import _compression_settings, _mean_downsample_2x
 
 
@@ -144,6 +144,74 @@ def _write_synthetic_rgb_qptiff(path: Path, base: np.ndarray) -> None:
             subfiletype=1,
             metadata=None,
         )
+
+
+def _indica_description(
+    level_shapes: list[tuple[int, int]],
+    channel_names: list[str],
+) -> str:
+    dimensions: list[str] = []
+    ifd = 0
+    for level, (height, width) in enumerate(level_shapes):
+        for channel in range(len(channel_names)):
+            dimensions.append(
+                f'<dimension sizeX="{width}" sizeY="{height}" ifd="{ifd}" '
+                f'channel="{channel}" level="{level}"/>'
+            )
+            ifd += 1
+    channels = [
+        f'<channel id="{index}" name="{name}" rgb="{255 + index}" '
+        'min="0.000000" max="100.000000"/>'
+        for index, name in enumerate(channel_names)
+    ]
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<indica><post_proc type="0"/><image><pixels>'
+        + "".join(dimensions)
+        + '</pixels><channels>'
+        + "".join(channels)
+        + '</channels><objective value="10.000000"/></image></indica>'
+    )
+
+
+def _write_synthetic_indica_mif(
+    path: Path,
+    base: np.ndarray,
+    *,
+    calibrated: bool = True,
+) -> np.ndarray:
+    source_level = np.full(
+        (
+            base.shape[0],
+            (base.shape[1] + 1) // 2,
+            (base.shape[2] + 1) // 2,
+        ),
+        -1234.5,
+        dtype=base.dtype,
+    )
+    channel_names = ["DAPI", "CD3 (Opal 480)"]
+    description = _indica_description(
+        [(base.shape[1], base.shape[2]), source_level.shape[1:]],
+        channel_names,
+    )
+
+    with tifffile.TiffWriter(path, bigtiff=True) as writer:
+        ifd = 0
+        for level, data in enumerate((base, source_level)):
+            scale = 2**level
+            for plane in data:
+                options = {
+                    "tile": (16, 16),
+                    "description": description if ifd == 0 else None,
+                    "software": "IndicaLabsImageWriter synthetic" if ifd == 0 else False,
+                    "metadata": None,
+                }
+                if calibrated:
+                    options["resolution"] = (20000.0 / scale, 25000.0 / scale)
+                    options["resolutionunit"] = "CENTIMETER"
+                writer.write(plane, **options)
+                ifd += 1
+    return source_level
 
 
 def _write_synthetic_svs(
@@ -345,6 +413,107 @@ def test_akoya_he_qptiff_writes_one_interleaved_rgb_ifd(tmp_path: Path) -> None:
         assert 'Interleaved="true"' in tif.ome_metadata
         assert 'SamplesPerPixel="3"' in tif.ome_metadata
         assert 'PlaneCount="1"' in tif.ome_metadata
+
+
+def test_indica_mif_reader_parses_channels_ifd_map_and_tiff_resolution(
+    tmp_path: Path,
+) -> None:
+    data = np.arange(2 * 35 * 49, dtype=np.float32).reshape(2, 35, 49)
+    source = tmp_path / "halo-mif.tif"
+    _write_synthetic_indica_mif(source, data)
+
+    with IndicaMIFTiffReader(source) as reader:
+        assert reader.input_type_description == "Indica Labs/HALO mIF TIFF"
+        assert reader.axes == "CYX"
+        assert reader.shape == data.shape
+        assert reader.channel_names == ("DAPI", "CD3 (Opal 480)")
+        assert reader.pixel_size == PixelSize(0.5, 0.4, "µm")
+        assert reader.level_count == 2
+        assert reader[0].source_id == "0"
+        assert reader[1].source_metadata["rgb"] == 256
+        np.testing.assert_array_equal(
+            reader[1].read_region(3, 9, 4, 12),
+            data[1, 3:9, 4:12],
+        )
+
+
+def test_indica_mif_conversion_rebuilds_pyramid_and_writes_micrometer_scale(
+    tmp_path: Path,
+) -> None:
+    data = np.arange(2 * 35 * 49, dtype=np.float32).reshape(2, 35, 49)
+    source = tmp_path / "halo-mif.tif"
+    output = tmp_path / "halo-mif.ome.tif"
+    source_level = _write_synthetic_indica_mif(source, data)
+
+    report = convert(
+        source,
+        output,
+        input_type="indica_mif",
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=1,
+        calculate_checksums=False,
+    )
+
+    assert report["input_file"]["type_description"] == "Indica Labs/HALO mIF TIFF"
+    assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
+    assert report["image"]["pixel_size"] == [0.5, 0.4, "µm"]
+    assert report["image"]["channel_names"] == ["DAPI", "CD3 (Opal 480)"]
+
+    expected_level = np.stack(
+        [
+            _mean_downsample_2x(
+                plane,
+                ((plane.shape[0] + 1) // 2, (plane.shape[1] + 1) // 2),
+            )
+            for plane in data
+        ],
+        axis=0,
+    )
+    with tifffile.TiffFile(output) as tiff:
+        np.testing.assert_array_equal(tiff.series[0].levels[0].asarray(), data)
+        np.testing.assert_array_equal(tiff.series[0].levels[1].asarray(), expected_level)
+        assert not np.array_equal(tiff.series[0].levels[1].asarray(), source_level)
+        assert 'PhysicalSizeX="0.5"' in tiff.ome_metadata
+        assert 'PhysicalSizeXUnit="µm"' in tiff.ome_metadata
+        assert 'PhysicalSizeY="0.4"' in tiff.ome_metadata
+        assert 'PhysicalSizeYUnit="µm"' in tiff.ome_metadata
+
+
+def test_indica_mif_without_resolution_requires_or_accepts_explicit_pixel_size(
+    tmp_path: Path,
+) -> None:
+    data = np.arange(2 * 32 * 48, dtype=np.float32).reshape(2, 32, 48)
+    source = tmp_path / "halo-uncalibrated.tif"
+    output = tmp_path / "halo-uncalibrated.ome.tif"
+    _write_synthetic_indica_mif(source, data, calibrated=False)
+
+    with IndicaMIFTiffReader(source) as reader:
+        assert reader.pixel_size is None
+
+    with pytest.raises(ValueError, match="does not provide a usable physical pixel size"):
+        convert(
+            source,
+            output,
+            input_type="indica_mif",
+            compression="Uncompressed",
+            tile_size=16,
+            pyramid_levels=0,
+            calculate_checksums=False,
+        )
+
+    report = convert(
+        source,
+        output,
+        input_type="indica_mif",
+        pixel_size=PixelSize(0.51, 0.52, "µm"),
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+    assert report["input_file"]["pixel_size"] is None
+    assert report["image"]["pixel_size"] == [0.51, 0.52, "µm"]
 
 
 def test_aperio_svs_reads_mpp_and_drops_vendor_description(tmp_path: Path) -> None:
@@ -681,7 +850,7 @@ def test_click_group_exposes_version_inspect_and_convert() -> None:
     result = CliRunner().invoke(main, ["version", "--json"])
     assert result.exit_code == 0
     version_info = json.loads(result.output)
-    assert version_info["omeify"] == "0.9.0"
+    assert version_info["omeify"] == "0.10.0"
     assert "tifffile" in version_info
 
     eager_result = CliRunner().invoke(main, ["--version"])
@@ -703,6 +872,7 @@ def test_click_group_exposes_version_inspect_and_convert() -> None:
     assert "--strict-miti" not in convert_help.output
     assert "qptiff_he" in convert_help.output
     assert "svs" in convert_help.output
+    assert "indica_mif" in convert_help.output
     assert "--jpeg-quality" in convert_help.output
     assert "--jpeg-subsampling" in convert_help.output
 
@@ -756,7 +926,7 @@ def test_pyproject_is_the_version_authority() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with pyproject.open("rb") as handle:
         project_version = tomllib.load(handle)["project"]["version"]
-    assert __version__ == project_version == "0.9.0"
+    assert __version__ == project_version == "0.10.0"
 
 
 def test_bundled_miti_json_schema_is_available() -> None:

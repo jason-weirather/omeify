@@ -26,7 +26,8 @@ guidelines (Schapiro et. al. Nat Methods. 2022).
 
 - Akoya mIF QPTIFF
 - Akoya Fusion multiplex QPTIFF, with explicit `Name`, `Biomarker`, or `auto` channel naming
-- Planar OME-TIFF, including HALO mIF OME-TIFF
+- Indica Labs/HALO mIF TIFF with an `<indica>` ImageDescription
+- Planar OME-TIFF, including HALO exports that already contain OME metadata
 - Akoya component TIFF
 - Native `uint8`, `uint16`, `uint32`, `int8`, `int16`, `int32`, `float32`, and
   `float64` pixels
@@ -49,10 +50,14 @@ Akoya physical pixel size is read from `PixelSizeMicrons` in the QPI description
 multiplex inputs are checked across every full-resolution channel page; inconsistent or partially
 missing calibration is an error. Fusion `Name` and `Biomarker` values are both retained in the
 reader/source metadata, while an explicit policy selects the one used as the normalized OME
-channel name. Aperio pixel size is read from `MPP`, with standard TIFF resolution tags used as a
-fallback. A source ICC profile is preserved when present. Arbitrary vendor descriptions,
-filenames, user names, scanner identifiers, dates, and other free text are not copied into the
-output OME-XML.
+channel name. Indica mIF channel names and the channel/level-to-IFD mapping are read from the
+`<indica>` ImageDescription. Physical scale is read from standard TIFF `XResolution`,
+`YResolution`, and `ResolutionUnit` tags and normalized to micrometers when the source unit is
+centimeters or inches. If those tags do not provide usable physical calibration, conversion
+requires an explicit pixel-size override. Aperio pixel size is read from `MPP`, with standard TIFF
+resolution tags used as a fallback. A source ICC profile is preserved when present. Arbitrary vendor
+descriptions, filenames, user names, scanner identifiers, dates, and other free text are not copied
+into the output OME-XML.
 
 OME-TIFF is also a first-class conversion input. `omeify convert --type ome_tiff` reads the
 source pixels and the minimum structural metadata needed to interpret them, then writes a fresh
@@ -257,6 +262,18 @@ omeify convert H32_HE.qptiff H32_HE.ome.tif \
   --tile-size 1024
 ```
 
+Indica Labs/HALO planar mIF TIFF:
+
+```bash
+omeify convert halo-mif.tif halo-mif.ome.tif \
+  --type indica_mif \
+  --compression LZW
+```
+
+The Indica profile reads channel names and IFD mappings from the `<indica>` ImageDescription.
+The source pyramid is not copied; omeify reads the full-resolution channel IFDs declared as
+`level="0"` and rebuilds the output pyramid through the normal writer path.
+
 Aperio SVS with an explicit quality setting:
 
 ```bash
@@ -273,7 +290,8 @@ omeify convert source.ome.tif normalized.ome.tif \
   --type ome_tiff
 ```
 
-HALO OME-TIFFs use the same `--type ome_tiff` path; there is no separate HALO conversion profile.
+HALO exports that already contain OME metadata use `--type ome_tiff`. HALO/Indica planar mIF
+TIFFs with an `<indica>` ImageDescription use the explicit `--type indica_mif` profile.
 
 Channel renaming is deliberately explicit. Name mode interprets JSON keys as normalized source
 channel names:
@@ -479,6 +497,7 @@ AkoyaFusionQPTiffReader
 AkoyaHEQPTiffReader
 AperioSVSReader
 AkoyaComponentTiffReader
+IndicaMIFTiffReader
 OMETiffReader
 ```
 

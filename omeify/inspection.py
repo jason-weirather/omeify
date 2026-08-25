@@ -568,6 +568,7 @@ def _format_name(tiff: tifffile.TiffFile, flags: list[str]) -> str:
     preferred = [
         ("svs", "Aperio SVS TIFF"),
         ("qpi", "Akoya/PerkinElmer QPI TIFF"),
+        ("indica", "Indica Labs TIFF"),
         ("lsm", "Zeiss LSM TIFF"),
         ("ndpi", "Hamamatsu NDPI TIFF"),
         ("imagej", "ImageJ TIFF"),

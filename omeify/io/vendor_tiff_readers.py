@@ -18,12 +18,20 @@ from .akoya_qptiff import (
     ChannelNameField,
     consistent_akoya_pixel_size,
     parse_akoya_qpi_channel_metadata,
-    pixel_size_from_tiff_resolution,
     select_akoya_channel_name,
 )
 from .base import ChannelSelection, MultichannelImage
 from .channel import Channel, normalize_channel_indices
-from .pixel_size import PixelSize
+from .indica_mif import (
+    IndicaMIFMetadata,
+    build_indica_mif_series,
+    parse_indica_mif_metadata,
+)
+from .pixel_size import (
+    PixelSize,
+    consistent_tiff_resolution_pixel_size,
+    pixel_size_from_tiff_resolution,
+)
 from .tiff import TiffPlaneReader
 
 LOGGER = logging.getLogger(__name__)
@@ -34,6 +42,7 @@ SourceProfile = Literal[
     "akoya_he_qptiff",
     "svs",
     "component",
+    "indica_mif",
 ]
 
 _SUPPORTED_PLANAR_DTYPES = {
@@ -149,16 +158,7 @@ class _VendorTiffReader(MultichannelImage):
         tiff = tifffile.TiffFile(self.path)
         try:
             self._validate_container(tiff)
-            if self.series_index >= len(tiff.series):
-                raise IndexError(
-                    f"Series {self.series_index} does not exist; file has {len(tiff.series)} series"
-                )
-            series = tiff.series[self.series_index]
-            levels = tuple(getattr(series, "levels", ()) or ())
-            level0 = levels[0] if levels else series
-            pages = [item.aspage() for item in level0.pages]
-            if not pages:
-                raise ValueError("Selected TIFF series contains no readable full-resolution pages")
+            series, level0, pages = self._select_series(tiff)
 
             self._tiff = tiff
             self._series = series
@@ -292,6 +292,22 @@ class _VendorTiffReader(MultichannelImage):
         elif self.profile == "svs" and not tiff.is_svs:
             raise ValueError("AperioSVSReader requires an Aperio SVS source")
 
+    def _select_series(
+        self,
+        tiff: tifffile.TiffFile,
+    ) -> tuple[tifffile.TiffPageSeries, tifffile.TiffPageSeries, list[tifffile.TiffPage]]:
+        if self.series_index >= len(tiff.series):
+            raise IndexError(
+                f"Series {self.series_index} does not exist; file has {len(tiff.series)} series"
+            )
+        series = tiff.series[self.series_index]
+        levels = tuple(getattr(series, "levels", ()) or ())
+        level0 = levels[0] if levels else series
+        pages = [item.aspage() for item in level0.pages]
+        if not pages:
+            raise ValueError("Selected TIFF series contains no readable full-resolution pages")
+        return series, level0, pages
+
     def _inspect_planar(self) -> None:
         page0 = self._pages[0]
         height = int(page0.imagelength)
@@ -346,6 +362,19 @@ class _VendorTiffReader(MultichannelImage):
                 names.append(normalized_name)
                 metadata.append(source)
             pixel_size = consistent_akoya_pixel_size(parsed, self._pages)
+            self._pixel_size = self.pixel_size_override or pixel_size
+        elif self.profile == "indica_mif":
+            metadata_value = getattr(self, "_indica_metadata", None)
+            if not isinstance(metadata_value, IndicaMIFMetadata):
+                raise RuntimeError("Indica metadata was not initialized")
+            if len(metadata_value.channels) != len(self._pages):
+                raise ValueError(
+                    "Indica channel metadata count does not match the full-resolution IFD map"
+                )
+            for channel in metadata_value.channels:
+                names.append(channel.name)
+                metadata.append(channel.as_dict())
+            pixel_size = consistent_tiff_resolution_pixel_size(self._pages)
             self._pixel_size = self.pixel_size_override or pixel_size
         elif self.profile == "component":
             if self.pixel_size_override is None:
@@ -508,6 +537,8 @@ class _VendorTiffReader(MultichannelImage):
                     shape = (int(page.imagelength), int(page.imagewidth), 3)
                 else:
                     shape = (int(page.imagelength), int(page.imagewidth))
+                source_id_value = source_metadata.get("id")
+                source_id = None if source_id_value is None else str(source_id_value)
                 result.append(
                     Channel(
                         index=index,
@@ -529,7 +560,7 @@ class _VendorTiffReader(MultichannelImage):
                             )
                         ),
                         ensure_available=lambda: self._require_open(),
-                        source_id=None,
+                        source_id=source_id,
                         id_is_generated=True,
                         source_metadata=source_metadata,
                     )
@@ -625,6 +656,40 @@ class AkoyaFusionQPTiffReader(_VendorTiffReader):
             pixel_size=pixel_size,
             channel_name_field=channel_name_field,
         )
+
+
+class IndicaMIFTiffReader(_VendorTiffReader):
+    profile = "indica_mif"
+    input_type_description = "Indica Labs/HALO mIF TIFF"
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        series: int = 0,
+        pixel_size: PixelSize | None = None,
+    ) -> None:
+        super().__init__(path, series=series, pixel_size=pixel_size)
+        self._indica_metadata: IndicaMIFMetadata | None = None
+
+    def _reset(self) -> None:
+        super()._reset()
+        self._indica_metadata = None
+
+    def _validate_container(self, tiff: tifffile.TiffFile) -> None:
+        self._indica_metadata = parse_indica_mif_metadata(tiff.pages.first.description)
+
+    def _select_series(
+        self,
+        tiff: tifffile.TiffFile,
+    ) -> tuple[tifffile.TiffPageSeries, tifffile.TiffPageSeries, list[tifffile.TiffPage]]:
+        if self.series_index != 0:
+            raise IndexError("Indica mIF TIFF contains one XML-defined image; series must be 0")
+        if self._indica_metadata is None:
+            raise RuntimeError("Indica metadata was not initialized")
+        series = build_indica_mif_series(tiff, self._indica_metadata)
+        pages = [item.aspage() for item in series.pages]
+        return series, series, pages
 
 
 class AkoyaHEQPTiffReader(_VendorTiffReader):

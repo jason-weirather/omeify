@@ -4,6 +4,9 @@ import math
 from dataclasses import dataclass
 from typing import Sequence
 
+import numpy as np
+import tifffile
+
 
 # Conversion factors are deliberately kept outside PixelSize validation. PixelSize
 # is a generic immutable value object; format-specific code decides whether a unit
@@ -175,6 +178,67 @@ class PixelSize:
             self.y * source_factor / target_factor,
             canonical_length_unit(unit),
         )
+
+
+def _resolution_value(value: object) -> float:
+    if isinstance(value, (tuple, list, np.ndarray)) and len(value) == 2:
+        numerator, denominator = value
+        return float(numerator) / float(denominator)
+    return float(value)
+
+
+def pixel_size_from_tiff_resolution(page: tifffile.TiffPage) -> PixelSize | None:
+    """Read physical X/Y pixel size from standard TIFF resolution tags.
+
+    TIFF stores resolution as pixels per physical unit. Centimeter and inch
+    calibrations are normalized to micrometers for use by source readers.
+    """
+
+    try:
+        x_ppu = _resolution_value(page.tags["XResolution"].value)
+        y_ppu = _resolution_value(page.tags["YResolution"].value)
+        unit_value = int(page.tags["ResolutionUnit"].value)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+    if x_ppu <= 0 or y_ppu <= 0:
+        return None
+    if unit_value == 3:  # centimeter
+        return PixelSize(1e4 / x_ppu, 1e4 / y_ppu, "µm")
+    if unit_value == 2:  # inch
+        return PixelSize(25400.0 / x_ppu, 25400.0 / y_ppu, "µm")
+    return None
+
+
+def consistent_tiff_resolution_pixel_size(
+    pages: Sequence[tifffile.TiffPage],
+) -> PixelSize | None:
+    """Read one consistent pixel size from TIFF resolution tags across pages."""
+
+    values = [pixel_size_from_tiff_resolution(page) for page in pages]
+    if not any(item is not None for item in values):
+        return None
+    if not all(item is not None for item in values):
+        missing = [str(index) for index, item in enumerate(values) if item is None]
+        raise ValueError(
+            "TIFF resolution calibration is present on only some full-resolution channel "
+            f"pages; missing on channels {', '.join(missing)}"
+        )
+
+    reference = values[0]
+    assert reference is not None
+    for index, item in enumerate(values[1:], start=1):
+        assert item is not None
+        converted = item.converted_to(reference.unit)
+        if not (
+            math.isclose(converted.x, reference.x, rel_tol=1e-9, abs_tol=1e-12)
+            and math.isclose(converted.y, reference.y, rel_tol=1e-9, abs_tol=1e-12)
+        ):
+            raise ValueError(
+                "TIFF resolution calibration is inconsistent across full-resolution channel "
+                f"pages; channel 0={reference.to_tuple()}, "
+                f"channel {index}={item.to_tuple()}"
+            )
+    return reference
 
 
 def normalize_ome_pixel_size(pixel_size: PixelSize) -> PixelSize:

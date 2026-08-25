@@ -18,6 +18,7 @@ from .io.vendor_tiff_readers import (
     AkoyaHEQPTiffReader,
     AkoyaMIFQPTiffReader,
     AperioSVSReader,
+    IndicaMIFTiffReader,
 )
 
 InputType = Literal[
@@ -27,6 +28,7 @@ InputType = Literal[
     "svs",
     "ome_tiff",
     "component",
+    "indica_mif",
 ]
 DownsampleMethod = Literal["mean", "nearest"]
 
@@ -116,6 +118,7 @@ INPUT_TYPES: tuple[str, ...] = (
     "svs",
     "ome_tiff",
     "component",
+    "indica_mif",
 )
 
 
@@ -165,6 +168,10 @@ def _reader_for_input(
         if channel_name_field is not None:
             raise ValueError("channel_name_field is only valid for qptiff_fusion input")
         return OMETiffReader(input_path, series=series)
+    if input_type == "indica_mif":
+        if channel_name_field is not None:
+            raise ValueError("channel_name_field is only valid for qptiff_fusion input")
+        return IndicaMIFTiffReader(input_path, series=series)
     if input_type == "component":
         if channel_name_field is not None:
             raise ValueError("channel_name_field is only valid for qptiff_fusion input")
