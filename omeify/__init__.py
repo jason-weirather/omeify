@@ -21,6 +21,7 @@ from .io import (
     TemporaryOMETiffWriter,
     write_ometiff,
 )
+from .mutation import mutate
 
 __all__ = [
     "AkoyaComponentTiffReader",
@@ -44,5 +45,6 @@ __all__ = [
     "__version__",
     "convert",
     "get_version_info",
+    "mutate",
     "write_ometiff",
 ]

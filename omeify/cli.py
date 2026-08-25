@@ -9,9 +9,17 @@ from typing import Any
 import click
 
 from omeify import __version__, get_version_info
-from omeify.conversion import INPUT_TYPES, RenameChannelsBy, convert
+from omeify.conversion import RenameChannelsBy, convert
+from omeify.dtype_mutation import (
+    DEFAULT_AUTO_MAX_NORMALIZED_RMSE,
+    DEFAULT_SAMPLE_PIXELS_PER_CHANNEL,
+    RANGE_MODES,
+    TARGET_DTYPES,
+)
 from omeify.inspection import TiffInspector
 from omeify.io.pixel_size import PixelSize
+from omeify.io.source_reader import INPUT_TYPES, PLANAR_INPUT_TYPES
+from omeify.mutation import mutate
 
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _INDEX_KEY = re.compile(r"0|[1-9][0-9]*")
@@ -77,9 +85,22 @@ def _write_or_echo(rendered: str, output: Path | None) -> None:
     output.write_text(rendered.rstrip("\n") + "\n", encoding="utf-8")
 
 
+def _pixel_size_override(
+    x: float | None,
+    y: float | None,
+    unit: str | None,
+) -> PixelSize | None:
+    supplied = (x, y, unit)
+    if not any(item is not None for item in supplied):
+        return None
+    if x is None or y is None:
+        raise click.UsageError("--pixel-size-x and --pixel-size-y must be supplied together")
+    return PixelSize(x, y, unit or "µm")
+
+
 @click.group(cls=_SubcommandOnlyGroup, context_settings=_CONTEXT_SETTINGS)
 def main() -> None:
-    """Convert, inspect, and read standardized TIFF-family images."""
+    """Convert, mutate, inspect, and read standardized TIFF-family images."""
 
 
 @main.command("convert", context_settings=_CONTEXT_SETTINGS)
@@ -225,18 +246,7 @@ def convert_command(
     if input_type != "qptiff_fusion" and channel_name_field is not None:
         raise click.UsageError("--channel-name-field is only valid with --type qptiff_fusion")
 
-    explicit_pixel_values = (pixel_size_x, pixel_size_y, pixel_size_unit)
-    pixel_size = None
-    if any(item is not None for item in explicit_pixel_values):
-        if pixel_size_x is None or pixel_size_y is None:
-            raise click.UsageError(
-                "--pixel-size-x and --pixel-size-y must be supplied together"
-            )
-        pixel_size = PixelSize(
-            pixel_size_x,
-            pixel_size_y,
-            pixel_size_unit or "µm",
-        )
+    pixel_size = _pixel_size_override(pixel_size_x, pixel_size_y, pixel_size_unit)
     try:
         report = convert(
             input_path,
@@ -264,12 +274,185 @@ def convert_command(
             raise
         raise click.ClickException(str(exc)) from exc
 
-    rendered = json.dumps(report, indent=2)
-    if output_json is None:
-        click.echo(rendered)
-    else:
-        output_json.parent.mkdir(parents=True, exist_ok=True)
-        output_json.write_text(rendered + "\n", encoding="utf-8")
+    _write_or_echo(json.dumps(report, indent=2), output_json)
+
+
+@main.command("mutate", context_settings=_CONTEXT_SETTINGS)
+@click.argument(
+    "input_path",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+)
+@click.argument(
+    "output_path",
+    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--type",
+    "input_type",
+    type=click.Choice(PLANAR_INPUT_TYPES),
+    required=True,
+    help="Input image profile.",
+)
+@click.option(
+    "--channel-name-field",
+    type=click.Choice(["name", "biomarker", "auto"]),
+    default=None,
+    help="Fusion QPTIFF field used for normalized channel names.",
+)
+@click.option(
+    "--dtype",
+    type=click.Choice(TARGET_DTYPES),
+    required=True,
+    help="Unsigned integer dtype for the mutated OME-TIFF.",
+)
+@click.option(
+    "--range-mode",
+    type=click.Choice(RANGE_MODES),
+    default="auto",
+    show_default=True,
+    help=(
+        "auto preserves source scale when measured unit-rounding loss is small or integer "
+        "ancestry evidence is strong; preserve forces no rescaling; full maps each channel's "
+        "exact minimum and maximum to the dtype limits."
+    ),
+)
+@click.option("--series", type=click.IntRange(min=0), default=0, show_default=True)
+@click.option(
+    "--sample-pixels-per-channel",
+    type=click.IntRange(min=1024),
+    default=DEFAULT_SAMPLE_PIXELS_PER_CHANNEL,
+    show_default=True,
+    help="Deterministic spatial sample used for lattice and loss estimates.",
+)
+@click.option(
+    "--auto-max-normalized-rmse",
+    type=click.FloatRange(min=0),
+    default=DEFAULT_AUTO_MAX_NORMALIZED_RMSE,
+    show_default=True,
+    help=(
+        "Largest unit-rounding RMSE, as a fraction of the sampled nonzero p0.1-p99.9 "
+        "intensity span, that auto mode may accept without strong integer-lattice evidence."
+    ),
+)
+@click.option("--omit-uuid", is_flag=True, help="Omit the optional OME root UUID.")
+@click.option(
+    "--output-json",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Write the mutation report to this JSON file instead of stdout.",
+)
+@click.option(
+    "--cache-directory",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Directory for temporary rebuilt pyramid levels.",
+)
+@click.option(
+    "--compression",
+    type=click.Choice(["LZW", "Deflate", "ZSTD", "Uncompressed"], case_sensitive=False),
+    default="LZW",
+    show_default=True,
+    help="Lossless compression for quantitative channel data.",
+)
+@click.option(
+    "--tile-size",
+    type=click.IntRange(min=16),
+    default=1024,
+    show_default=True,
+    help="Square output tile size; must be divisible by 16.",
+)
+@click.option(
+    "--pyramid-levels",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Number of subresolution levels. By default, build until the image fits one tile.",
+)
+@click.option(
+    "--downsample",
+    type=click.Choice(["mean", "nearest"]),
+    default="mean",
+    show_default=True,
+)
+@click.option(
+    "--workers",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Maximum parallel TIFF compression workers.",
+)
+@click.option("--pixel-size-x", type=click.FloatRange(min=0, min_open=True), default=None)
+@click.option("--pixel-size-y", type=click.FloatRange(min=0, min_open=True), default=None)
+@click.option(
+    "--pixel-size-unit",
+    type=str,
+    default=None,
+    help="Unit for an explicit physical pixel-size override; default µm.",
+)
+@click.option("--overwrite/--no-overwrite", default=True, show_default=True)
+@click.option("--checksums/--no-checksums", default=True, show_default=True)
+@click.option("-v", "--verbose", count=True, help="Increase logging verbosity.")
+def mutate_command(
+    input_path: Path,
+    output_path: Path,
+    input_type: str,
+    channel_name_field: str | None,
+    dtype: str,
+    range_mode: str,
+    series: int,
+    sample_pixels_per_channel: int,
+    auto_max_normalized_rmse: float,
+    omit_uuid: bool,
+    output_json: Path | None,
+    cache_directory: Path | None,
+    compression: str,
+    tile_size: int,
+    pyramid_levels: int | None,
+    downsample: str,
+    workers: int | None,
+    pixel_size_x: float | None,
+    pixel_size_y: float | None,
+    pixel_size_unit: str | None,
+    overwrite: bool,
+    checksums: bool,
+    verbose: int,
+) -> None:
+    """Create a dtype-mutated OME-TIFF from planar floating-point INPUT_PATH."""
+
+    log_level = logging.DEBUG if verbose >= 2 else logging.INFO if verbose == 1 else logging.WARNING
+    logging.basicConfig(level=log_level, format="%(levelname)s %(name)s: %(message)s")
+    if output_json is not None:
+        report_path = output_json.resolve()
+        if report_path in {input_path.resolve(), output_path.resolve()}:
+            raise click.UsageError("--output-json must differ from both image paths")
+    if input_type != "qptiff_fusion" and channel_name_field is not None:
+        raise click.UsageError("--channel-name-field is only valid with --type qptiff_fusion")
+
+    pixel_size = _pixel_size_override(pixel_size_x, pixel_size_y, pixel_size_unit)
+    try:
+        report = mutate(
+            input_path,
+            output_path,
+            input_type=input_type,  # type: ignore[arg-type]
+            channel_name_field=channel_name_field,  # type: ignore[arg-type]
+            pixel_size=pixel_size,
+            dtype=dtype,  # type: ignore[arg-type]
+            range_mode=range_mode,  # type: ignore[arg-type]
+            series=series,
+            sample_pixels_per_channel=sample_pixels_per_channel,
+            auto_max_normalized_rmse=auto_max_normalized_rmse,
+            compression=compression,
+            tile_size=tile_size,
+            pyramid_levels=pyramid_levels,
+            downsample=downsample,  # type: ignore[arg-type]
+            max_workers=workers,
+            display_uuid=not omit_uuid,
+            overwrite=overwrite,
+            calculate_checksums=checksums,
+            cache_directory=cache_directory,
+        )
+    except Exception as exc:
+        if verbose >= 2:
+            raise
+        raise click.ClickException(str(exc)) from exc
+
+    _write_or_echo(json.dumps(report, indent=2), output_json)
 
 
 @main.command("inspect", context_settings=_CONTEXT_SETTINGS)

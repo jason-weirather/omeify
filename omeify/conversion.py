@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import time
-from datetime import datetime
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from numbers import Integral
 from pathlib import Path
 from typing import Literal
@@ -12,24 +11,9 @@ from ._version import get_version_info
 from .io.ome_tiff_reader import OMETiffReader
 from .io.ome_tiff_writer import JPEGSubsampling, OMETiffWriter
 from .io.pixel_size import PixelSize
-from .io.vendor_tiff_readers import (
-    AkoyaComponentTiffReader,
-    AkoyaFusionQPTiffReader,
-    AkoyaHEQPTiffReader,
-    AkoyaMIFQPTiffReader,
-    AperioSVSReader,
-    IndicaMIFTiffReader,
-)
+from .io.source_reader import INPUT_TYPES, InputType, source_reader
+from .provenance import hash_file, readable_runtime
 
-InputType = Literal[
-    "qptiff_mif",
-    "qptiff_fusion",
-    "qptiff_he",
-    "svs",
-    "ome_tiff",
-    "component",
-    "indica_mif",
-]
 DownsampleMethod = Literal["mean", "nearest"]
 
 RenameChannelsBy = Literal["name", "index"]
@@ -111,77 +95,6 @@ def _apply_channel_renames(
         )
     return tuple(index_mapping.get(index, name) for index, name in enumerate(names))
 
-INPUT_TYPES: tuple[str, ...] = (
-    "qptiff_mif",
-    "qptiff_fusion",
-    "qptiff_he",
-    "svs",
-    "ome_tiff",
-    "component",
-    "indica_mif",
-)
-
-
-def _hash_file(path: Path) -> dict[str, str]:
-    md5 = hashlib.md5()
-    sha256 = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-            md5.update(chunk)
-            sha256.update(chunk)
-    return {"md5_checksum": md5.hexdigest(), "sha256_checksum": sha256.hexdigest()}
-
-
-def _readable_runtime(seconds: float) -> str:
-    hours, remainder = divmod(seconds, 3600)
-    minutes, secs = divmod(remainder, 60)
-    return f"{int(hours):02d}:{int(minutes):02d}:{secs:05.2f}"
-
-
-def _reader_for_input(
-    input_path: Path,
-    *,
-    input_type: InputType,
-    series: int,
-    channel_name_field: str | None,
-    component_pixel_size: PixelSize | None,
-):
-    if input_type == "qptiff_mif":
-        if channel_name_field is not None:
-            raise ValueError("channel_name_field is only valid for qptiff_fusion input")
-        return AkoyaMIFQPTiffReader(input_path, series=series)
-    if input_type == "qptiff_fusion":
-        return AkoyaFusionQPTiffReader(
-            input_path,
-            series=series,
-            channel_name_field=channel_name_field or "auto",  # type: ignore[arg-type]
-        )
-    if input_type == "qptiff_he":
-        if channel_name_field is not None:
-            raise ValueError("channel_name_field is only valid for qptiff_fusion input")
-        return AkoyaHEQPTiffReader(input_path, series=series)
-    if input_type == "svs":
-        if channel_name_field is not None:
-            raise ValueError("channel_name_field is only valid for qptiff_fusion input")
-        return AperioSVSReader(input_path, series=series)
-    if input_type == "ome_tiff":
-        if channel_name_field is not None:
-            raise ValueError("channel_name_field is only valid for qptiff_fusion input")
-        return OMETiffReader(input_path, series=series)
-    if input_type == "indica_mif":
-        if channel_name_field is not None:
-            raise ValueError("channel_name_field is only valid for qptiff_fusion input")
-        return IndicaMIFTiffReader(input_path, series=series)
-    if input_type == "component":
-        if channel_name_field is not None:
-            raise ValueError("channel_name_field is only valid for qptiff_fusion input")
-        return AkoyaComponentTiffReader(
-            input_path,
-            series=series,
-            pixel_size=component_pixel_size,
-        )
-    raise ValueError(f"Unsupported input_type {input_type!r}")
-
 
 def convert(
     input_path: str | Path,
@@ -237,7 +150,7 @@ def convert(
         raise TypeError("pixel_size must be a PixelSize instance")
 
     start_epoch = time.time()
-    reader = _reader_for_input(
+    reader = source_reader(
         input_file,
         input_type=input_type,
         series=int(series),
@@ -356,7 +269,7 @@ def convert(
         "conversion_stats": {
             "start_time": datetime.fromtimestamp(start_epoch).strftime("%Y-%m-%d %H:%M:%S"),
             "stop_time": datetime.fromtimestamp(stop_epoch).strftime("%Y-%m-%d %H:%M:%S"),
-            "run_time": _readable_runtime(stop_epoch - start_epoch),
+            "run_time": readable_runtime(stop_epoch - start_epoch),
             "output_to_input_size_ratio": (
                 output_size / int(input_report["size_bytes"])
                 if int(input_report["size_bytes"])
@@ -372,8 +285,8 @@ def convert(
     }
 
     if calculate_checksums:
-        input_report.update(_hash_file(input_file))
-        output_report.update(_hash_file(output_file))
+        input_report.update(hash_file(input_file))
+        output_report.update(hash_file(output_file))
     else:
         input_report["md5_checksum"] = None
         input_report["sha256_checksum"] = None

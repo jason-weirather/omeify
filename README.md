@@ -10,7 +10,8 @@ guidelines (Schapiro et. al. Nat Methods. 2022).
 ## Design goals
 
 - Produce a predictable OME-TIFF representation from other image format inputs
-- Preserve native pixel dtype and full-resolution image quality
+- Preserve native pixel dtype and full-resolution image quality during conversion
+- Make any lossy dtype mutation explicit, deterministic, and quantitatively reported
 - Minimize carried-forward metadata while retaining image geometry, physical scale, and color
 - Rebuild pyramid levels from full resolution rather than trusting source pyramids
 - Keep peak memory bounded by processing strips and tiles instead of materializing a whole slide
@@ -72,8 +73,9 @@ for taking a valid but non-canonical OME-TIFF and producing one that satisfies t
 header profile while dropping arbitrary extra OME metadata. The conversion report records the
 source OME header's MITI status before normalization.
 
-Unsupported dtypes and image layouts fail before conversion. `omeify` does not automatically
-cast or rescale unsupported pixel data.
+Unsupported dtypes and image layouts fail before conversion. `omeify convert` does not
+automatically cast or rescale pixel data. Intentional float-to-integer quantization is a
+separate `omeify mutate` operation with a per-channel loss report.
 
 ## Compression policy
 
@@ -229,6 +231,7 @@ code reads it from distribution metadata; direct source-tree imports fall back t
 
 ```text
 omeify convert   Convert a supported source into standardized OME-TIFF
+omeify mutate    Create an explicitly transformed OME-TIFF from a supported source
 omeify inspect   Summarize any TIFF as a text tree or schema-backed JSON
 omeify version   Show the omeify version
 ```
@@ -370,6 +373,70 @@ The conversion report keeps separate `ome`, `miti_header`, and `verification` se
 validity, header-profile validity, and binary-image verification remain distinct. Pixel size is
 serialized in reports as `[x, y, unit]`.
 
+### Mutate
+
+`mutate` currently performs one operation: conversion of planar `float32` or `float64`
+channels to `uint8` or `uint16`. It accepts explicitly selected planar source profiles, including
+Indica/HALO mIF TIFF, and never edits the input in place. The source is scanned tile by tile, one
+fixed mapping is selected for each full-resolution channel, and transformed tiles are passed
+through the same `OMETiffWriter` used by `convert`.
+
+```bash
+omeify mutate halo-stitched-float.tif compact.ome.tif \
+  --type indica_mif \
+  --dtype uint16 \
+  --range-mode auto
+```
+
+The default `auto` policy first evaluates a unit-preserving candidate, `round(source)`. It selects
+that candidate only when the nearest-integer range fits the requested dtype and at least one of
+the following is true:
+
+1. Full-resolution nonzero values show strong enrichment near a unit-spaced integer lattice.
+2. The full-resolution unit-rounding RMSE is no more than `0.005` of the sampled nonzero
+   p0.1-p99.9 intensity span. Configure that loss budget with
+   `--auto-max-normalized-rmse`.
+
+This allows a broad channel such as `0..150` to retain its source scale even when interpolation
+has made many pixels fractional, while preventing a continuous `0..1` channel from collapsing to
+two output values. If the unit-preserving candidate is rejected, `auto` preserves zero and
+linearly maps the exact observed channel maximum to the largest target code. No finite source
+value is clipped.
+
+Use `--range-mode preserve` to explicitly retain the source numeric scale and apply nearest-integer
+rounding without stretching. It fails when the rounded range does not fit the target dtype.
+
+Use `--range-mode full` to explicitly map each channel's exact observed minimum and maximum to the
+full target range. This can represent negative source values, but it changes the numeric zero and
+should therefore be selected deliberately. Percentile clipping is not automatic: rare bright
+pixels can be scientifically meaningful, so a value is never discarded merely because it is in a
+small tail of the histogram.
+
+The JSON report records, for every channel:
+
+- exact full-raster minimum, maximum, zero count, negative count, and non-finite counts
+- deterministic all-pixel and nonzero percentiles plus integer-lattice diagnostics
+- exact unit-rounding error on all finite nonzero pixels and the automatic loss-budget decision
+- the selected offset and source-units-per-output-code quantum
+- the reason the mapping was selected
+- theoretical and sampled absolute error, normalized RMSE, clipping count, and output-code usage
+
+The mapping is always:
+
+```text
+output = clip(rint((source - offset) / quantum), dtype range)
+```
+
+`rint` uses nearest-even rounding. The report's inverse approximation is therefore
+`source ≈ output * quantum + offset`. Per-channel scaling preserves within-channel ordering but
+changes raw numeric comparability between channels or independently auto-scaled images. A cohort
+that requires common intensity units should reuse fixed channel mappings rather than selecting a
+new automatic mapping for every slide.
+
+For a durable scientific output, use `--output-json` and keep that report as a sidecar to the
+mutated OME-TIFF. Checksums are enabled by default so the report identifies the exact input and
+output files to which its mappings apply.
+
 ### Inspect
 
 The default report is a compact tree of the file, OME header when present, series, and pyramid
@@ -478,6 +545,30 @@ report = convert(
 If an otherwise usable source lacks physical calibration, an explicit `PixelSize` can be supplied
 as an override. Standard TIFF resolution tags are used as a fallback where available rather than
 inventing calibration.
+
+### Mutation
+
+The Python API mirrors the CLI:
+
+```python
+from omeify import mutate
+
+report = mutate(
+    "halo-stitched-float.tif",
+    "compact.ome.tif",
+    input_type="indica_mif",
+    dtype="uint16",
+    range_mode="auto",
+)
+
+for channel in report["dtype_mutation"]["channels"]:
+    print(channel["channel_name"], channel["mapping"], channel["anticipated_loss"])
+```
+
+Mutation is currently restricted to planar floating-point input from an explicitly selected
+supported reader. It preserves channel names and physical pixel size, rebuilds the pyramid from
+the mutated full-resolution raster, uses lossless compression, and records the complete
+per-channel mapping in the returned report.
 
 ### Pixel size
 
@@ -677,8 +768,9 @@ with TemporaryOMETiffWriter(
 
 ## Architectural boundary
 
-`omeify` owns the TIFF/OME-TIFF file boundary: inspection, normalization, metadata validation,
-virtual region access, and standardized writing. It does not own tile scheduling, overlapping
+`omeify` owns the TIFF/OME-TIFF file boundary: inspection, normalization, explicit raster
+mutation, metadata validation, virtual region access, and standardized writing. It does not
+own tile scheduling, overlapping
 patch generation, stitching, segmentation, object reconciliation, or morphological analysis.
 Those operations belong in downstream computation packages such as OcelliKit.
 
