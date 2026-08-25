@@ -146,29 +146,32 @@ class _OMETiffReaderCore:
     @property
     def pixel_size(self) -> PixelSize | None:
         image = self._ome_image_summary()
-        if image is not None:
-            physical = image.get("physical_size") or {}
-            x = physical.get("x")
-            y = physical.get("y")
-            if (
-                x
-                and y
-                and x.get("value") is not None
-                and y.get("value") is not None
-                and x.get("unit")
-                and y.get("unit")
-            ):
-                return pixel_size_from_xy_units(
-                    float(x["value"]),
-                    str(x["unit"]),
-                    float(y["value"]),
-                    str(y["unit"]),
-                )
+        physical = (image.get("physical_size") or {}) if image is not None else {}
+        x = physical.get("x")
+        y = physical.get("y")
+        x_complete = bool(x and x.get("value") is not None and x.get("unit"))
+        y_complete = bool(y and y.get("value") is not None and y.get("unit"))
+        if x_complete and y_complete:
+            assert x is not None and y is not None
+            return pixel_size_from_xy_units(
+                float(x["value"]),
+                str(x["unit"]),
+                float(y["value"]),
+                str(y["unit"]),
+            )
+
+        if x is not None or y is not None:
+            LOGGER.warning(
+                "OME-TIFF contains incomplete PhysicalSizeX/PhysicalSizeY metadata; "
+                "TIFF resolution fallback will not be used. Supply an explicit pixel-size "
+                "override for conversion."
+            )
+            return None
 
         fallback = consistent_tiff_resolution_pixel_size(self._level_pages(0))
         if fallback is not None:
             LOGGER.warning(
-                "OME-TIFF does not provide complete PhysicalSizeX/PhysicalSizeY metadata; "
+                "OME-TIFF does not provide PhysicalSizeX/PhysicalSizeY metadata; "
                 "using TIFF XResolution/YResolution/ResolutionUnit tags (%s).",
                 fallback.to_tuple(),
             )

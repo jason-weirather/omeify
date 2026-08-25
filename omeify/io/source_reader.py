@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Literal
 
 from .ome_tiff_reader import OMETiffReader
-from .pixel_size import PixelSize
 from .vendor_tiff_readers import (
     AkoyaComponentTiffReader,
     AkoyaFusionQPTiffReader,
@@ -55,7 +54,6 @@ def source_reader(
     input_type: InputType,
     series: int,
     channel_name_field: str | None,
-    component_pixel_size: PixelSize | None,
 ):
     """Construct the explicitly selected source-format reader.
 
@@ -92,9 +90,5 @@ def source_reader(
     if input_type == "component":
         if channel_name_field is not None:
             raise ValueError("channel_name_field is only valid for qptiff_fusion input")
-        return AkoyaComponentTiffReader(
-            input_path,
-            series=series,
-            pixel_size=component_pixel_size,
-        )
+        return AkoyaComponentTiffReader(input_path, series=series)
     raise ValueError(f"Unsupported input_type {input_type!r}")

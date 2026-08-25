@@ -16,6 +16,7 @@ from omeify import (
     TiffInspector,
     convert,
 )
+from omeify.conversion import _default_compression
 from omeify.io.ome_tiff_writer import _compression_settings, _mean_downsample_2x
 
 
@@ -680,6 +681,16 @@ def test_aperio_missing_mpp_uses_tiff_resolution_with_warning(
 
     assert "does not provide expected Aperio MPP calibration" in caplog.text
     assert "using TIFF XResolution/YResolution/ResolutionUnit tags" in caplog.text
+
+
+def test_conversion_compression_defaults_are_profile_specific() -> None:
+    assert _default_compression("qptiff_he") == "JPEG"
+    assert _default_compression("svs") == "JPEG"
+    assert _default_compression("ome_tiff") == "LZW"
+    assert _default_compression("qptiff_mif") == "LZW"
+    assert _default_compression("qptiff_fusion") == "LZW"
+    assert _default_compression("component") == "LZW"
+    assert _default_compression("indica_mif") == "LZW"
 
 
 def test_brightfield_profiles_default_to_conservative_jpeg_policy() -> None:

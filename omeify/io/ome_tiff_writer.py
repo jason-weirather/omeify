@@ -385,7 +385,7 @@ class OMETiffWriter:
         if not isinstance(pixel_size, PixelSize):
             raise TypeError("pixel_size must be a PixelSize instance")
         self.pixel_size = pixel_size
-        self.compression_name = compression or ("JPEG" if image_type == "rgb" else "LZW")
+        self.compression_name = compression or "LZW"
         self.jpeg_quality = int(jpeg_quality)
         if not 1 <= self.jpeg_quality <= 100:
             raise ValueError("jpeg_quality must be between 1 and 100")
@@ -510,8 +510,11 @@ class OMETiffWriter:
             jpeg_quality=self.jpeg_quality,
             jpeg_subsampling=self.jpeg_subsampling,
         )
-        if spec.is_label and not compression.lossless:
-            raise ValueError("Label OME-TIFF output requires lossless compression")
+        if not spec.is_rgb and not compression.lossless:
+            raise ValueError(
+                "Lossy compression is restricted to RGB OME-TIFF output; "
+                "multichannel and label output require lossless compression"
+            )
         if compression.subsampling is not None:
             jpeg_alignment = max(compression.subsampling) * 8
             if self.tile_size % jpeg_alignment != 0:
@@ -536,7 +539,12 @@ class OMETiffWriter:
         omexml = str(xml_info["xml_string"])
         validator = OMESchemaValidator()
         xml_is_valid = validator.validate(omexml)
-        if xml_is_valid is False:
+        if xml_is_valid is None:
+            raise RuntimeError(
+                "OME-XML schema validation could not be performed because no local "
+                "OME 2016-06 schema was available"
+            )
+        if not xml_is_valid:
             raise ValueError("Generated OME-XML failed OME 2016-06 schema validation")
         miti_header = validate_miti_ome_tiff_header(omexml)
         if not miti_header.is_valid:

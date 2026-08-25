@@ -19,6 +19,7 @@ from omeify import (
     TiffInspector,
 )
 from omeify.cli import main
+from omeify.utils.ome_schema_validator import OMESchemaValidator
 
 
 def _write_generic_tiff(path: Path) -> np.ndarray:
@@ -321,6 +322,56 @@ def test_public_ome_tiff_writer_emits_miti_profiled_multichannel_output(
             image.read_region(2, 8, 3, 10),
             data[:, 2:8, 3:10],
         )
+
+
+def test_generic_rgb_writer_defaults_to_lossless_lzw(tmp_path: Path) -> None:
+    writer = OMETiffWriter(
+        tmp_path / "rgb-default.ome.tif",
+        image_type="rgb",
+        pixel_size=PixelSize(0.5, 0.5, "µm"),
+    )
+
+    assert writer.compression_name == "LZW"
+
+
+def test_planar_writer_rejects_lossy_compression(tmp_path: Path) -> None:
+    output = tmp_path / "lossy-planar.ome.tif"
+    data = np.zeros((1, 16, 16), dtype=np.uint8)
+
+    with pytest.raises(ValueError, match="Lossy compression is restricted to RGB"):
+        OMETiffWriter(
+            output,
+            image_type="multichannel",
+            channel_names=["DAPI"],
+            pixel_size=PixelSize(0.5, 0.5, "µm"),
+            compression="JPEG",
+            tile_size=16,
+            pyramid_levels=0,
+        ).write(data)
+
+    assert not output.exists()
+
+
+def test_writer_fails_closed_when_ome_schema_validation_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "schema-unavailable.ome.tif"
+    data = np.zeros((1, 16, 16), dtype=np.uint16)
+    monkeypatch.setattr(OMESchemaValidator, "validate", lambda self, xml: None)
+
+    with pytest.raises(RuntimeError, match="schema validation could not be performed"):
+        OMETiffWriter(
+            output,
+            image_type="multichannel",
+            channel_names=["DAPI"],
+            pixel_size=PixelSize(0.5, 0.5, "µm"),
+            compression="Uncompressed",
+            tile_size=16,
+            pyramid_levels=0,
+        ).write(data)
+
+    assert not output.exists()
 
 
 def test_label_writer_and_reader_stay_at_the_virtual_io_boundary(tmp_path: Path) -> None:

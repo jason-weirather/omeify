@@ -111,6 +111,33 @@ def _write_planar_ome(
     )
 
 
+def _write_partial_physical_ome(
+    path: Path,
+    *,
+    physical_size_x: float,
+    tiff_pixel_size: tuple[float, float],
+) -> None:
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0"><Pixels ID="Pixels:0" DimensionOrder="XYZCT" Type="uint16" '
+        'SizeX="16" SizeY="16" SizeZ="1" SizeC="1" SizeT="1" '
+        f'PhysicalSizeX="{physical_size_x}" PhysicalSizeXUnit="um">'
+        '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+        '<TiffData IFD="0" PlaneCount="1"/>'
+        '</Pixels></Image></OME>'
+    )
+    tifffile.imwrite(
+        path,
+        np.zeros((16, 16), dtype=np.uint16),
+        tile=(16, 16),
+        description=xml,
+        resolution=(1e4 / tiff_pixel_size[0], 1e4 / tiff_pixel_size[1]),
+        resolutionunit="CENTIMETER",
+        metadata=None,
+    )
+
+
 def _read_ome_channel_names(path: Path) -> list[str]:
     with tifffile.TiffFile(path) as tiff:
         assert tiff.ome_metadata is not None
@@ -883,7 +910,7 @@ def test_ome_tiff_missing_physical_size_falls_back_to_tiff_resolution_with_warni
         with OMETiffReader(source) as reader:
             assert reader.pixel_size == PixelSize(0.5, 0.4, "µm")
 
-    assert "does not provide complete PhysicalSizeX/PhysicalSizeY metadata" in caplog.text
+    assert "does not provide PhysicalSizeX/PhysicalSizeY metadata" in caplog.text
     assert "using TIFF XResolution/YResolution/ResolutionUnit tags" in caplog.text
 
     report = convert(
@@ -897,6 +924,61 @@ def test_ome_tiff_missing_physical_size_falls_back_to_tiff_resolution_with_warni
     )
     assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
     assert report["image"]["pixel_size"] == [0.5, 0.4, "µm"]
+
+
+def test_partial_ome_pixel_size_does_not_use_tiff_fallback(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = tmp_path / "partial-physical.ome.tif"
+    _write_partial_physical_ome(
+        source,
+        physical_size_x=0.5,
+        tiff_pixel_size=(0.5, 0.4),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with OMETiffReader(source) as reader:
+            assert reader.pixel_size is None
+
+    assert "contains incomplete PhysicalSizeX/PhysicalSizeY metadata" in caplog.text
+    assert "TIFF resolution fallback will not be used" in caplog.text
+
+
+def test_partial_ome_pixel_size_requires_explicit_conversion_override(tmp_path: Path) -> None:
+    source = tmp_path / "partial-physical.ome.tif"
+    output = tmp_path / "partial-normalized.ome.tif"
+    _write_partial_physical_ome(
+        source,
+        physical_size_x=0.5,
+        tiff_pixel_size=(0.5, 0.4),
+    )
+
+    with pytest.raises(ValueError, match="does not provide a usable physical pixel size"):
+        convert(
+            source,
+            output,
+            input_type="ome_tiff",
+            compression="Uncompressed",
+            tile_size=16,
+            pyramid_levels=0,
+            calculate_checksums=False,
+        )
+    assert not output.exists()
+
+    report = convert(
+        source,
+        output,
+        input_type="ome_tiff",
+        pixel_size=PixelSize(0.75, 0.8, "µm"),
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+    assert report["input_file"]["pixel_size"] is None
+    assert report["image"]["pixel_size"] == [0.75, 0.8, "µm"]
+    assert report["options"]["pixel_size_override"] == [0.75, 0.8, "µm"]
 
 
 def test_component_reader_uses_tiff_resolution_when_no_override_is_supplied(
@@ -928,6 +1010,37 @@ def test_component_reader_uses_tiff_resolution_when_no_override_is_supplied(
     )
     assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
     assert report["image"]["pixel_size"] == [0.5, 0.4, "µm"]
+
+
+def test_component_pixel_size_override_does_not_replace_source_provenance(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "component-calibrated.tif"
+    output = tmp_path / "component-override.ome.tif"
+    tifffile.imwrite(
+        source,
+        np.zeros((16, 16), dtype=np.uint16),
+        tile=(16, 16),
+        description="<Component><Name>DAPI</Name></Component>",
+        resolution=(20000.0, 25000.0),
+        resolutionunit="CENTIMETER",
+        metadata=None,
+    )
+
+    report = convert(
+        source,
+        output,
+        input_type="component",
+        pixel_size=PixelSize(0.75, 0.8, "µm"),
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+
+    assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
+    assert report["image"]["pixel_size"] == [0.75, 0.8, "µm"]
+    assert report["options"]["pixel_size_override"] == [0.75, 0.8, "µm"]
 
 
 def test_conversion_api_no_longer_has_parallel_inputs_or_converters_packages() -> None:

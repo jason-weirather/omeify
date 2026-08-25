@@ -81,7 +81,6 @@ def mutate(
         input_type=input_type,
         series=int(series),
         channel_name_field=channel_name_field,
-        component_pixel_size=pixel_size if input_type == "component" else None,
     )
     with reader:
         if reader.is_rgb:

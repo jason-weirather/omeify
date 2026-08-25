@@ -20,6 +20,12 @@ RenameChannelsBy = Literal["name", "index"]
 ChannelRenameMapping = Mapping[str, str] | Mapping[int, str]
 
 
+def _default_compression(input_type: InputType) -> str:
+    """Return the fidelity policy for an explicitly selected source profile."""
+
+    return "JPEG" if input_type in {"qptiff_he", "svs"} else "LZW"
+
+
 def _validate_channel_rename_mapping(
     mapping: ChannelRenameMapping | None,
     by: RenameChannelsBy | None,
@@ -155,7 +161,6 @@ def convert(
         input_type=input_type,
         series=int(series),
         channel_name_field=channel_name_field,
-        component_pixel_size=pixel_size if input_type == "component" else None,
     )
 
     with reader:
@@ -174,12 +179,13 @@ def convert(
             normalized_rename_mode,
         )
         image_type = "rgb" if bool(getattr(reader, "is_rgb", False)) else "multichannel"
+        effective_compression = compression or _default_compression(input_type)
         writer = OMETiffWriter(
             output_file,
             image_type=image_type,
             channel_names=output_channel_names,
             pixel_size=effective_pixel_size,
-            compression=compression,
+            compression=effective_compression,
             jpeg_quality=jpeg_quality,
             jpeg_subsampling=jpeg_subsampling,
             tile_size=tile_size,

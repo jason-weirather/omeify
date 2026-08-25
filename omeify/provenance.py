@@ -8,7 +8,7 @@ def hash_file(path: str | Path) -> dict[str, str]:
     """Return MD5 and SHA-256 checksums for one file."""
 
     file_path = Path(path)
-    md5 = hashlib.md5()
+    md5 = hashlib.md5(usedforsecurity=False)
     sha256 = hashlib.sha256()
     with file_path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):

@@ -57,8 +57,10 @@ channel/level-to-IFD mapping are read from the `<indica>` ImageDescription. TIFF
 are the expected Indica physical-scale source, so using them does not emit a warning. For
 multi-page images, a calibration present on one page applies to pages where those tags are absent;
 any other page that explicitly provides usable resolution calibration must agree. Aperio uses
-`MPP` when available and warns before falling back to TIFF resolution tags. OME-TIFF similarly
-falls back with a warning when its OME `PhysicalSizeX`/`PhysicalSizeY` metadata is incomplete.
+`MPP` when available and warns before falling back to TIFF resolution tags. OME-TIFF falls back
+to TIFF resolution tags only when OME physical X/Y calibration is absent. If OME physical-size
+metadata is partially specified, omeify does not splice the partial OME metadata together with
+TIFF resolution tags; conversion requires an explicit pixel-size override instead.
 Component TIFF uses an explicit override when supplied, otherwise standard TIFF resolution tags
 when available. TIFF resolution-derived values are normalized to micrometers for centimeter or
 inch source units and rounded to six significant digits. If no usable calibration source remains,
@@ -81,7 +83,8 @@ separate `omeify mutate` operation with a per-channel loss report.
 
 Planar mIF and component inputs default to lossless LZW. Brightfield `qptiff_he` and `svs`
 inputs default to JPEG because whole-slide RGB pathology images become extraordinarily large
-under lossless compression.
+under lossless compression. Other conversion profiles, including OME-TIFF normalization, default
+to lossless LZW so normalization does not introduce a new lossy encoding step.
 
 The omeify brightfield default is:
 
@@ -95,7 +98,8 @@ and `411`. Tile dimensions must satisfy the JPEG sampling alignment; omeify repo
 error when they do not.
 
 Lossless LZW, Deflate, ZSTD, and uncompressed output remain available for RGB images. JPEG is
-restricted to `uint8` input.
+restricted to `uint8` RGB output; quantitative planar and label outputs require lossless
+compression.
 
 ## Output conventions
 
@@ -692,7 +696,8 @@ a reliable count when IDs are sparse. `scikit-image` is deliberately not an omei
 ### OME-TIFF writer
 
 `OMETiffWriter` is the single standards-enforcing output implementation used by both the Python
-API and `omeify convert`:
+API and `omeify convert`. The generic writer defaults to lossless LZW; `convert` opts only the
+brightfield `qptiff_he` and `svs` profiles into the JPEG default described above:
 
 ```python
 import numpy as np
