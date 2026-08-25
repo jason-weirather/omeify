@@ -53,7 +53,9 @@ used as a fallback and a warning is emitted; inconsistent calibration still fail
 and `Biomarker` values are both retained in the reader/source metadata, while an explicit policy
 selects the one used as the normalized OME channel name. Indica mIF channel names and the
 channel/level-to-IFD mapping are read from the `<indica>` ImageDescription. TIFF resolution tags
-are the expected Indica physical-scale source, so using them does not emit a warning. Aperio uses
+are the expected Indica physical-scale source, so using them does not emit a warning. For
+multi-page images, a calibration present on one page applies to pages where those tags are absent;
+any other page that explicitly provides usable resolution calibration must agree. Aperio uses
 `MPP` when available and warns before falling back to TIFF resolution tags. OME-TIFF similarly
 falls back with a warning when its OME `PhysicalSizeX`/`PhysicalSizeY` metadata is incomplete.
 Component TIFF uses an explicit override when supplied, otherwise standard TIFF resolution tags

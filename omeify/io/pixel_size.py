@@ -232,30 +232,34 @@ def pixel_size_from_tiff_resolution(page: tifffile.TiffPage) -> PixelSize | None
 def consistent_tiff_resolution_pixel_size(
     pages: Sequence[tifffile.TiffPage],
 ) -> PixelSize | None:
-    """Read one consistent pixel size from TIFF resolution tags across pages."""
+    """Read one series-level pixel size from TIFF resolution tags.
 
-    values = [pixel_size_from_tiff_resolution(page) for page in pages]
-    if not any(item is not None for item in values):
+    TIFF writers commonly store XResolution/YResolution/ResolutionUnit only on
+    the first page of a multi-page image. Missing calibration on later pages is
+    therefore treated as inheriting the first usable page-level value. Any
+    other page that explicitly provides usable calibration must agree.
+    """
+
+    calibrated: list[tuple[int, PixelSize]] = []
+    for index, page in enumerate(pages):
+        pixel_size = pixel_size_from_tiff_resolution(page)
+        if pixel_size is not None:
+            calibrated.append((index, pixel_size))
+    if not calibrated:
         return None
-    if not all(item is not None for item in values):
-        missing = [str(index) for index, item in enumerate(values) if item is None]
-        raise ValueError(
-            "TIFF resolution calibration is present on only some full-resolution pages; "
-            f"missing on pages {', '.join(missing)}"
-        )
 
-    reference = values[0]
-    assert reference is not None
-    for index, item in enumerate(values[1:], start=1):
-        assert item is not None
+    reference_index, reference = calibrated[0]
+    for index, item in calibrated[1:]:
         converted = item.converted_to(reference.unit)
         if not (
             math.isclose(converted.x, reference.x, rel_tol=1e-9, abs_tol=1e-12)
             and math.isclose(converted.y, reference.y, rel_tol=1e-9, abs_tol=1e-12)
         ):
             raise ValueError(
-                "TIFF resolution calibration is inconsistent across full-resolution pages; "
-                f"page 0={reference.to_tuple()}, page {index}={item.to_tuple()}"
+                "TIFF resolution calibration is inconsistent across explicitly calibrated "
+                "full-resolution pages; "
+                f"page {reference_index}={reference.to_tuple()}, "
+                f"page {index}={item.to_tuple()}"
             )
     return reference
 

@@ -208,6 +208,7 @@ def _write_synthetic_indica_mif(
     base: np.ndarray,
     *,
     calibrated: bool = True,
+    additional_resolution_pages: dict[int, tuple[float, float]] | None = None,
 ) -> np.ndarray:
     source_level = np.full(
         (
@@ -226,8 +227,7 @@ def _write_synthetic_indica_mif(
 
     with tifffile.TiffWriter(path, bigtiff=True) as writer:
         ifd = 0
-        for level, data in enumerate((base, source_level)):
-            scale = 2**level
+        for data in (base, source_level):
             for plane in data:
                 options = {
                     "tile": (16, 16),
@@ -235,8 +235,18 @@ def _write_synthetic_indica_mif(
                     "software": "IndicaLabsImageWriter synthetic" if ifd == 0 else False,
                     "metadata": None,
                 }
-                if calibrated:
-                    options["resolution"] = (20000.0 / scale, 25000.0 / scale)
+                pixel_size = None
+                if calibrated and ifd == 0:
+                    # Real Indica/HALO mIF files commonly put the series-level
+                    # TIFF resolution calibration only on the first IFD.
+                    pixel_size = (0.5, 0.4)
+                if additional_resolution_pages and ifd in additional_resolution_pages:
+                    pixel_size = additional_resolution_pages[ifd]
+                if pixel_size is not None:
+                    options["resolution"] = (
+                        1e4 / pixel_size[0],
+                        1e4 / pixel_size[1],
+                    )
                     options["resolutionunit"] = "CENTIMETER"
                 writer.write(plane, **options)
                 ifd += 1
@@ -493,6 +503,25 @@ def test_indica_mif_reader_parses_channels_ifd_map_and_tiff_resolution(
             reader[1].read_region(3, 9, 4, 12),
             data[1, 3:9, 4:12],
         )
+
+
+def test_indica_mif_rejects_conflicting_explicit_tiff_resolution(
+    tmp_path: Path,
+) -> None:
+    data = np.arange(2 * 35 * 49, dtype=np.float32).reshape(2, 35, 49)
+    source = tmp_path / "halo-mif-conflicting-resolution.tif"
+    _write_synthetic_indica_mif(
+        source,
+        data,
+        additional_resolution_pages={1: (0.6, 0.4)},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="inconsistent across explicitly calibrated full-resolution pages",
+    ):
+        with IndicaMIFTiffReader(source):
+            pass
 
 
 def test_indica_inspection_reports_tiff_resolution_without_warning(
