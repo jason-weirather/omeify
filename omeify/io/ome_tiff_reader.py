@@ -33,6 +33,7 @@ class _OMETiffReaderCore:
         self._tiff: tifffile.TiffFile | None = None
         self._inspection: TiffInspector | None = None
         self._read_lock = threading.RLock()
+        self._region_readers: dict[tuple[int, int], TiffPlaneReader] = {}
 
     @property
     def path(self) -> Path:
@@ -62,6 +63,9 @@ class _OMETiffReaderCore:
         return self
 
     def close(self) -> None:
+        for reader in self._region_readers.values():
+            reader.clear_cache()
+        self._region_readers.clear()
         if self._tiff is not None:
             self._tiff.close()
         self._tiff = None
@@ -202,6 +206,23 @@ class _OMETiffReaderCore:
     def _level_pages(self, level: int) -> list[tifffile.TiffPage]:
         return [item.aspage() for item in self._selected_level(level).pages]
 
+    def _region_reader(
+        self,
+        page: tifffile.TiffPage,
+        *,
+        level: int,
+        page_index: int,
+    ) -> TiffPlaneReader:
+        """Reuse decoded TIFF segments across repeated regional reads."""
+
+        self._require_open()
+        key = (int(level), int(page_index))
+        reader = self._region_readers.get(key)
+        if reader is None:
+            reader = TiffPlaneReader(page, lock=self._read_lock)
+            self._region_readers[key] = reader
+        return reader
+
     def asarray(self, *, level: int = 0) -> np.ndarray:
         """Materialize one pyramid level.
 
@@ -256,7 +277,11 @@ class _OMETiffReaderCore:
                     f"{len(pages)} pages for C={size_c}"
                 )
             readers = [
-                TiffPlaneReader(pages[index], lock=self._read_lock)
+                self._region_reader(
+                    pages[index],
+                    level=level,
+                    page_index=index,
+                )
                 for index in selected_channels
             ]
             return np.stack(
@@ -268,7 +293,11 @@ class _OMETiffReaderCore:
             raise NotImplementedError(
                 f"Region reading for axes {axes!r} expects one TIFF page; found {len(pages)}"
             )
-        reader = TiffPlaneReader(pages[0], lock=self._read_lock)
+        reader = self._region_reader(
+            pages[0],
+            level=level,
+            page_index=0,
+        )
         result = reader.read_region(y0, y1, x0, x1)
         if "S" in axes:
             selected_samples = normalize_channel_indices(channels, axis_sizes["S"])
@@ -345,9 +374,12 @@ class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
         return pages[0]
 
     def _channel_plane_reader(self, channel_index: int, level: int) -> TiffPlaneReader:
-        return TiffPlaneReader(
+        selected = self._selected_level(level)
+        page_index = channel_index if "C" in str(selected.axes) else 0
+        return self._region_reader(
             self._channel_page(channel_index, level),
-            lock=self._read_lock,
+            level=level,
+            page_index=page_index,
         )
 
     def _channel_array(self, channel_index: int, level: int) -> np.ndarray:

@@ -19,6 +19,7 @@ from omeify import (
     TiffInspector,
 )
 from omeify.cli import main
+from omeify.io.tiff import TiffPlaneReader
 from omeify.utils.ome_schema_validator import OMESchemaValidator
 
 
@@ -221,6 +222,48 @@ def test_ome_tiff_reader_holds_file_open_reads_regions_and_matches_inspect(
     assert not reader.is_open
     with pytest.raises(RuntimeError, match="must be opened"):
         _ = reader.axes
+
+
+def test_ome_tiff_reader_reuses_decoded_segments_across_region_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "cached-regions.ome.tif"
+    data = _write_ome_tiff(source)
+    cache_misses = 0
+    original_decode_segment = TiffPlaneReader._decode_segment
+
+    def count_cache_misses(
+        plane_reader: TiffPlaneReader,
+        index: int,
+    ) -> tuple[np.ndarray, int, int]:
+        nonlocal cache_misses
+        if index not in plane_reader._cache:
+            cache_misses += 1
+        return original_decode_segment(plane_reader, index)
+
+    monkeypatch.setattr(TiffPlaneReader, "_decode_segment", count_cache_misses)
+
+    reader = OMETiffReader(source)
+    with reader as ome:
+        np.testing.assert_array_equal(
+            ome.read_region(2, 7, 3, 9, channels=[0]),
+            data[[0], 2:7, 3:9],
+        )
+        np.testing.assert_array_equal(
+            ome[0].read_region(7, 12, 8, 14),
+            data[0, 7:12, 8:14],
+        )
+        assert cache_misses == 1
+
+    # Closing the OME reader releases decoded segments. Reopening starts with
+    # a new plane reader rather than retaining data backed by the old TIFF.
+    with reader as ome:
+        np.testing.assert_array_equal(
+            ome.read_region(2, 7, 3, 9, channels=[0]),
+            data[[0], 2:7, 3:9],
+        )
+        assert cache_misses == 2
 
 
 def test_reader_rejects_non_ome_tiff(tmp_path: Path) -> None:
