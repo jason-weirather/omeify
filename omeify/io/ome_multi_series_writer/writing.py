@@ -49,11 +49,8 @@ def prepare_series(
         jpeg_quality=jpeg_quality,
         jpeg_subsampling=jpeg_subsampling,
     )
-    if not image.spec.is_rgb and not compression.lossless:
-        raise ValueError(
-            "Lossy compression is restricted to RGB OME-TIFF series; "
-            "multichannel and label series require lossless compression"
-        )
+    if image.spec.is_label and not compression.lossless:
+        raise ValueError("Label-image OME-TIFF series require lossless compression")
     if compression.subsampling is not None:
         jpeg_alignment = max(compression.subsampling) * 8
         if tile_size % jpeg_alignment != 0:

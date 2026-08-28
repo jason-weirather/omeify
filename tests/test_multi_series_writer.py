@@ -216,3 +216,66 @@ def test_miti_validator_requires_contiguous_ifd_mapping_across_images() -> None:
         "contiguous multi-image mapping requires IFD=2" in error
         for error in assessment.errors
     )
+
+
+def test_multi_series_writer_allows_per_series_grayscale_jpeg(tmp_path: Path) -> None:
+    pytest.importorskip("imagecodecs")
+    output = tmp_path / "mixed-compression.ome.tif"
+    pixel_size = PixelSize(0.5, 0.5, "µm")
+    visualization = np.arange(32 * 48, dtype=np.uint8).reshape(32, 48)
+    labels = (np.arange(32 * 48, dtype=np.uint16).reshape(32, 48) % 17)
+    series = (
+        OMEImageSeries.from_array(
+            "Visualization",
+            visualization,
+            image_type="multichannel",
+            channel_names=("Visualization",),
+            pixel_size=pixel_size,
+            compression="JPEG",
+        ),
+        OMEImageSeries.from_array(
+            "Labels",
+            labels,
+            image_type="label",
+            channel_names=("Labels",),
+            pixel_size=pixel_size,
+        ),
+    )
+
+    report = OMEMultiSeriesWriter(
+        output,
+        compression="LZW",
+        jpeg_quality=90,
+        tile_size=16,
+        pyramid_levels=0,
+    ).write(series)
+
+    assert [item["compression"] for item in report["series"]] == ["JPEG", "LZW"]
+    assert report["output_file"]["lossless_compression"] is False
+    with tifffile.TiffFile(output) as tiff:
+        assert int(tiff.series[0].pages[0].compression) == 7
+        assert int(tiff.series[1].pages[0].compression) == 5
+        decoded = tiff.series[0].asarray()
+        assert decoded.dtype == np.uint8
+        assert decoded.shape == visualization.shape
+        np.testing.assert_array_equal(tiff.series[1].asarray(), labels)
+
+
+def test_multi_series_writer_rejects_jpeg_label_series(tmp_path: Path) -> None:
+    pixel_size = PixelSize(0.5, 0.5, "µm")
+    labels = OMEImageSeries.from_array(
+        "Labels",
+        np.zeros((16, 16), dtype=np.uint8),
+        image_type="label",
+        channel_names=("Labels",),
+        pixel_size=pixel_size,
+        compression="JPEG",
+    )
+
+    with pytest.raises(ValueError, match="require lossless compression"):
+        OMEMultiSeriesWriter(
+            tmp_path / "bad-label.ome.tif",
+            compression="LZW",
+            tile_size=16,
+            pyramid_levels=0,
+        ).write((labels,))

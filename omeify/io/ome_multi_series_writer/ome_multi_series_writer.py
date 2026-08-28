@@ -100,7 +100,7 @@ class OMEMultiSeriesWriter:
         prepared = tuple(
             prepare_series(
                 image,
-                compression_name=self.compression_name,
+                compression_name=image.compression or self.compression_name,
                 jpeg_quality=self.jpeg_quality,
                 jpeg_subsampling=self.jpeg_subsampling,
                 tile_size=self.tile_size,

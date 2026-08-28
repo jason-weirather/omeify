@@ -98,9 +98,10 @@ subsampling while still providing substantial compression. Configure it with
 and `411`. Tile dimensions must satisfy the JPEG sampling alignment; omeify reports a clear
 error when they do not.
 
-Lossless LZW, Deflate, ZSTD, and uncompressed output remain available for RGB images. JPEG is
-restricted to `uint8` RGB output; quantitative planar and label outputs require lossless
-compression.
+Lossless LZW, Deflate, ZSTD, and uncompressed output remain available for RGB images. The
+ordinary primary-image writer restricts JPEG to `uint8` RGB output. The heterogeneous
+multi-series writer may also use JPEG for explicitly selected `uint8` continuous visualization
+series; label series always require lossless compression.
 
 ## Output conventions
 
@@ -779,6 +780,8 @@ Array-backed series may use NumPy memory maps; the writer reads bounded regions 
 materialize the complete stack. Advanced callers use `OMEImageSeries.from_source()` with the same
 `PlaneReaderSource` boundary as the ordinary writer. Continuous series default to deterministic
 2× mean pyramids. Label series require nearest-neighbor pyramids. Series names must be unique.
+A series may override the writer default with `compression="JPEG"`, which is permitted only for
+`uint8` continuous or RGB visualization series; label series remain lossless.
 
 The optional provenance mapping must contain finite JSON-serializable values. Omeify serializes
 it once in canonical JSON, stores it in a namespaced OME `MapAnnotation`, and links that annotation

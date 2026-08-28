@@ -40,6 +40,7 @@ class OMEImageSeries:
     source: PlaneReaderSource
     spec: OMEImageSpec
     downsample: DownsampleMethod
+    compression: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -53,6 +54,10 @@ class OMEImageSeries:
             raise ValueError("downsample must be 'mean' or 'nearest'")
         if self.spec.is_label and self.downsample != "nearest":
             raise ValueError("Label-image series require nearest-neighbor downsampling")
+        if self.compression is not None:
+            if not isinstance(self.compression, str) or not self.compression.strip():
+                raise ValueError("series compression must be a non-empty string or None")
+            object.__setattr__(self, "compression", self.compression.strip())
 
     @classmethod
     def from_array(
@@ -64,6 +69,7 @@ class OMEImageSeries:
         channel_names: Sequence[str] | None,
         pixel_size: PixelSize,
         downsample: DownsampleMethod | None = None,
+        compression: str | None = None,
         icc_profile: bytes | None = None,
     ) -> OMEImageSeries:
         """Create one series from a canonical in-memory or memory-mapped array."""
@@ -99,6 +105,7 @@ class OMEImageSeries:
             source=_ArraySeriesSource(array, spec),
             spec=spec,
             downsample=effective_downsample,
+            compression=compression,
         )
 
     @classmethod
@@ -114,6 +121,7 @@ class OMEImageSeries:
         channel_names: Sequence[str] | None,
         pixel_size: PixelSize,
         downsample: DownsampleMethod | None = None,
+        compression: str | None = None,
         icc_profile: bytes | None = None,
     ) -> OMEImageSeries:
         """Create one series from an explicit random-access plane source."""
@@ -135,4 +143,5 @@ class OMEImageSeries:
             source=source,
             spec=spec,
             downsample=effective_downsample,
+            compression=compression,
         )
