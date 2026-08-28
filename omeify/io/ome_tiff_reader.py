@@ -91,6 +91,38 @@ class _OMETiffReaderCore:
         return self.tiff.series[self.series_index]
 
     @property
+    def series_count(self) -> int:
+        """Return the number of OME image series in the open file."""
+
+        return len(self.tiff.series)
+
+    @property
+    def series_name(self) -> str | None:
+        """Return the selected OME ``Image/@Name`` when one is present."""
+
+        image = self._ome_image_summary()
+        if image is None:
+            return None
+        name = image.get("name")
+        return None if name in {None, ""} else str(name)
+
+    @property
+    def series_names(self) -> tuple[str | None, ...]:
+        """Return ordered OME ``Image/@Name`` values without synthesizing names."""
+
+        ome = self.inspection_report.get("ome")
+        images = [] if ome is None else list(ome.get("images", []))
+        if len(images) != self.series_count:
+            raise ValueError(
+                f"OME metadata describes {len(images)} Images, but TIFF exposes "
+                f"{self.series_count} series"
+            )
+        return tuple(
+            None if image.get("name") in {None, ""} else str(image["name"])
+            for image in images
+        )
+
+    @property
     def levels(self) -> tuple[tifffile.TiffPageSeries, ...]:
         values = tuple(getattr(self.series, "levels", ()) or ())
         return values or (self.series,)

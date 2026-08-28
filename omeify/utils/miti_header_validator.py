@@ -339,8 +339,6 @@ def _validate_record(
             f"Image[{image_index}]: the omeify header profile requires exactly one "
             f"TiffData element; found {len(tiff_data)}"
         )
-    elif tiff_data[0].get("ifd") != 0:
-        errors.append(f"Image[{image_index}]: omeify TiffData must begin at IFD=0")
 
     if (
         isinstance(size_z, int)
@@ -370,6 +368,30 @@ def _validate_record(
     channel_ids = [channel.get("id") for channel in channels]
     if len(channel_ids) != len(set(channel_ids)):
         errors.append(f"Image[{image_index}]: Channel IDs must be unique within the Image")
+
+
+def _validate_tiff_data_sequence(
+    records: list[dict[str, Any]],
+    errors: list[str],
+) -> None:
+    """Validate global top-level IFD mapping across every OME Image."""
+
+    expected_ifd = 0
+    for image_index, record in enumerate(records):
+        tiff_data = record.get("tiff_data", [])
+        if len(tiff_data) != 1:
+            continue
+        mapping = tiff_data[0]
+        ifd = mapping.get("ifd")
+        plane_count = mapping.get("plane_count")
+        if not isinstance(ifd, int) or not isinstance(plane_count, int):
+            continue
+        if ifd != expected_ifd:
+            errors.append(
+                f"Image[{image_index}]: TiffData begins at IFD={ifd}, but contiguous "
+                f"multi-image mapping requires IFD={expected_ifd}"
+            )
+        expected_ifd += plane_count
 
 
 _ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
@@ -492,13 +514,10 @@ def validate_miti_ome_tiff_header(xml_string: str) -> MITIHeaderValidation:
             missing_fields=("OME/Image",),
             extra_metadata=_find_extra_metadata(root),
         )
-    if len(images) > 1:
-        warnings.append(
-            f"The omeify output profile normally contains one Image; validating all {len(images)}"
-        )
-
+    records: list[dict[str, Any]] = []
     for image_index, image in enumerate(images):
         record, interleaved = _normalized_record(root, image, image_index, errors)
+        records.append(record)
         _validate_record(
             record,
             image_index=image_index,
@@ -506,6 +525,7 @@ def validate_miti_ome_tiff_header(xml_string: str) -> MITIHeaderValidation:
             errors=errors,
             missing_fields=missing_fields,
         )
+    _validate_tiff_data_sequence(records, errors)
 
     deduplicated_errors = _deduplicate(errors)
     return MITIHeaderValidation(

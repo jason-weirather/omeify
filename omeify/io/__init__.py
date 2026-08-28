@@ -29,7 +29,9 @@ __all__ = [
     "IndicaMIFTiffReader",
     "LabelImage",
     "MultichannelImage",
+    "OMEImageSeries",
     "OMEImageSpec",
+    "OMEMultiSeriesWriter",
     "OMETiffLabelReader",
     "OMETiffReader",
     "OMETiffWriter",
@@ -59,6 +61,16 @@ def __getattr__(name: str) -> Any:
             "OMETiffWriter": OMETiffWriter,
             "PlaneReaderSource": PlaneReaderSource,
             "TemporaryOMETiffWriter": TemporaryOMETiffWriter,
+        }[name]
+    if name in {"OMEImageSeries", "OMEMultiSeriesWriter"}:
+        from .ome_multi_series_writer import (
+            OMEImageSeries,
+            OMEMultiSeriesWriter,
+        )
+
+        return {
+            "OMEImageSeries": OMEImageSeries,
+            "OMEMultiSeriesWriter": OMEMultiSeriesWriter,
         }[name]
     if name == "write_ometiff":
         from .convenience import write_ometiff

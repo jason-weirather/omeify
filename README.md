@@ -19,6 +19,7 @@ guidelines (Schapiro et. al. Nat Methods. 2022).
 - Inspect the hierarchy and metadata of any TIFF without decoding the image raster
 - Provide context-managed Python readers for every supported conversion source plus OME-TIFF labels
 - Provide one standards-enforcing OME-TIFF writer used by both the Python API and `convert`
+- Provide a separate standards-enforcing writer for named heterogeneous derived-image series
 - Keep image analysis, segmentation, patch generation, stitching, and region measurements outside omeify
 
 ## Supported inputs
@@ -103,9 +104,15 @@ compression.
 
 ## Output conventions
 
-All profiles emit one little-endian BigTIFF series. The generated OME-XML therefore declares
-`BigEndian="false"`. Converting a big-endian source changes byte encoding, not its numeric dtype
-or values.
+Conversion profiles and the ordinary `OMETiffWriter` emit one little-endian BigTIFF series. The
+generated OME-XML therefore declares `BigEndian="false"`. Converting a big-endian source changes
+byte encoding, not its numeric dtype or values.
+
+`OMEMultiSeriesWriter` is the separate derived-product path. It writes multiple named OME
+`Image` elements into one little-endian BigTIFF and permits each series to have its own scalar
+dtype, image type, channel vocabulary, physical calibration, and pyramid downsampling policy.
+Top-level IFD mappings remain contiguous across the file, while SubIFDs remain private to their
+own image series.
 
 `SignificantBits` is the full storage width of the output pixel type: 8 for `uint8`, 16 for
 `uint16`, 32 for `float32`, and so on.
@@ -190,6 +197,8 @@ another place for unnecessary source identity to enter the standardized file.
 | Empty `LightPath` | Generated for each OME channel | Preserves schema structure without inventing acquisition metadata. |
 | Pyramid `MapAnnotation` + `AnnotationRef` | Generated when a pyramid is present | Records rebuilt level dimensions and links them to the image. |
 | TIFF ICC profile | Preserved for RGB when present | Retains the source color-space characterization without copying free-text metadata. |
+| `Image/@Name` in multi-series outputs | Required and caller supplied | Gives every derived series one stable navigation identity without inferring semantics from IFD position or dtype. |
+| Shared JSON provenance `MapAnnotation` in multi-series outputs | Optional and caller supplied | Stores one canonical structured provenance record and links it to every image without duplicating free text. |
 
 This is metadata minimization, not metadata invention. MITI also defines biospecimen, reagent,
 acquisition, instrument, processing, analysis, and other companion metadata. Those records remain
@@ -625,6 +634,8 @@ from omeify import OMETiffReader
 with OMETiffReader("output.ome.tif") as ome:
     print(ome)  # same default tree as: omeify inspect output.ome.tif
     print(ome.pixel_size)
+    print(ome.series_name)
+    print(ome.series_names)
 
     dapi = ome[0]
     panck = ome.get_by_name("PanCK")
@@ -721,6 +732,58 @@ values from intensity values.
 Advanced streaming sources can implement the small `PlaneReaderSource` contract and call
 `write_source`. The public `convert()` helper uses that path directly with the source readers, so
 there is no second private writer or conversion-only I/O stack drifting away from the public API.
+
+### Heterogeneous multi-series writer
+
+`OMEMultiSeriesWriter` is intentionally not another mode on `OMETiffWriter`. The primary-image
+writer has one dtype and channel organization. A derived stack may instead contain continuous
+float rasters, compact integer labels, masks, and RGB views in one file. Each layer is therefore
+represented by one explicit `OMEImageSeries` and one OME `Image`:
+
+```python
+import numpy as np
+from omeify import OMEImageSeries, OMEMultiSeriesWriter, PixelSize
+
+pixel_size = PixelSize(0.5, 0.5, "µm")
+series = (
+    OMEImageSeries.from_array(
+        "Normalized DAPI",
+        np.zeros((4096, 4096), dtype=np.float32),
+        image_type="multichannel",
+        channel_names=("Normalized DAPI",),
+        pixel_size=pixel_size,
+    ),
+    OMEImageSeries.from_array(
+        "Nuclear segmentation",
+        np.zeros((4096, 4096), dtype=np.uint32),
+        image_type="label",
+        channel_names=("Nuclear segmentation",),
+        pixel_size=pixel_size,
+    ),
+)
+
+report = OMEMultiSeriesWriter(
+    "segmentation.ome.tif",
+    compression="Deflate",
+).write(
+    series,
+    provenance={
+        "schema": "example.segmentation.provenance/1",
+        "software": {"name": "example-segmenter", "version": "1.0"},
+        "parameters": {"threshold": 0.25},
+    },
+)
+```
+
+Array-backed series may use NumPy memory maps; the writer reads bounded regions and does not
+materialize the complete stack. Advanced callers use `OMEImageSeries.from_source()` with the same
+`PlaneReaderSource` boundary as the ordinary writer. Continuous series default to deterministic
+2× mean pyramids. Label series require nearest-neighbor pyramids. Series names must be unique.
+
+The optional provenance mapping must contain finite JSON-serializable values. Omeify serializes
+it once in canonical JSON, stores it in a namespaced OME `MapAnnotation`, and links that annotation
+from every image. The annotation is generic file-boundary metadata; Omeify does not interpret
+segmentation parameters or label identities.
 
 ### Convenience writers
 

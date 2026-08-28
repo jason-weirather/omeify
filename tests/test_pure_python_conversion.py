@@ -988,7 +988,7 @@ def test_click_group_exposes_version_inspect_mutate_and_convert() -> None:
     result = CliRunner().invoke(main, ["version", "--json"])
     assert result.exit_code == 0
     version_info = json.loads(result.output)
-    assert version_info["omeify"] == "0.11.0"
+    assert version_info["omeify"] == "0.12.0"
     assert "tifffile" in version_info
 
     eager_result = CliRunner().invoke(main, ["--version"])
@@ -1065,7 +1065,7 @@ def test_pyproject_is_the_version_authority() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with pyproject.open("rb") as handle:
         project_version = tomllib.load(handle)["project"]["version"]
-    assert __version__ == project_version == "0.11.0"
+    assert __version__ == project_version == "0.12.0"
 
 
 def test_bundled_miti_json_schema_is_available() -> None:
