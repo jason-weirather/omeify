@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import logging
@@ -26,7 +25,6 @@ from omeify.io.ome_tiff_writer import (
 )
 from omeify.io.tiff import ArrayPlaneReader
 from omeify.progress import ProgressLogger
-from omeify.provenance import hash_file
 
 
 class _ArraySource:
@@ -229,25 +227,6 @@ def test_mutation_analysis_maps_one_channel_before_scanning_the_next(monkeypatch
     assert events == ["scan-0", "map-0", "scan-1", "map-1"]
 
 
-def test_hash_file_logs_progress_and_preserves_digest_values(
-    tmp_path: Path,
-    caplog,
-) -> None:
-    path = tmp_path / "payload.bin"
-    payload = b"omeify-progress" * 1024
-    path.write_bytes(payload)
-
-    with caplog.at_level(logging.INFO, logger="omeify.provenance"):
-        result = hash_file(path, progress_label="Checksumming test payload")
-
-    assert result == {
-        "md5_checksum": hashlib.md5(payload, usedforsecurity=False).hexdigest(),
-        "sha256_checksum": hashlib.sha256(payload).hexdigest(),
-    }
-    assert "Checksumming test payload [--------------------]   0%" in caplog.text
-    assert "Checksumming test payload [####################] 100%" in caplog.text
-
-
 def test_channel_logging_shows_discovered_names_and_explicit_renames(caplog) -> None:
     logger = logging.getLogger("omeify.tests.channels")
 
@@ -277,8 +256,6 @@ def test_convert_and_mutate_share_boundary_helpers_and_writer_without_calling_ea
         mutation_module.validate_channel_rename_mapping
         is workflow_module.validate_channel_rename_mapping
     )
-    assert conversion_module.update_file_checksums is workflow_module.update_file_checksums
-    assert mutation_module.update_file_checksums is workflow_module.update_file_checksums
     assert conversion_module.OMETiffWriter is mutation_module.OMETiffWriter
     assert conversion_module.convert is not mutation_module.mutate
 
@@ -327,7 +304,6 @@ def test_mutate_uses_shared_writer_through_dtype_transform_adapter(
         tile_size=16,
         pyramid_levels=0,
         max_workers=1,
-        calculate_checksums=False,
     )
 
     assert isinstance(observed["source"], DTypeMutationSource)

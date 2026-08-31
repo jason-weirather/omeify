@@ -302,12 +302,11 @@ def test_conversion_preserves_dtype_and_rebuilds_pyramid(tmp_path: Path, dtype) 
         tile_size=16,
         pyramid_levels=2,
         downsample="mean",
-        calculate_checksums=False,
     )
 
     assert report["output_file"]["dtype"] == np.dtype(dtype).name
-    assert report["input_file"]["sha256_checksum"] is None
-    assert report["output_file"]["sha256_checksum"] is None
+    assert "sha256_checksum" not in report["input_file"]
+    assert "sha256_checksum" not in report["output_file"]
     assert report["verification"]["ome_tiff_recognized"] is True
     assert report["verification"]["bigtiff"] is True
     assert report["verification"]["output_byte_order"] == "little"
@@ -363,7 +362,6 @@ def test_channel_rename_and_omit_uuid(tmp_path: Path) -> None:
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=1,
-        calculate_checksums=False,
     )
     assert report["ome"]["uuid"] is None
     with tifffile.TiffFile(output) as tif:
@@ -384,7 +382,6 @@ def test_akoya_qptiff_profile_ignores_source_pyramid(tmp_path: Path) -> None:
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=1,
-        calculate_checksums=False,
     )
 
     assert report["input_file"]["source_axes"] == "CYX"
@@ -440,7 +437,6 @@ def test_akoya_he_qptiff_writes_one_interleaved_rgb_ifd(tmp_path: Path) -> None:
         tile_size=16,
         pyramid_levels=1,
         downsample="mean",
-        calculate_checksums=False,
     )
 
     assert report["input_file"]["source_axes"] == "YXS"
@@ -559,7 +555,6 @@ def test_indica_mif_conversion_rebuilds_pyramid_and_writes_micrometer_scale(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=1,
-        calculate_checksums=False,
     )
 
     assert report["input_file"]["type_description"] == "Indica Labs/HALO mIF TIFF"
@@ -606,7 +601,6 @@ def test_indica_mif_without_resolution_requires_or_accepts_explicit_pixel_size(
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
 
     report = convert(
@@ -617,7 +611,6 @@ def test_indica_mif_without_resolution_requires_or_accepts_explicit_pixel_size(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     assert report["input_file"]["pixel_size"] is None
     assert report["image"]["pixel_size"] == [0.51, 0.52, "µm"]
@@ -642,7 +635,6 @@ def test_aperio_svs_reads_mpp_and_drops_vendor_description(tmp_path: Path) -> No
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     assert report["input_file"]["source_axes"] == "YXS"
@@ -724,7 +716,6 @@ def test_jpeg_411_requires_tile_size_divisible_by_32(tmp_path: Path) -> None:
             jpeg_subsampling="411",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
     assert not output.exists()
 
@@ -744,7 +735,6 @@ def test_he_default_jpeg_when_imagecodecs_is_available(tmp_path: Path) -> None:
         input_type="qptiff_he",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     assert report["options"]["compression"] == "JPEG"
@@ -775,7 +765,6 @@ def test_zero_pyramid_levels_writes_base_only(tmp_path: Path) -> None:
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     assert report["pyramid"]["subresolution_count"] == 0
@@ -798,7 +787,6 @@ def test_strip_source_and_mismatched_output_grid(tmp_path: Path) -> None:
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=2,
-        calculate_checksums=False,
     )
 
     assert report["verification"]["all_levels_tiled"] is True
@@ -820,7 +808,6 @@ def test_float32_dtype_and_miti_type_are_preserved(tmp_path: Path) -> None:
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=1,
-        calculate_checksums=False,
     )
 
     assert report["output_file"]["dtype"] == "float32"
@@ -843,7 +830,6 @@ def test_significant_bits_matches_dtype_width(tmp_path: Path) -> None:
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     assert report["image"]["significant_bits"] == 16
@@ -865,7 +851,6 @@ def test_deflate_is_lossless_and_uses_the_same_streaming_path(tmp_path: Path) ->
         compression="Deflate",
         tile_size=16,
         pyramid_levels=1,
-        calculate_checksums=False,
     )
 
     assert report["output_file"]["lossless_compression"] is True
@@ -888,7 +873,6 @@ def test_unsupported_dtype_fails_without_casting(tmp_path: Path) -> None:
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
     assert not output.exists()
 
@@ -906,7 +890,6 @@ def test_input_and_output_must_differ(tmp_path: Path) -> None:
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
 
 
@@ -925,7 +908,6 @@ def test_big_endian_input_is_written_little_endian_without_value_change(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     assert report["input_file"]["byte_order"] == "big"
@@ -951,7 +933,6 @@ def test_explicit_pyramid_level_count_must_be_possible(tmp_path: Path) -> None:
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=10,
-            calculate_checksums=False,
         )
     assert not output.exists()
 
@@ -1042,7 +1023,6 @@ def test_cli_svs_type_routes_to_rgb_converter(tmp_path: Path) -> None:
             "16",
             "--pyramid-levels",
             "0",
-            "--no-checksums",
         ],
     )
 
@@ -1106,7 +1086,6 @@ def test_convert_helper_dogfoods_public_ome_tiff_writer(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     assert called["value"] is True

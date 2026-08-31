@@ -376,7 +376,6 @@ Useful conversion options:
 --pixel-size-x/y/unit     Explicit physical-size override; default unit µm
 --omit-uuid               Omit the optional OME root UUID
 --workers N               TIFF compression workers
---no-checksums            Skip the final whole-file checksum pass
 ```
 
 Only the selected TIFF series is converted. The default is series 0, which is the baseline
@@ -448,8 +447,8 @@ that requires common intensity units should reuse fixed channel mappings rather 
 new automatic mapping for every slide.
 
 For a durable scientific output, use `--output-json` and keep that report as a sidecar to the
-mutated OME-TIFF. Checksums are enabled by default so the report identifies the exact input and
-output files to which its mappings apply.
+mutated OME-TIFF. The report records the input/output paths, file sizes, and complete mapping
+parameters without rereading whole-slide files after the mutation is complete.
 
 ### Inspect
 

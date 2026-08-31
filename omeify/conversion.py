@@ -18,7 +18,6 @@ from .workflow import (
     build_input_report,
     log_channel_mapping,
     log_source_summary,
-    update_file_checksums,
     validate_channel_rename_mapping as _validate_channel_rename_mapping,
     validate_image_paths,
 )
@@ -53,7 +52,6 @@ def convert(
     max_workers: int | None = None,
     display_uuid: bool = True,
     overwrite: bool = True,
-    calculate_checksums: bool = True,
     cache_directory: str | Path | None = None,
 ) -> dict[str, object]:
     """Normalize one supported image into omeify's canonical OME-TIFF contract.
@@ -202,13 +200,6 @@ def convert(
         }
     )
 
-    update_file_checksums(
-        input_report,
-        output_report,
-        input_file=input_file,
-        output_file=output_file,
-        calculate=calculate_checksums,
-    )
 
     stop_epoch = time.time()
     report: dict[str, object] = {

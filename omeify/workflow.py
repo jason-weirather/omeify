@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 from .io.ome_tiff_reader import OMETiffReader
 from .io.pixel_size import PixelSize
-from .provenance import hash_file
 
 RenameChannelsBy = Literal["name", "index"]
 ChannelRenameMapping = Mapping[str, str] | Mapping[int, str]
@@ -249,30 +248,3 @@ def build_input_report(
         time.monotonic() - started,
     )
     return report
-
-
-def update_file_checksums(
-    input_report: dict[str, object],
-    output_report: dict[str, object],
-    *,
-    input_file: Path,
-    output_file: Path,
-    calculate: bool,
-) -> None:
-    """Populate the common checksum fields for convert and mutate reports."""
-
-    if calculate:
-        LOGGER.info("Calculating whole-file input and output checksums")
-        input_report.update(
-            hash_file(input_file, progress_label=f"Checksumming input {input_file.name}")
-        )
-        output_report.update(
-            hash_file(output_file, progress_label=f"Checksumming output {output_file.name}")
-        )
-        return
-
-    LOGGER.info("Checksum calculation disabled")
-    input_report["md5_checksum"] = None
-    input_report["sha256_checksum"] = None
-    output_report["md5_checksum"] = None
-    output_report["sha256_checksum"] = None

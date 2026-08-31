@@ -81,7 +81,6 @@ def test_auto_preserves_integer_scale_when_float_values_show_integer_ancestry(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     channels = report["dtype_mutation"]["channels"]
@@ -124,7 +123,6 @@ def test_auto_preserves_1500_count_scale_in_uint16_but_rescales_for_uint8(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     uint16_channel = uint16_report["dtype_mutation"]["channels"][0]
     assert uint16_channel["mapping"]["name"] == "identity"
@@ -143,7 +141,6 @@ def test_auto_preserves_1500_count_scale_in_uint16_but_rescales_for_uint8(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     uint8_channel = uint8_report["dtype_mutation"]["channels"][0]
     assert uint8_channel["mapping"]["name"] == "zero_anchored_linear"
@@ -170,7 +167,6 @@ def test_auto_does_not_percentile_clip_a_rare_bright_pixel(tmp_path: Path) -> No
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     channel = report["dtype_mutation"]["channels"][0]
     assert channel["source"]["sample_percentiles"]["p99_9"] < 200
@@ -198,7 +194,6 @@ def test_mutate_reads_indica_float_source_directly_without_float_ome_intermediat
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     assert report["options"]["input_type"] == "indica_mif"
@@ -229,7 +224,6 @@ def test_auto_uses_zero_anchored_scaling_when_subinteger_values_look_continuous(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     channels = report["dtype_mutation"]["channels"]
@@ -275,7 +269,6 @@ def test_auto_preserves_broad_source_scale_when_unit_rounding_loss_is_small(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     channel = preserved_report["dtype_mutation"]["channels"][0]
     assert channel["integer_lattice_evidence"]["classification"] == "weak"
@@ -292,7 +285,6 @@ def test_auto_preserves_broad_source_scale_when_unit_rounding_loss_is_small(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     scaled_channel = scaled_report["dtype_mutation"]["channels"][0]
     assert scaled_channel["mapping"]["name"] == "zero_anchored_linear"
@@ -315,7 +307,6 @@ def test_preserve_mode_forces_source_scale_and_rejects_an_unrepresentable_range(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     assert report["dtype_mutation"]["channels"][0]["mapping"]["name"] == "identity"
     with OMETiffReader(output) as reader:
@@ -336,7 +327,6 @@ def test_preserve_mode_forces_source_scale_and_rejects_an_unrepresentable_range(
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
 
 
@@ -358,7 +348,6 @@ def test_auto_rejects_negative_values_and_full_range_maps_them_explicitly(
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
     assert not output.exists()
 
@@ -371,7 +360,6 @@ def test_auto_rejects_negative_values_and_full_range_maps_them_explicitly(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     mapping = report["dtype_mutation"]["channels"][0]["mapping"]
     assert mapping["name"] == "full_range_linear"
@@ -402,7 +390,6 @@ def test_mutation_rejects_nonfinite_values_before_writing(tmp_path: Path) -> Non
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
     assert not output.exists()
 
@@ -432,7 +419,6 @@ def test_mutation_cli_emits_structured_per_channel_report(tmp_path: Path) -> Non
             "16",
             "--pyramid-levels",
             "0",
-            "--no-checksums",
             "--output-json",
             str(report_path),
         ],
@@ -471,7 +457,6 @@ def test_mutation_python_api_supports_convert_channel_rename_semantics(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     assert [item["name"] for item in name_report["input_file"]["channels"]] == [
         "A",
@@ -498,7 +483,6 @@ def test_mutation_python_api_supports_convert_channel_rename_semantics(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     assert index_report["image"]["channel_names"] == ["First", "B", "Third"]
     assert index_report["options"]["rename_channels"] == {0: "First", 2: "Third"}
@@ -515,7 +499,6 @@ def test_mutation_python_api_supports_convert_channel_rename_semantics(
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
 
 
@@ -553,7 +536,6 @@ def test_mutation_cli_accepts_channel_rename_json_with_interspersed_options(
             "16",
             "--pyramid-levels",
             "0",
-            "--no-checksums",
             "--output-json",
             str(report_path),
             "--verbose",

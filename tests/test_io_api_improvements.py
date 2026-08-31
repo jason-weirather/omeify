@@ -225,7 +225,6 @@ def test_fusion_reader_reports_missing_calibration_and_convert_accepts_override(
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
 
     report = convert(
@@ -236,7 +235,6 @@ def test_fusion_reader_reports_missing_calibration_and_convert_accepts_override(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     assert report["input_file"]["pixel_size"] is None
     assert report["image"]["pixel_size"] == [0.51, 0.51, "µm"]
@@ -311,7 +309,6 @@ def test_fusion_reader_rejects_inconsistent_pixel_sizes(tmp_path: Path) -> None:
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
     assert not output.exists()
 
@@ -337,7 +334,6 @@ def test_fusion_conversion_profile_preserves_source_fields_but_writes_selected_n
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     assert report["image"]["channel_names"] == ["CD3", "PanCK"]
@@ -365,7 +361,6 @@ def test_python_channel_renames_require_explicit_mode_and_support_indices(
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
 
     report = convert(
@@ -377,7 +372,6 @@ def test_python_channel_renames_require_explicit_mode_and_support_indices(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     assert report["image"]["channel_names"] == ["Alpha", "B", "Gamma"]
 
@@ -391,7 +385,6 @@ def test_python_channel_renames_require_explicit_mode_and_support_indices(
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
 
     duplicate_source = tmp_path / "duplicate-source.ome.tif"
@@ -406,7 +399,6 @@ def test_python_channel_renames_require_explicit_mode_and_support_indices(
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
 
 
@@ -437,7 +429,6 @@ def test_cli_channel_rename_json_by_name_and_index(tmp_path: Path) -> None:
             "16",
             "--pyramid-levels",
             "0",
-            "--no-checksums",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -464,7 +455,6 @@ def test_cli_channel_rename_json_by_name_and_index(tmp_path: Path) -> None:
             "16",
             "--pyramid-levels",
             "0",
-            "--no-checksums",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -535,7 +525,6 @@ def test_cli_rejects_missing_malformed_and_mixed_channel_rename_modes(tmp_path: 
             "16",
             "--pyramid-levels",
             "0",
-            "--no-checksums",
         ],
     )
     assert numeric_name_result.exit_code == 0, numeric_name_result.output
@@ -757,7 +746,6 @@ def test_fusion_cli_profile_and_subcommand_only_policy(tmp_path: Path) -> None:
             "16",
             "--pyramid-levels",
             "0",
-            "--no-checksums",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -832,7 +820,6 @@ def test_ome_tiff_input_is_rewritten_to_minimized_miti_contract(tmp_path: Path) 
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     source_miti = report["input_file"]["source_miti_header"]
@@ -871,7 +858,6 @@ def test_ome_tiff_normalization_can_supply_missing_pixel_size_explicitly(
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
 
     report = convert(
@@ -882,7 +868,6 @@ def test_ome_tiff_normalization_can_supply_missing_pixel_size_explicitly(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     assert report["image"]["pixel_size"] == [0.75, 0.8, "µm"]
     assert report["options"]["pixel_size_override"] == [0.75, 0.8, "µm"]
@@ -920,7 +905,6 @@ def test_ome_tiff_missing_physical_size_falls_back_to_tiff_resolution_with_warni
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
     assert report["image"]["pixel_size"] == [0.5, 0.4, "µm"]
@@ -962,7 +946,6 @@ def test_partial_ome_pixel_size_requires_explicit_conversion_override(tmp_path: 
             compression="Uncompressed",
             tile_size=16,
             pyramid_levels=0,
-            calculate_checksums=False,
         )
     assert not output.exists()
 
@@ -974,7 +957,6 @@ def test_partial_ome_pixel_size_requires_explicit_conversion_override(tmp_path: 
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     assert report["input_file"]["pixel_size"] is None
     assert report["image"]["pixel_size"] == [0.75, 0.8, "µm"]
@@ -1006,7 +988,6 @@ def test_component_reader_uses_tiff_resolution_when_no_override_is_supplied(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
     assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
     assert report["image"]["pixel_size"] == [0.5, 0.4, "µm"]
@@ -1035,7 +1016,6 @@ def test_component_pixel_size_override_does_not_replace_source_provenance(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        calculate_checksums=False,
     )
 
     assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]

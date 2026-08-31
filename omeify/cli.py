@@ -277,7 +277,6 @@ def main() -> None:
     help="Unit for an explicit physical pixel-size override; default µm.",
 )
 @click.option("--overwrite/--no-overwrite", default=True, show_default=True)
-@click.option("--checksums/--no-checksums", default=True, show_default=True)
 @click.option(
     "-v",
     "--verbose",
@@ -309,7 +308,6 @@ def convert_command(
     pixel_size_y: float | None,
     pixel_size_unit: str | None,
     overwrite: bool,
-    checksums: bool,
     verbose: int,
 ) -> None:
     """Convert INPUT_PATH into a deidentified pyramidal OME-TIFF at OUTPUT_PATH."""
@@ -348,7 +346,6 @@ def convert_command(
             downsample=downsample,  # type: ignore[arg-type]
             max_workers=workers,
             overwrite=overwrite,
-            calculate_checksums=checksums,
             cache_directory=cache_directory,
         )
     except Exception as exc:
@@ -479,7 +476,6 @@ def convert_command(
     help="Unit for an explicit physical pixel-size override; default µm.",
 )
 @click.option("--overwrite/--no-overwrite", default=True, show_default=True)
-@click.option("--checksums/--no-checksums", default=True, show_default=True)
 @click.option(
     "-v",
     "--verbose",
@@ -513,7 +509,6 @@ def mutate_command(
     pixel_size_y: float | None,
     pixel_size_unit: str | None,
     overwrite: bool,
-    checksums: bool,
     verbose: int,
 ) -> None:
     """Create a dtype-mutated OME-TIFF from planar floating-point INPUT_PATH."""
@@ -552,7 +547,6 @@ def mutate_command(
             max_workers=workers,
             display_uuid=not omit_uuid,
             overwrite=overwrite,
-            calculate_checksums=checksums,
             cache_directory=cache_directory,
         )
     except Exception as exc:
