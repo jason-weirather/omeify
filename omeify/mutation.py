@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime
 from pathlib import Path
@@ -8,12 +9,6 @@ from typing import Literal
 import numpy as np
 
 from ._version import get_version_info
-from .conversion import (
-    ChannelRenameMapping,
-    RenameChannelsBy,
-    _apply_channel_renames,
-    _validate_channel_rename_mapping,
-)
 from .dtype_mutation import (
     DEFAULT_AUTO_MAX_NORMALIZED_RMSE,
     DEFAULT_SAMPLE_PIXELS_PER_CHANNEL,
@@ -25,11 +20,23 @@ from .dtype_mutation import (
     TargetDType,
     analyze_dtype_mutation,
 )
-from .io.ome_tiff_reader import OMETiffReader
 from .io.ome_tiff_writer import DownsampleMethod, OMETiffWriter
 from .io.pixel_size import PixelSize
 from .io.source_reader import PLANAR_INPUT_TYPES, PlanarInputType, source_reader
-from .provenance import hash_file, readable_runtime
+from .provenance import readable_runtime
+from .workflow import (
+    ChannelRenameMapping,
+    RenameChannelsBy,
+    apply_channel_renames,
+    build_input_report,
+    log_channel_mapping,
+    log_source_summary,
+    update_file_checksums,
+    validate_channel_rename_mapping,
+    validate_image_paths,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 
 def mutate(
@@ -64,17 +71,14 @@ def mutate(
     then the transformed planes stream through the normal :class:`OMETiffWriter`.
     """
 
-    input_file = Path(input_path)
-    output_file = Path(output_path)
-    if not input_file.is_file():
-        raise FileNotFoundError(f"Input image does not exist: {input_file}")
-    if input_file.resolve() == output_file.resolve():
-        raise ValueError("Input and output paths must be different")
-    if output_file.exists() and not overwrite:
-        raise FileExistsError(f"Output already exists: {output_file}")
+    input_file, output_file = validate_image_paths(
+        input_path,
+        output_path,
+        overwrite=overwrite,
+    )
     if input_type not in PLANAR_INPUT_TYPES:
         raise ValueError(f"Unsupported input_type {input_type!r}")
-    normalized_renames, normalized_rename_mode = _validate_channel_rename_mapping(
+    normalized_renames, normalized_rename_mode = validate_channel_rename_mapping(
         rename_channels,
         rename_channels_by,
     )
@@ -88,6 +92,12 @@ def mutate(
         raise ValueError("dtype-mutated quantitative channels require lossless compression")
 
     start_epoch = time.time()
+    LOGGER.info(
+        "Mutate workflow: opening %s as input type %s, series %s",
+        input_file,
+        input_type,
+        int(series),
+    )
     reader = source_reader(
         input_file,
         input_type=input_type,
@@ -113,12 +123,38 @@ def mutate(
                 "invent one"
             )
 
-        source_channel_names = tuple(reader.channel_names)
-        output_channel_names = _apply_channel_renames(
+        log_source_summary(
+            LOGGER,
+            reader,
+            source_pixel_size=source_pixel_size,
+            effective_pixel_size=effective_pixel_size,
+            pixel_size_overridden=pixel_size is not None,
+        )
+        source_channels = tuple(reader.channels)
+        source_channel_names = tuple(channel.name for channel in source_channels)
+        output_channel_names = apply_channel_renames(
             source_channel_names,
             normalized_renames,
             normalized_rename_mode,
         )
+        log_channel_mapping(
+            LOGGER,
+            source_channels,
+            output_channel_names,
+            rename_mode=normalized_rename_mode,
+        )
+        LOGGER.info(
+            "Mutation boundary: %s -> %s using range mode %s; source metadata and geometry "
+            "remain on the shared conversion path",
+            reader.dtype,
+            dtype,
+            range_mode,
+        )
+        LOGGER.info(
+            "Scanning every full-resolution channel before writing so each channel gets one "
+            "fixed, auditable mapping"
+        )
+        analysis_started = time.monotonic()
         plans = analyze_dtype_mutation(
             reader,
             channel_names=source_channel_names,
@@ -128,7 +164,18 @@ def mutate(
             sample_pixels_per_channel=sample_pixels_per_channel,
             auto_max_normalized_rmse=auto_max_normalized_rmse,
         )
+        LOGGER.info(
+            "Mutation planning completed in %s",
+            readable_runtime(time.monotonic() - analysis_started),
+        )
         transformed = DTypeMutationSource(reader, plans)
+        LOGGER.info(
+            "Using the same OME-TIFF writer as convert through a streaming dtype-transform "
+            "adapter (compression=%s, tile=%s, downsample=%s)",
+            compression,
+            tile_size,
+            downsample,
+        )
         writer = OMETiffWriter(
             output_file,
             image_type="multichannel",
@@ -143,47 +190,25 @@ def mutate(
             overwrite=overwrite,
             cache_directory=cache_directory,
         )
+        writer_started = time.monotonic()
         write_report = writer.write_source(
             transformed,
             axes=reader.output_axes,
             shape=reader.output_shape,
             dtype=np.dtype(dtype),
         )
+        LOGGER.info(
+            "Shared writer path completed in %s",
+            readable_runtime(time.monotonic() - writer_started),
+        )
 
-        source_miti_header = None
-        if isinstance(reader, OMETiffReader):
-            ome_summary = reader.inspection_report.get("ome")
-            if ome_summary is not None:
-                source_miti_header = ome_summary.get("miti")
-        source_channels = [
-            {
-                "index": channel.index,
-                "id": channel.id,
-                "name": channel.name,
-                "source_id": channel.source_id,
-                "id_is_generated": channel.id_is_generated,
-                "source_metadata": dict(channel.source_metadata),
-            }
-            for channel in reader.channels
-        ]
-        input_report: dict[str, object] = {
-            "path": str(input_file),
-            "size_bytes": input_file.stat().st_size,
-            "type_description": reader.input_type_description,
-            "dtype": reader.dtype.name,
-            "shape": list(reader.shape),
-            "normalized_shape": list(reader.output_shape),
-            "source_axes": reader.source_axes,
-            "output_axes": reader.output_axes,
-            "byte_order": reader.source_byte_order,
-            "pixel_size": (
-                None if source_pixel_size is None else list(source_pixel_size.to_tuple())
-            ),
-            "channels": source_channels,
-            "source_miti_header": source_miti_header,
-        }
+        input_report = build_input_report(
+            reader,
+            input_file,
+            source_pixel_size,
+            always_include_source_miti_header=True,
+        )
 
-    stop_epoch = time.time()
     output_size = output_file.stat().st_size
     output_report = dict(write_report["output_file"])
     options = dict(write_report["options"])
@@ -204,6 +229,16 @@ def mutate(
             "auto_max_normalized_rmse": float(auto_max_normalized_rmse),
         }
     )
+
+    update_file_checksums(
+        input_report,
+        output_report,
+        input_file=input_file,
+        output_file=output_file,
+        calculate=calculate_checksums,
+    )
+
+    stop_epoch = time.time()
     report: dict[str, object] = {
         "operation": "dtype",
         "ome": write_report["ome"],
@@ -252,13 +287,10 @@ def mutate(
         },
         "versions": get_version_info(),
     }
-
-    if calculate_checksums:
-        input_report.update(hash_file(input_file))
-        output_report.update(hash_file(output_file))
-    else:
-        input_report["md5_checksum"] = None
-        input_report["sha256_checksum"] = None
-        output_report["md5_checksum"] = None
-        output_report["sha256_checksum"] = None
+    LOGGER.info(
+        "Mutate complete: %s (%s bytes) in %s",
+        output_file,
+        f"{output_size:,}",
+        readable_runtime(stop_epoch - start_epoch),
+    )
     return report

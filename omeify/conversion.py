@@ -1,105 +1,37 @@
 from __future__ import annotations
 
+import logging
 import time
-from collections.abc import Mapping, Sequence
 from datetime import datetime
-from numbers import Integral
 from pathlib import Path
 from typing import Literal
 
 from ._version import get_version_info
-from .io.ome_tiff_reader import OMETiffReader
 from .io.ome_tiff_writer import JPEGSubsampling, OMETiffWriter
 from .io.pixel_size import PixelSize
 from .io.source_reader import INPUT_TYPES, InputType, source_reader
-from .provenance import hash_file, readable_runtime
+from .provenance import readable_runtime
+from .workflow import (
+    ChannelRenameMapping,
+    RenameChannelsBy,
+    apply_channel_renames as _apply_channel_renames,
+    build_input_report,
+    log_channel_mapping,
+    log_source_summary,
+    update_file_checksums,
+    validate_channel_rename_mapping as _validate_channel_rename_mapping,
+    validate_image_paths,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 DownsampleMethod = Literal["mean", "nearest"]
-
-RenameChannelsBy = Literal["name", "index"]
-ChannelRenameMapping = Mapping[str, str] | Mapping[int, str]
 
 
 def _default_compression(input_type: InputType) -> str:
     """Return the fidelity policy for an explicitly selected source profile."""
 
     return "JPEG" if input_type in {"qptiff_he", "svs"} else "LZW"
-
-
-def _validate_channel_rename_mapping(
-    mapping: ChannelRenameMapping | None,
-    by: RenameChannelsBy | None,
-) -> tuple[dict[str, str] | dict[int, str], RenameChannelsBy | None]:
-    """Validate a channel rename mapping at the conversion boundary."""
-
-    if not mapping:
-        if by is not None and by not in {"name", "index"}:
-            raise ValueError("rename_channels_by must be 'name' or 'index'")
-        return {}, by
-    if by not in {"name", "index"}:
-        raise ValueError(
-            "rename_channels_by must be explicitly set to 'name' or 'index' "
-            "when rename_channels is provided"
-        )
-    if not all(isinstance(value, str) and value.strip() for value in mapping.values()):
-        raise TypeError("Channel rename values must be non-empty strings")
-
-    if by == "name":
-        normalized: dict[str, str] = {}
-        for key, value in mapping.items():
-            if not isinstance(key, str):
-                raise TypeError("Name-based channel rename keys must be strings")
-            # The mode is explicit, so a source channel literally named "0"
-            # remains a name instead of being guessed to be an index.
-            normalized[key] = value.strip()
-        return normalized, by
-
-    normalized_index: dict[int, str] = {}
-    for key, value in mapping.items():
-        if isinstance(key, bool) or not isinstance(key, Integral):
-            raise TypeError("Index-based Python channel rename keys must be integers")
-        index = int(key)
-        if index < 0:
-            raise ValueError("Index-based channel rename keys must be zero or greater")
-        normalized_index[index] = value.strip()
-    return normalized_index, by
-
-
-def _apply_channel_renames(
-    channel_names: Sequence[str],
-    mapping: ChannelRenameMapping | None,
-    by: RenameChannelsBy | None,
-) -> tuple[str, ...]:
-    normalized, normalized_by = _validate_channel_rename_mapping(mapping, by)
-    names = tuple(str(item) for item in channel_names)
-    if not normalized:
-        return names
-
-    if normalized_by == "name":
-        name_mapping = normalized
-        unknown = sorted(set(name_mapping) - set(names))
-        if unknown:
-            raise ValueError(
-                "Name-based channel rename mapping contains unknown source names: "
-                + ", ".join(repr(item) for item in unknown)
-            )
-        ambiguous = sorted(name for name in name_mapping if names.count(name) > 1)
-        if ambiguous:
-            raise ValueError(
-                "Name-based channel rename mapping is ambiguous for duplicate source names: "
-                + ", ".join(repr(item) for item in ambiguous)
-                + "; use rename_channels_by='index'"
-            )
-        return tuple(name_mapping.get(name, name) for name in names)
-
-    index_mapping = normalized
-    out_of_range = sorted(index for index in index_mapping if index >= len(names))
-    if out_of_range:
-        raise IndexError(
-            "Index-based channel rename mapping contains out-of-range indices: "
-            + ", ".join(str(item) for item in out_of_range)
-        )
-    return tuple(index_mapping.get(index, name) for index, name in enumerate(names))
 
 
 def convert(
@@ -136,14 +68,11 @@ def convert(
     into those same semantic values before calling this function.
     """
 
-    input_file = Path(input_path)
-    output_file = Path(output_path)
-    if not input_file.is_file():
-        raise FileNotFoundError(f"Input image does not exist: {input_file}")
-    if input_file.resolve() == output_file.resolve():
-        raise ValueError("Input and output paths must be different")
-    if output_file.exists() and not overwrite:
-        raise FileExistsError(f"Output already exists: {output_file}")
+    input_file, output_file = validate_image_paths(
+        input_path,
+        output_path,
+        overwrite=overwrite,
+    )
     if input_type not in INPUT_TYPES:
         raise ValueError(f"Unsupported input_type {input_type!r}")
     normalized_renames, normalized_rename_mode = _validate_channel_rename_mapping(
@@ -156,6 +85,12 @@ def convert(
         raise TypeError("pixel_size must be a PixelSize instance")
 
     start_epoch = time.time()
+    LOGGER.info(
+        "Convert workflow: opening %s as input type %s, series %s",
+        input_file,
+        input_type,
+        int(series),
+    )
     reader = source_reader(
         input_file,
         input_type=input_type,
@@ -172,14 +107,47 @@ def convert(
                 "PixelSize(x, y, unit) explicitly so omeify can satisfy its OME-TIFF contract."
             )
 
-        source_channel_names = tuple(reader.channel_names)
+        log_source_summary(
+            LOGGER,
+            reader,
+            source_pixel_size=source_pixel_size,
+            effective_pixel_size=effective_pixel_size,
+            pixel_size_overridden=pixel_size is not None,
+        )
+        source_channels = tuple(reader.channels)
+        source_channel_names = tuple(channel.name for channel in source_channels)
         output_channel_names = _apply_channel_renames(
             source_channel_names,
             normalized_renames,
             normalized_rename_mode,
         )
+        log_channel_mapping(
+            LOGGER,
+            source_channels,
+            output_channel_names,
+            rename_mode=normalized_rename_mode,
+        )
         image_type = "rgb" if bool(getattr(reader, "is_rgb", False)) else "multichannel"
         effective_compression = compression or _default_compression(input_type)
+        LOGGER.info(
+            "Convert fidelity boundary: source samples enter the writer with dtype %s and "
+            "without an intensity rescale or explicit numeric cast",
+            reader.dtype,
+        )
+        if effective_compression.strip().lower() in {"jpeg", "jpg"}:
+            LOGGER.info(
+                "Output storage: JPEG quality %s, subsampling %s; RGB pixels are re-encoded",
+                jpeg_quality,
+                jpeg_subsampling,
+            )
+        else:
+            LOGGER.info("Output storage: %s lossless compression", effective_compression)
+        LOGGER.info(
+            "Using the shared OME-TIFF writer directly on the source reader "
+            "(tile=%s, downsample=%s)",
+            tile_size,
+            downsample,
+        )
         writer = OMETiffWriter(
             output_file,
             image_type=image_type,
@@ -197,6 +165,7 @@ def convert(
             cache_directory=cache_directory,
             icc_profile=getattr(reader, "icc_profile", None),
         )
+        writer_started = time.monotonic()
         write_report = writer.write_source(
             reader,
             axes=reader.output_axes,
@@ -204,43 +173,13 @@ def convert(
             dtype=reader.dtype,
             icc_profile=getattr(reader, "icc_profile", None),
         )
+        LOGGER.info(
+            "Shared writer path completed in %s",
+            readable_runtime(time.monotonic() - writer_started),
+        )
 
-        source_channels = [
-            {
-                "index": channel.index,
-                "id": channel.id,
-                "name": channel.name,
-                "source_id": channel.source_id,
-                "id_is_generated": channel.id_is_generated,
-                "source_metadata": dict(channel.source_metadata),
-            }
-            for channel in reader.channels
-        ]
-        source_miti_header = None
-        if isinstance(reader, OMETiffReader):
-            ome_summary = reader.inspection_report.get("ome")
-            if ome_summary is not None:
-                source_miti_header = ome_summary.get("miti")
+        input_report = build_input_report(reader, input_file, source_pixel_size)
 
-        input_report: dict[str, object] = {
-            "path": str(input_file),
-            "size_bytes": input_file.stat().st_size,
-            "type_description": reader.input_type_description,
-            "dtype": reader.dtype.name,
-            "shape": list(reader.shape),
-            "normalized_shape": list(reader.output_shape),
-            "source_axes": reader.source_axes,
-            "output_axes": reader.output_axes,
-            "byte_order": reader.source_byte_order,
-            "pixel_size": (
-                None if source_pixel_size is None else list(source_pixel_size.to_tuple())
-            ),
-            "channels": source_channels,
-        }
-        if source_miti_header is not None:
-            input_report["source_miti_header"] = source_miti_header
-
-    stop_epoch = time.time()
     output_size = output_file.stat().st_size
     output_report = dict(write_report["output_file"])
     image_report = dict(write_report["image"])
@@ -263,6 +202,15 @@ def convert(
         }
     )
 
+    update_file_checksums(
+        input_report,
+        output_report,
+        input_file=input_file,
+        output_file=output_file,
+        calculate=calculate_checksums,
+    )
+
+    stop_epoch = time.time()
     report: dict[str, object] = {
         "ome": write_report["ome"],
         "miti_header": write_report["miti_header"],
@@ -289,13 +237,10 @@ def convert(
         },
         "versions": get_version_info(),
     }
-
-    if calculate_checksums:
-        input_report.update(hash_file(input_file))
-        output_report.update(hash_file(output_file))
-    else:
-        input_report["md5_checksum"] = None
-        input_report["sha256_checksum"] = None
-        output_report["md5_checksum"] = None
-        output_report["sha256_checksum"] = None
+    LOGGER.info(
+        "Convert complete: %s (%s bytes) in %s",
+        output_file,
+        f"{output_size:,}",
+        readable_runtime(stop_epoch - start_epoch),
+    )
     return report

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import Literal, Sequence
@@ -8,6 +9,9 @@ import numpy as np
 
 from .io.ome_tiff_writer import PlaneReaderSource
 from .io.tiff import PlaneReader
+from .progress import ProgressLogger
+
+LOGGER = logging.getLogger(__name__)
 
 TargetDType = Literal["uint8", "uint16"]
 RangeMode = Literal["auto", "preserve", "full"]
@@ -164,13 +168,16 @@ def _scan_plane(
     channel_index: int,
     channel_name: str,
     sample_pixels: int,
+    progress_label: str | None = None,
 ) -> _PlaneScan:
     if int(reader.samples_per_pixel) != 1:
         raise ValueError("dtype mutation requires planar grayscale channel pages")
     if not np.issubdtype(reader.dtype, np.floating):
         raise TypeError(f"dtype mutation requires floating input, found {reader.dtype}")
 
-    total_pixels = int(reader.height) * int(reader.width)
+    height = int(reader.height)
+    width = int(reader.width)
+    total_pixels = height * width
     stride = max(1, int(math.ceil(math.sqrt(total_pixels / sample_pixels))))
     finite_pixels = 0
     nan_pixels = 0
@@ -187,51 +194,72 @@ def _scan_plane(
     maximum = -math.inf
     sampled: list[np.ndarray] = []
 
-    for y0 in range(0, int(reader.height), _SCAN_TILE_SIZE):
-        y1 = min(int(reader.height), y0 + _SCAN_TILE_SIZE)
-        for x0 in range(0, int(reader.width), _SCAN_TILE_SIZE):
-            x1 = min(int(reader.width), x0 + _SCAN_TILE_SIZE)
-            block = np.asarray(reader.read_region(y0, y1, x0, x1))
-            if block.ndim != 2:
-                raise ValueError(
-                    f"Channel {channel_index} did not read as one YX plane: {block.shape}"
-                )
-
-            nan_pixels += int(np.count_nonzero(np.isnan(block)))
-            positive_infinity_pixels += int(np.count_nonzero(np.isposinf(block)))
-            negative_infinity_pixels += int(np.count_nonzero(np.isneginf(block)))
-            finite = np.isfinite(block)
-            finite_values = block[finite]
-            finite_pixels += int(finite_values.size)
-            if finite_values.size:
-                minimum = min(minimum, _safe_float(np.min(finite_values)))
-                maximum = max(maximum, _safe_float(np.max(finite_values)))
-                negative_pixels += int(np.count_nonzero(finite_values < 0))
-                zero_pixels += int(np.count_nonzero(finite_values == 0))
-                nonzero_values = finite_values[finite_values != 0]
-                nonzero_pixels += int(nonzero_values.size)
-                if nonzero_values.size:
-                    unit_residual = np.abs(nonzero_values - np.rint(nonzero_values))
-                    near_integer_nonzero_pixels += int(
-                        np.count_nonzero(unit_residual <= _INTEGER_TOLERANCE)
-                    )
-                    unit_rounding_absolute_error_sum += float(np.sum(unit_residual))
-                    unit_rounding_squared_error_sum += float(
-                        np.sum(np.square(unit_residual, dtype=np.float64))
-                    )
-                    unit_rounding_maximum_absolute_error = max(
-                        unit_rounding_maximum_absolute_error,
-                        float(np.max(unit_residual)),
+    blocks_y = math.ceil(height / _SCAN_TILE_SIZE)
+    blocks_x = math.ceil(width / _SCAN_TILE_SIZE)
+    progress = (
+        None
+        if progress_label is None
+        else ProgressLogger(
+            LOGGER,
+            progress_label,
+            blocks_y * blocks_x,
+            unit="blocks",
+        )
+    )
+    completed_blocks = 0
+    try:
+        for y0 in range(0, height, _SCAN_TILE_SIZE):
+            y1 = min(height, y0 + _SCAN_TILE_SIZE)
+            for x0 in range(0, width, _SCAN_TILE_SIZE):
+                x1 = min(width, x0 + _SCAN_TILE_SIZE)
+                block = np.asarray(reader.read_region(y0, y1, x0, x1))
+                if block.ndim != 2:
+                    raise ValueError(
+                        f"Channel {channel_index} did not read as one YX plane: {block.shape}"
                     )
 
-            sample_y0 = (-y0) % stride
-            sample_x0 = (-x0) % stride
-            sample_block = block[sample_y0::stride, sample_x0::stride]
-            finite_sample = sample_block[np.isfinite(sample_block)]
-            if finite_sample.size:
-                sampled.append(finite_sample.astype(np.float64, copy=False).reshape(-1))
+                nan_pixels += int(np.count_nonzero(np.isnan(block)))
+                positive_infinity_pixels += int(np.count_nonzero(np.isposinf(block)))
+                negative_infinity_pixels += int(np.count_nonzero(np.isneginf(block)))
+                finite = np.isfinite(block)
+                finite_values = block[finite]
+                finite_pixels += int(finite_values.size)
+                if finite_values.size:
+                    minimum = min(minimum, _safe_float(np.min(finite_values)))
+                    maximum = max(maximum, _safe_float(np.max(finite_values)))
+                    negative_pixels += int(np.count_nonzero(finite_values < 0))
+                    zero_pixels += int(np.count_nonzero(finite_values == 0))
+                    nonzero_values = finite_values[finite_values != 0]
+                    nonzero_pixels += int(nonzero_values.size)
+                    if nonzero_values.size:
+                        unit_residual = np.abs(nonzero_values - np.rint(nonzero_values))
+                        near_integer_nonzero_pixels += int(
+                            np.count_nonzero(unit_residual <= _INTEGER_TOLERANCE)
+                        )
+                        unit_rounding_absolute_error_sum += float(np.sum(unit_residual))
+                        unit_rounding_squared_error_sum += float(
+                            np.sum(np.square(unit_residual, dtype=np.float64))
+                        )
+                        unit_rounding_maximum_absolute_error = max(
+                            unit_rounding_maximum_absolute_error,
+                            float(np.max(unit_residual)),
+                        )
 
-    reader.clear_cache()
+                sample_y0 = (-y0) % stride
+                sample_x0 = (-x0) % stride
+                sample_block = block[sample_y0::stride, sample_x0::stride]
+                finite_sample = sample_block[np.isfinite(sample_block)]
+                if finite_sample.size:
+                    sampled.append(finite_sample.astype(np.float64, copy=False).reshape(-1))
+
+                completed_blocks += 1
+                if progress is not None:
+                    progress.update(completed_blocks)
+    finally:
+        reader.clear_cache()
+
+    if progress is not None:
+        progress.finish()
     if finite_pixels == 0:
         raise ValueError(f"Channel {channel_index} contains no finite pixel values")
     sample = np.concatenate(sampled) if sampled else np.empty(0, dtype=np.float64)
@@ -807,26 +835,67 @@ def analyze_dtype_mutation(
     names = tuple(str(item) for item in channel_names)
     readers = source.plane_readers(cache_mib=64)
     if len(readers) != len(names):
+        for reader in readers:
+            reader.clear_cache()
         raise ValueError(
             f"Source supplied {len(readers)} planes, but {len(names)} channel names were provided"
         )
 
-    scans = tuple(
-        _scan_plane(
-            reader,
-            channel_index=index,
-            channel_name=names[index],
-            sample_pixels=sample_pixels,
-        )
-        for index, reader in enumerate(readers)
+    LOGGER.info(
+        "Mutation analysis: scanning %s full-resolution channel(s) for exact bounds, "
+        "non-finite values, and quantization diagnostics",
+        len(readers),
     )
-    return tuple(
-        _mapping_for_scan(
-            scan,
-            source_dtype=normalized_source_dtype,
-            target_dtype=normalized_target_dtype,
-            range_mode=range_mode,
-            auto_max_normalized_rmse=normalized_auto_loss,
-        )
-        for scan in scans
-    )
+    plans: list[DTypeChannelPlan] = []
+    try:
+        for index, reader in enumerate(readers):
+            name = names[index]
+            scan = _scan_plane(
+                reader,
+                channel_index=index,
+                channel_name=name,
+                sample_pixels=sample_pixels,
+                progress_label=(
+                    f"Scanning mutation channel {index + 1}/{len(readers)} {name!r}"
+                ),
+            )
+            LOGGER.info(
+                "Mutation scan %s/%s complete for %r: range=%g..%g, finite=%s, "
+                "nonzero=%s, NaN=%s, +Inf=%s, -Inf=%s",
+                index + 1,
+                len(readers),
+                name,
+                scan.minimum,
+                scan.maximum,
+                f"{scan.finite_pixels:,}",
+                f"{scan.nonzero_pixels:,}",
+                f"{scan.nan_pixels:,}",
+                f"{scan.positive_infinity_pixels:,}",
+                f"{scan.negative_infinity_pixels:,}",
+            )
+            plan = _mapping_for_scan(
+                scan,
+                source_dtype=normalized_source_dtype,
+                target_dtype=normalized_target_dtype,
+                range_mode=range_mode,
+                auto_max_normalized_rmse=normalized_auto_loss,
+            )
+            plans.append(plan)
+            LOGGER.info(
+                "Mutation plan %s/%s for channel [%s] %r: "
+                "mapping=%s, offset=%g, quantum=%g",
+                index + 1,
+                len(readers),
+                index,
+                name,
+                plan.mapping,
+                plan.offset,
+                plan.quantum,
+            )
+            LOGGER.info("  Mapping decision: %s", plan.reason)
+    finally:
+        for reader in readers:
+            reader.clear_cache()
+
+    LOGGER.info("Mutation analysis complete: planned %s channel(s)", len(plans))
+    return tuple(plans)

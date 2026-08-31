@@ -77,6 +77,19 @@ def _load_channel_renames(
     return {int(key): str(item).strip() for key, item in value.items()}, by
 
 
+def _configure_logging(verbose: int) -> None:
+    """Configure predictable omeify logging without enabling dependency chatter."""
+
+    level = logging.DEBUG if verbose >= 2 else logging.INFO if verbose == 1 else logging.WARNING
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+    logging.getLogger("omeify").setLevel(level)
+
+
 def _write_or_echo(rendered: str, output: Path | None) -> None:
     if output is None:
         click.echo(rendered)
@@ -203,7 +216,15 @@ def main() -> None:
 )
 @click.option("--overwrite/--no-overwrite", default=True, show_default=True)
 @click.option("--checksums/--no-checksums", default=True, show_default=True)
-@click.option("-v", "--verbose", count=True, help="Increase logging verbosity.")
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    help=(
+        "Show stages and 5-second progress bars; repeat for debug details, "
+        "1-second progress, and tracebacks."
+    ),
+)
 def convert_command(
     input_path: Path,
     output_path: Path,
@@ -231,8 +252,7 @@ def convert_command(
 ) -> None:
     """Convert INPUT_PATH into a deidentified pyramidal OME-TIFF at OUTPUT_PATH."""
 
-    log_level = logging.DEBUG if verbose >= 2 else logging.INFO if verbose == 1 else logging.WARNING
-    logging.basicConfig(level=log_level, format="%(levelname)s %(name)s: %(message)s")
+    _configure_logging(verbose)
     rename_channels, rename_mode = _load_channel_renames(
         rename_channels_json,
         rename_channels_by,  # type: ignore[arg-type]
@@ -398,7 +418,15 @@ def convert_command(
 )
 @click.option("--overwrite/--no-overwrite", default=True, show_default=True)
 @click.option("--checksums/--no-checksums", default=True, show_default=True)
-@click.option("-v", "--verbose", count=True, help="Increase logging verbosity.")
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    help=(
+        "Show stages and 5-second progress bars; repeat for debug details, "
+        "1-second progress, and tracebacks."
+    ),
+)
 def mutate_command(
     input_path: Path,
     output_path: Path,
@@ -428,8 +456,7 @@ def mutate_command(
 ) -> None:
     """Create a dtype-mutated OME-TIFF from planar floating-point INPUT_PATH."""
 
-    log_level = logging.DEBUG if verbose >= 2 else logging.INFO if verbose == 1 else logging.WARNING
-    logging.basicConfig(level=log_level, format="%(levelname)s %(name)s: %(message)s")
+    _configure_logging(verbose)
     rename_channels, rename_mode = _load_channel_renames(
         rename_channels_json,
         rename_channels_by,  # type: ignore[arg-type]

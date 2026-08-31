@@ -4,6 +4,7 @@ import logging
 import os
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Literal, Protocol, Sequence, runtime_checkable
@@ -16,6 +17,7 @@ from omeify._version import __version__
 from omeify.io.pixel_size import PixelSize
 from omeify.io.spec import ImageType, OMEImageSpec
 from omeify.io.tiff import ArrayPlaneReader, PlaneReader, TiffPlaneReader
+from omeify.progress import ProgressLogger
 from omeify.utils.generate_ome_xml import generate_ome_xml
 from omeify.utils.miti_header_validator import validate_miti_ome_tiff_header
 from omeify.utils.ome_schema_validator import OMESchemaValidator
@@ -236,6 +238,21 @@ def _mean_downsample_2x(block: np.ndarray, out_shape: tuple[int, int]) -> np.nda
     return (accumulator / _broadcast_counts(counts, block.ndim)).astype(dtype, copy=False)
 
 
+def _tile_count(
+    shape: Sequence[int],
+    *,
+    axes: str,
+    plane_count: int,
+    tile_size: int,
+) -> int:
+    """Return the number of tiles consumed for one canonical image level."""
+
+    height, width = _yx_shape(shape, axes)
+    tiles_y = (height + tile_size - 1) // tile_size
+    tiles_x = (width + tile_size - 1) // tile_size
+    return int(plane_count) * tiles_y * tiles_x
+
+
 def _downsample_region(
     reader: PlaneReader,
     *,
@@ -267,17 +284,62 @@ def _iter_tiles(
     axes: str,
     plane_count: int,
     tile_size: int,
+    progress_label: str | None = None,
 ) -> Iterable[np.ndarray]:
     height, width = _yx_shape(shape, axes)
     if len(readers) != plane_count:
         raise ValueError(f"Expected {plane_count} page readers, got {len(readers)}")
-    for reader in readers:
-        for y0 in range(0, height, tile_size):
-            y1 = min(height, y0 + tile_size)
-            for x0 in range(0, width, tile_size):
-                x1 = min(width, x0 + tile_size)
-                yield np.ascontiguousarray(reader.read_region(y0, y1, x0, x1))
-        reader.clear_cache()
+    total_tiles = _tile_count(
+        shape,
+        axes=axes,
+        plane_count=plane_count,
+        tile_size=tile_size,
+    )
+    progress = (
+        None
+        if progress_label is None
+        else ProgressLogger(LOGGER, progress_label, total_tiles, unit="tiles")
+    )
+    completed_tiles = 0
+    yielded_tiles = 0
+    try:
+        for plane_index, reader in enumerate(readers):
+            LOGGER.debug(
+                "%s: starting plane %s/%s",
+                progress_label or "Tile stream",
+                plane_index + 1,
+                plane_count,
+            )
+            try:
+                for y0 in range(0, height, tile_size):
+                    y1 = min(height, y0 + tile_size)
+                    for x0 in range(0, width, tile_size):
+                        x1 = min(width, x0 + tile_size)
+                        tile = np.ascontiguousarray(
+                            reader.read_region(y0, y1, x0, x1)
+                        )
+                        yielded_tiles += 1
+                        yield tile
+                        completed_tiles = yielded_tiles
+                        if progress is not None:
+                            progress.update(completed_tiles)
+            finally:
+                reader.clear_cache()
+            LOGGER.debug(
+                "%s: completed plane %s/%s",
+                progress_label or "Tile stream",
+                plane_index + 1,
+                plane_count,
+            )
+    finally:
+        # Tifffile may close a generator immediately after accepting its last
+        # expected tile without resuming the code after the final ``yield``.
+        # Treat a fully yielded stream as complete so the user still sees the
+        # terminal 100 percent line for that stage.
+        if progress is not None and yielded_tiles == total_tiles:
+            progress.finish()
+        for reader in readers:
+            reader.clear_cache()
 
 
 def _iter_downsampled_tiles(
@@ -288,24 +350,67 @@ def _iter_downsampled_tiles(
     plane_count: int,
     tile_size: int,
     method: DownsampleMethod,
+    progress_label: str | None = None,
 ) -> Iterable[np.ndarray]:
     height, width = _yx_shape(output_shape, axes)
     if len(readers) != plane_count:
         raise ValueError(f"Expected {plane_count} page readers, got {len(readers)}")
-    for reader in readers:
-        for y0 in range(0, height, tile_size):
-            y1 = min(height, y0 + tile_size)
-            for x0 in range(0, width, tile_size):
-                x1 = min(width, x0 + tile_size)
-                yield _downsample_region(
-                    reader,
-                    out_y0=y0,
-                    out_y1=y1,
-                    out_x0=x0,
-                    out_x1=x1,
-                    method=method,
-                )
-        reader.clear_cache()
+    total_tiles = _tile_count(
+        output_shape,
+        axes=axes,
+        plane_count=plane_count,
+        tile_size=tile_size,
+    )
+    progress = (
+        None
+        if progress_label is None
+        else ProgressLogger(LOGGER, progress_label, total_tiles, unit="tiles")
+    )
+    completed_tiles = 0
+    yielded_tiles = 0
+    try:
+        for plane_index, reader in enumerate(readers):
+            LOGGER.debug(
+                "%s: starting plane %s/%s",
+                progress_label or "Downsample stream",
+                plane_index + 1,
+                plane_count,
+            )
+            try:
+                for y0 in range(0, height, tile_size):
+                    y1 = min(height, y0 + tile_size)
+                    for x0 in range(0, width, tile_size):
+                        x1 = min(width, x0 + tile_size)
+                        tile = _downsample_region(
+                            reader,
+                            out_y0=y0,
+                            out_y1=y1,
+                            out_x0=x0,
+                            out_x1=x1,
+                            method=method,
+                        )
+                        yielded_tiles += 1
+                        yield tile
+                        completed_tiles = yielded_tiles
+                        if progress is not None:
+                            progress.update(completed_tiles)
+            finally:
+                reader.clear_cache()
+            LOGGER.debug(
+                "%s: completed plane %s/%s",
+                progress_label or "Downsample stream",
+                plane_index + 1,
+                plane_count,
+            )
+    finally:
+        # Tifffile may close a generator immediately after accepting its last
+        # expected tile without resuming the code after the final ``yield``.
+        # Treat a fully yielded stream as complete so the user still sees the
+        # terminal 100 percent line for that stage.
+        if progress is not None and yielded_tiles == total_tiles:
+            progress.finish()
+        for reader in readers:
+            reader.clear_cache()
 
 
 def _page_readers(tiff: tifffile.TiffFile, plane_count: int) -> list[TiffPlaneReader]:
@@ -492,16 +597,27 @@ class OMETiffWriter:
         source: PlaneReaderSource,
         spec: OMEImageSpec,
     ) -> dict[str, object]:
+        writer_started = time.monotonic()
         if self.output_path.exists() and not self.overwrite:
             raise FileExistsError(f"Output already exists: {self.output_path}")
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         if self.cache_directory is not None:
             self.cache_directory.mkdir(parents=True, exist_ok=True)
 
+        LOGGER.info(
+            "Writer preflight: validating %s source plane(s) for %s %s %s output",
+            spec.plane_count,
+            spec.image_type,
+            spec.output_axes,
+            spec.output_shape,
+        )
         base_readers = source.plane_readers(cache_mib=64)
-        self._validate_readers(base_readers, spec)
-        for reader in base_readers:
-            reader.clear_cache()
+        try:
+            self._validate_readers(base_readers, spec)
+        finally:
+            for reader in base_readers:
+                reader.clear_cache()
+        LOGGER.info("Writer preflight passed; output dtype=%s", spec.dtype)
 
         compression = _compression_settings(
             self.compression_name,
@@ -530,6 +646,24 @@ class OMETiffWriter:
             tile_size=self.tile_size,
             pyramid_levels=self.pyramid_levels,
         )
+        LOGGER.info(
+            "Writer plan: compression=%s (%s), tile=%sx%s, workers=%s, downsample=%s, "
+            "subresolution-levels=%s",
+            compression.name,
+            "lossless" if compression.lossless else "lossy",
+            self.tile_size,
+            self.tile_size,
+            self.max_workers,
+            self.downsample,
+            len(level_shapes) - 1,
+        )
+        LOGGER.info(
+            "Pyramid level shapes: %s",
+            ", ".join(f"L{index}={shape}" for index, shape in enumerate(level_shapes)),
+        )
+
+        metadata_started = time.monotonic()
+        LOGGER.info("Generating and validating minimized OME-XML")
         xml_info = generate_ome_xml(
             spec,
             level_shapes,
@@ -550,15 +684,9 @@ class OMETiffWriter:
         if not miti_header.is_valid:
             details = "; ".join(miti_header.errors)
             raise ValueError(f"Generated OME header failed omeify MITI validation: {details}")
-
         LOGGER.info(
-            "Writing %s %s plane(s) of %s data at %sx%s into %s pyramid levels",
-            spec.plane_count,
-            spec.output_axes,
-            spec.dtype,
-            spec.size_x,
-            spec.size_y,
-            len(level_shapes),
+            "OME-XML schema and omeify MITI header validation passed in %.2f seconds",
+            time.monotonic() - metadata_started,
         )
 
         with tempfile.TemporaryDirectory(
@@ -566,7 +694,22 @@ class OMETiffWriter:
             dir=str(self.cache_directory) if self.cache_directory else None,
         ) as temporary_directory:
             temp_root = Path(temporary_directory)
-            level_paths = self._build_pyramid(source, spec, level_shapes, temp_root)
+            LOGGER.debug("Pyramid scratch directory: %s", temp_root)
+            if len(level_shapes) > 1:
+                LOGGER.info(
+                    "Building %s temporary uncompressed pyramid level(s) before final encoding",
+                    len(level_shapes) - 1,
+                )
+                pyramid_started = time.monotonic()
+                level_paths = self._build_pyramid(source, spec, level_shapes, temp_root)
+                LOGGER.info(
+                    "Temporary pyramid construction complete in %.2f seconds",
+                    time.monotonic() - pyramid_started,
+                )
+            else:
+                LOGGER.info("Pyramid construction skipped: base level only")
+                level_paths = []
+
             file_descriptor, temporary_name = tempfile.mkstemp(
                 prefix=".omeify-",
                 suffix=".partial",
@@ -576,6 +719,14 @@ class OMETiffWriter:
             temporary_output = Path(temporary_name)
             temporary_output.unlink()
             try:
+                if level_paths:
+                    LOGGER.info(
+                        "Writing final encoded OME-TIFF; the base raster and staged pyramid "
+                        "levels are streamed again here"
+                    )
+                else:
+                    LOGGER.info("Writing final encoded OME-TIFF from the base raster")
+                final_write_started = time.monotonic()
                 self._write_output(
                     source,
                     spec,
@@ -585,6 +736,14 @@ class OMETiffWriter:
                     omexml,
                     compression,
                 )
+                LOGGER.info(
+                    "Final encoded temporary output complete in %.2f seconds (%s bytes)",
+                    time.monotonic() - final_write_started,
+                    f"{temporary_output.stat().st_size:,}",
+                )
+
+                LOGGER.info("Verifying OME metadata, TIFF layout, decoding, and spot values")
+                verification_started = time.monotonic()
                 verification = self._verify_output(
                     source,
                     spec,
@@ -592,11 +751,26 @@ class OMETiffWriter:
                     temporary_output,
                     compression,
                 )
+                LOGGER.info(
+                    "Output verification passed in %.2f seconds",
+                    time.monotonic() - verification_started,
+                )
+
+                LOGGER.info("Installing verified output atomically at %s", self.output_path)
                 os.replace(temporary_output, self.output_path)
+                LOGGER.info("Verified output installed")
             finally:
                 temporary_output.unlink(missing_ok=True)
 
+            LOGGER.info("Removing temporary pyramid cache")
+
+        LOGGER.info("Temporary pyramid cache removed")
         output_size = self.output_path.stat().st_size
+        LOGGER.info(
+            "Writer complete in %.2f seconds; output size=%s bytes",
+            time.monotonic() - writer_started,
+            f"{output_size:,}",
+        )
         return {
             "ome": {
                 "xml_string": omexml,
@@ -679,32 +853,55 @@ class OMETiffWriter:
         temp_root: Path,
     ) -> list[Path]:
         level_paths: list[Path] = []
+        total_subresolutions = len(level_shapes) - 1
+        if total_subresolutions == 0:
+            LOGGER.info("No subresolution levels requested; pyramid staging is skipped")
+            return level_paths
+
         for level_index, output_shape in enumerate(level_shapes[1:], start=1):
             output_path = temp_root / f"level-{level_index}.tf8"
-            LOGGER.info("Building pyramid level %s with shape %s", level_index, output_shape)
+            LOGGER.info(
+                "Building pyramid level %s/%s with shape %s from %s",
+                level_index,
+                total_subresolutions,
+                output_shape,
+                (
+                    "the full-resolution source"
+                    if level_index == 1
+                    else f"temporary level {level_index - 1}"
+                ),
+            )
+            level_started = time.monotonic()
+            progress_label = (
+                f"Building pyramid level {level_index}/{total_subresolutions}"
+            )
             if level_index == 1:
                 readers = source.plane_readers()
+                self._write_temporary_level(
+                    readers,
+                    output_shape,
+                    spec,
+                    output_path,
+                    progress_label=progress_label,
+                )
             else:
-                previous = tifffile.TiffFile(level_paths[-1])
-                try:
+                with tifffile.TiffFile(level_paths[-1]) as previous:
                     readers = _page_readers(previous, spec.plane_count)
                     self._write_temporary_level(
                         readers,
                         output_shape,
                         spec,
                         output_path,
+                        progress_label=progress_label,
                     )
-                finally:
-                    previous.close()
-                level_paths.append(output_path)
-                continue
-            self._write_temporary_level(
-                readers,
-                output_shape,
-                spec,
-                output_path,
-            )
             level_paths.append(output_path)
+            LOGGER.info(
+                "Pyramid level %s/%s staged in %.2f seconds (%s bytes)",
+                level_index,
+                total_subresolutions,
+                time.monotonic() - level_started,
+                f"{output_path.stat().st_size:,}",
+            )
         return level_paths
 
     def _write_temporary_level(
@@ -713,6 +910,8 @@ class OMETiffWriter:
         output_shape: tuple[int, ...],
         spec: OMEImageSpec,
         output_path: Path,
+        *,
+        progress_label: str,
     ) -> None:
         write_options: dict[str, object] = {
             "shape": output_shape,
@@ -741,6 +940,7 @@ class OMETiffWriter:
                     plane_count=spec.plane_count,
                     tile_size=self.tile_size,
                     method=self.downsample,
+                    progress_label=progress_label,
                 ),
                 **write_options,
             )
@@ -773,12 +973,14 @@ class OMETiffWriter:
                 common_options["iccprofile"] = spec.icc_profile
 
         software = f"omeify {__version__}"
+        total_subresolutions = len(level_paths)
         with tifffile.TiffWriter(
             output_path,
             bigtiff=True,
             byteorder=_OUTPUT_BYTEORDER,
             ome=False,
         ) as writer:
+            base_started = time.monotonic()
             base_readers = source.plane_readers()
             writer.write(
                 _iter_tiles(
@@ -787,20 +989,26 @@ class OMETiffWriter:
                     axes=spec.output_axes,
                     plane_count=spec.plane_count,
                     tile_size=self.tile_size,
+                    progress_label="Writing final full-resolution base",
                 ),
                 shape=level_shapes[0],
                 description=omexml.encode("utf-8"),
                 software=software,
-                subifds=len(level_paths),
+                subifds=total_subresolutions,
                 resolution=_resolution(spec.pixel_size, 1),
                 resolutionunit="CENTIMETER",
                 **common_options,
+            )
+            LOGGER.info(
+                "Final full-resolution base encoded and written in %.2f seconds",
+                time.monotonic() - base_started,
             )
 
             for level_index, (level_path, level_shape) in enumerate(
                 zip(level_paths, level_shapes[1:]),
                 start=1,
             ):
+                level_started = time.monotonic()
                 with tifffile.TiffFile(level_path) as level_tiff:
                     readers = _page_readers(level_tiff, spec.plane_count)
                     writer.write(
@@ -810,6 +1018,10 @@ class OMETiffWriter:
                             axes=spec.output_axes,
                             plane_count=spec.plane_count,
                             tile_size=self.tile_size,
+                            progress_label=(
+                                f"Writing final pyramid level "
+                                f"{level_index}/{total_subresolutions}"
+                            ),
                         ),
                         shape=level_shape,
                         software=False,
@@ -818,6 +1030,12 @@ class OMETiffWriter:
                         resolutionunit="CENTIMETER",
                         **common_options,
                     )
+                LOGGER.info(
+                    "Final pyramid level %s/%s encoded and written in %.2f seconds",
+                    level_index,
+                    total_subresolutions,
+                    time.monotonic() - level_started,
+                )
 
     def _verify_output(
         self,
@@ -855,6 +1073,7 @@ class OMETiffWriter:
             "points_per_plane": 0,
             "points_per_channel": 0,
         }
+        LOGGER.debug("Verification: opening candidate TIFF %s", output_path)
         with tifffile.TiffFile(output_path) as output:
             if not output.is_ome:
                 raise ValueError("Written TIFF is not recognized as OME-TIFF")
@@ -1011,6 +1230,12 @@ class OMETiffWriter:
             compression_match = True
             jpeg_subsampling_match = True
             expected_compression = _OUTPUT_COMPRESSION_CODES[compression.name]
+            layout_progress = ProgressLogger(
+                LOGGER,
+                "Verifying TIFF plane and pyramid layouts",
+                spec.plane_count,
+                unit="planes",
+            )
             for plane_index, frame in enumerate(output.pages):
                 page = frame.aspage()
                 all_levels_tiled = all_levels_tiled and bool(page.is_tiled)
@@ -1087,6 +1312,7 @@ class OMETiffWriter:
                             f"Output plane {plane_index}, pyramid level {level_index} "
                             "is not marked as a reduced-resolution image"
                         )
+                layout_progress.update(plane_index + 1)
             if not samples_match:
                 raise ValueError("One or more output levels has the wrong SamplesPerPixel")
             verification["samples_per_pixel_match"] = True
@@ -1115,40 +1341,70 @@ class OMETiffWriter:
                     raise ValueError("Source ICC profile was not preserved in the RGB output")
                 verification["icc_profile_preserved"] = True
 
-            output_readers = _page_readers(output, spec.plane_count)
-            coordinates = sorted(
-                {
-                    (0, 0),
-                    (spec.size_y // 2, spec.size_x // 2),
-                    (spec.size_y - 1, spec.size_x - 1),
-                }
+            LOGGER.debug(
+                "Verification: decoding %s representative point(s) from each of %s plane(s)",
+                3,
+                spec.plane_count,
             )
-            for output_reader in output_readers:
-                for y, x in coordinates:
-                    output_reader.read_region(y, y + 1, x, x + 1)
+            output_readers = _page_readers(output, spec.plane_count)
+            input_readers = (
+                source.plane_readers(cache_mib=16) if compression.lossless else None
+            )
+            try:
+                if input_readers is not None and len(input_readers) != spec.plane_count:
+                    raise ValueError(
+                        f"Source supplied {len(input_readers)} verification readers; "
+                        f"expected {spec.plane_count}"
+                    )
+                coordinates = sorted(
+                    {
+                        (0, 0),
+                        (spec.size_y // 2, spec.size_x // 2),
+                        (spec.size_y - 1, spec.size_x - 1),
+                    }
+                )
+                verification_progress = ProgressLogger(
+                    LOGGER,
+                    "Verifying representative base-plane pixels",
+                    spec.plane_count,
+                    unit="planes",
+                )
+                if input_readers is not None:
+                    verification["base_pixel_values_checked"] = True
+                for plane_index, output_reader in enumerate(output_readers):
+                    for y, x in coordinates:
+                        output_value = output_reader.read_region(
+                            y, y + 1, x, x + 1
+                        )[0, 0, ...]
+                        if input_readers is not None:
+                            source_value = input_readers[plane_index].read_region(
+                                y, y + 1, x, x + 1
+                            )[0, 0, ...]
+                            if not np.array_equal(source_value, output_value):
+                                raise ValueError(
+                                    "Lossless base-image verification failed at "
+                                    f"plane {plane_index}, y={y}, x={x}: "
+                                    f"source={source_value}, output={output_value}"
+                                )
+                    verification_progress.update(plane_index + 1)
+                    LOGGER.debug(
+                        "Verified representative pixels for plane %s/%s",
+                        plane_index + 1,
+                        spec.plane_count,
+                    )
+            finally:
+                for reader in output_readers:
+                    reader.clear_cache()
+                if input_readers is not None:
+                    for reader in input_readers:
+                        reader.clear_cache()
+
             verification["output_pixels_decodable"] = True
             verification["planes_checked"] = spec.plane_count
             verification["channels_checked"] = spec.size_c
             verification["points_per_plane"] = len(coordinates)
             verification["points_per_channel"] = len(coordinates)
-
-            if compression.lossless:
-                input_readers = source.plane_readers(cache_mib=16)
-                verification["base_pixel_values_checked"] = True
-                for plane_index in range(spec.plane_count):
-                    for y, x in coordinates:
-                        source_value = input_readers[plane_index].read_region(
-                            y, y + 1, x, x + 1
-                        )[0, 0, ...]
-                        output_value = output_readers[plane_index].read_region(
-                            y, y + 1, x, x + 1
-                        )[0, 0, ...]
-                        if not np.array_equal(source_value, output_value):
-                            raise ValueError(
-                                "Lossless base-image verification failed at "
-                                f"plane {plane_index}, y={y}, x={x}: "
-                                f"source={source_value}, output={output_value}"
-                            )
+            if input_readers is not None:
                 verification["base_pixel_values_match"] = True
         return verification
 
