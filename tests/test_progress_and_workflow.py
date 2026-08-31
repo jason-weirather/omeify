@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,7 +17,7 @@ import omeify.dtype_mutation as dtype_mutation_module
 import omeify.mutation as mutation_module
 import omeify.workflow as workflow_module
 from omeify import PixelSize
-from omeify.cli import main
+from omeify.cli import _CompactLogHandler, main
 from omeify.dtype_mutation import DTypeMutationSource, analyze_dtype_mutation
 from omeify.io.ome_tiff_writer import (
     OMETiffWriter,
@@ -59,10 +61,10 @@ def test_progress_logger_reports_start_periodic_progress_and_completion(caplog) 
         progress.update(2)
         progress.finish()
 
-    assert "Synthetic stage: starting (4 tiles)" in caplog.text
-    assert "Synthetic stage: [##########----------]  50.0%" in caplog.text
-    assert "Synthetic stage: [####################] 100.0%" in caplog.text
-    assert "ETA" in caplog.text
+    assert "Synthetic stage [--------------------]   0%" in caplog.text
+    assert "Synthetic stage [##########----------]  50%" in caplog.text
+    assert "Synthetic stage [####################] 100% 00:02" in caplog.text
+    assert "ETA 00:01" in caplog.text
 
 
 def test_tile_iterators_emit_progress_without_changing_pixels(caplog) -> None:
@@ -83,8 +85,8 @@ def test_tile_iterators_emit_progress_without_changing_pixels(caplog) -> None:
     assert len(tiles) == 4
     np.testing.assert_array_equal(tiles[0], data[:16, :16])
     np.testing.assert_array_equal(tiles[-1], data[16:, 16:])
-    assert "Writing test tiles: starting (4 tiles)" in caplog.text
-    assert "Writing test tiles: [####################] 100.0%" in caplog.text
+    assert "Writing test tiles [--------------------]   0%" in caplog.text
+    assert "Writing test tiles [####################] 100%" in caplog.text
 
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="omeify.io.ome_tiff_writer"):
@@ -102,7 +104,7 @@ def test_tile_iterators_emit_progress_without_changing_pixels(caplog) -> None:
 
     assert len(downsampled) == 1
     np.testing.assert_array_equal(downsampled[0], data[::2, ::2])
-    assert "Building test pyramid: [####################] 100.0%" in caplog.text
+    assert "Building test pyramid [####################] 100%" in caplog.text
 
 
 def test_writer_logs_pyramid_final_assembly_verification_and_cleanup(
@@ -145,7 +147,7 @@ def test_writer_logs_pyramid_final_assembly_verification_and_cleanup(
     for message in expected_messages:
         assert message in caplog.text
     assert (
-        "Writing final full-resolution base: [####################] 100.0%"
+        "Writing final full-resolution base [####################] 100%"
         in caplog.text
     )
 
@@ -169,7 +171,7 @@ def test_mutation_analysis_logs_scans_and_maps_each_channel_immediately(caplog) 
         )
 
     assert len(plans) == 2
-    assert "Scanning mutation channel 1/2 'Integer-like':" in caplog.text
+    assert "Scanning mutation channel 1/2 'Integer-like' [" in caplog.text
     assert "Mutation scan 2/2 complete for 'Continuous'" in caplog.text
     assert "Mutation plan 1/2 for channel [0] 'Integer-like'" in caplog.text
     assert "Mapping decision:" in caplog.text
@@ -242,8 +244,8 @@ def test_hash_file_logs_progress_and_preserves_digest_values(
         "md5_checksum": hashlib.md5(payload, usedforsecurity=False).hexdigest(),
         "sha256_checksum": hashlib.sha256(payload).hexdigest(),
     }
-    assert "Checksumming test payload: starting" in caplog.text
-    assert "Checksumming test payload: [####################] 100.0%" in caplog.text
+    assert "Checksumming test payload [--------------------]   0%" in caplog.text
+    assert "Checksumming test payload [####################] 100%" in caplog.text
 
 
 def test_channel_logging_shows_discovered_names_and_explicit_renames(caplog) -> None:
@@ -368,9 +370,84 @@ def test_cli_single_verbose_level_enables_only_omeify_stage_logs(
     )
 
     assert result.exit_code == 0, result.output
-    assert "visible stage log" in result.output
+    assert result.output == "visible stage log\n"
     assert "dependency chatter" not in result.output
     assert json.loads(report_path.read_text(encoding="utf-8")) == {"status": "ok"}
+
+
+def test_compact_handler_reuses_one_tty_line_until_progress_finishes() -> None:
+    class TTYBuffer(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    stream = TTYBuffer()
+    handler = _CompactLogHandler()
+    handler.setStream(stream)
+    logger = logging.Logger("omeify.tests.compact-handler", level=logging.INFO)
+    logger.propagate = False
+    logger.addHandler(handler)
+    ticks = iter((0.0, 1.0, 2.0))
+
+    progress = ProgressLogger(
+        logger,
+        "Synthetic stage",
+        4,
+        unit="tiles",
+        min_interval_seconds=0,
+        clock=lambda: next(ticks),
+    )
+    progress.update(2)
+    progress.finish()
+
+    rendered = stream.getvalue()
+    assert rendered.count("\n") == 1
+    assert rendered.count("\r") == 3
+    assert "Synthetic stage [##########----------]  50%" in rendered
+    assert rendered.rstrip().endswith("100% 00:02")
+
+
+def test_cli_repeated_verbose_level_keeps_full_diagnostic_prefixes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "source.tif"
+    output = tmp_path / "output.ome.tif"
+    report_path = tmp_path / "report.json"
+    tifffile.imwrite(source, np.zeros((16, 16), dtype=np.uint16), metadata=None)
+
+    def fake_convert(*args, **kwargs):
+        del args, kwargs
+        logger = logging.getLogger("omeify.test_cli")
+        logger.info("visible stage log")
+        logger.debug("debug detail")
+        return {"status": "ok"}
+
+    monkeypatch.setattr("omeify.cli.convert", fake_convert)
+    result = CliRunner().invoke(
+        main,
+        [
+            "convert",
+            str(source),
+            str(output),
+            "--type",
+            "component",
+            "--pixel-size-x",
+            "0.5",
+            "--pixel-size-y",
+            "0.5",
+            "--output-json",
+            str(report_path),
+            "--verbose",
+            "--verbose",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert re.search(
+        r"\d{2}:\d{2}:\d{2} INFO omeify\.test_cli: visible stage log",
+        result.output,
+    )
+    assert "DEBUG omeify.test_cli: debug detail" in result.output
 
 
 def test_verbose_help_describes_single_and_repeated_levels() -> None:
@@ -378,6 +455,7 @@ def test_verbose_help_describes_single_and_repeated_levels() -> None:
     for command in ("convert", "mutate"):
         result = runner.invoke(main, [command, "--help"])
         assert result.exit_code == 0
-        assert "Show stages and 5-second progress bars" in result.output
-        assert "1-second progress" in result.output
+        assert "Show compact stages and progress bars" in result.output
+        assert "timestamps, debug details" in result.output
+        assert "1-second" in result.output
         assert "tracebacks" in result.output

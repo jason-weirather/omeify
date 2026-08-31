@@ -46,12 +46,12 @@ def _progress_bar(fraction: float) -> str:
 
 
 class ProgressLogger:
-    """Emit bounded, terminal-safe progress through standard logging.
+    """Emit bounded progress through standard logging.
 
-    INFO mode reports at most once every five seconds. DEBUG mode shortens the
-    interval to one second. Output is line-oriented instead of relying on
-    terminal cursor control, so it remains readable in tmux, Slurm logs, and
-    redirected stderr.
+    INFO mode emits short progress records suitable for the CLI's single-line
+    ``-v`` display. DEBUG mode retains the detailed line-oriented diagnostics
+    used by ``-vv``. INFO progress updates at most every five seconds; DEBUG
+    shortens the interval to one second.
     """
 
     def __init__(
@@ -70,7 +70,8 @@ class ProgressLogger:
         self.unit = str(unit)
         self._clock = clock
         self._enabled = logger.isEnabledFor(logging.INFO)
-        default_interval = 1.0 if logger.isEnabledFor(logging.DEBUG) else 5.0
+        self._debug = logger.isEnabledFor(logging.DEBUG)
+        default_interval = 1.0 if self._debug else 5.0
         self._interval = (
             default_interval
             if min_interval_seconds is None
@@ -81,11 +82,16 @@ class ProgressLogger:
         self._completed = 0
         self._finished = False
         if self._enabled:
-            self._logger.info(
-                "%s: starting (%s)",
-                self.label,
-                _format_quantity(self.total, self.unit),
-            )
+            if self._debug:
+                self._logger.info(
+                    "%s: starting (%s)",
+                    self.label,
+                    _format_quantity(self.total, self.unit),
+                )
+            else:
+                self._log(self._started)
+                if self.total == 0:
+                    self._finished = True
 
     def update(self, completed: int, *, force: bool = False) -> None:
         """Record an absolute completed count and log when the interval expires."""
@@ -121,16 +127,35 @@ class ProgressLogger:
         rate = self._completed / elapsed if elapsed > 0 and self._completed > 0 else None
         remaining = self.total - self._completed
         eta = remaining / rate if rate not in {None, 0.0} else None
-        rate_text = "unknown" if rate is None else f"{_format_quantity(rate, self.unit)}/s"
-        self._logger.info(
-            "%s: [%s] %5.1f%% (%s of %s, %s, elapsed %s, ETA %s)",
-            self.label,
-            _progress_bar(fraction),
-            100.0 * fraction,
-            _format_quantity(self._completed, self.unit),
-            _format_quantity(self.total, self.unit),
-            rate_text,
-            _format_duration(elapsed),
-            _format_duration(eta),
-        )
+
+        if self._debug:
+            rate_text = "unknown" if rate is None else f"{_format_quantity(rate, self.unit)}/s"
+            self._logger.info(
+                "%s: [%s] %5.1f%% (%s of %s, %s, elapsed %s, ETA %s)",
+                self.label,
+                _progress_bar(fraction),
+                100.0 * fraction,
+                _format_quantity(self._completed, self.unit),
+                _format_quantity(self.total, self.unit),
+                rate_text,
+                _format_duration(elapsed),
+                _format_duration(eta),
+            )
+        else:
+            suffix = (
+                f" {_format_duration(elapsed)}"
+                if fraction >= 1.0
+                else ("" if eta is None else f" ETA {_format_duration(eta)}")
+            )
+            self._logger.info(
+                "%s [%s] %3.0f%%%s",
+                self.label,
+                _progress_bar(fraction),
+                100.0 * fraction,
+                suffix,
+                extra={
+                    "omeify_progress": True,
+                    "omeify_progress_complete": fraction >= 1.0,
+                },
+            )
         self._last_log = now

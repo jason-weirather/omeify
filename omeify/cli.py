@@ -77,16 +77,78 @@ def _load_channel_renames(
     return {int(key): str(item).strip() for key, item in value.items()}, by
 
 
+class _CompactLogHandler(logging.StreamHandler):
+    """Render ``-v`` as compact stages with in-place TTY progress bars."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFormatter(logging.Formatter("%(message)s"))
+        self._progress_width = 0
+
+    def _is_tty(self) -> bool:
+        isatty = getattr(self.stream, "isatty", None)
+        if not callable(isatty):
+            return False
+        try:
+            return bool(isatty())
+        except OSError:
+            return False
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+            if record.levelno >= logging.WARNING:
+                message = f"{record.levelname}: {message}"
+            is_progress = bool(getattr(record, "omeify_progress", False))
+            progress_complete = bool(
+                getattr(record, "omeify_progress_complete", False)
+            )
+
+            if is_progress and self._is_tty():
+                padding = " " * max(0, self._progress_width - len(message))
+                self.stream.write("\r" + message + padding)
+                self.flush()
+                self._progress_width = len(message)
+                if progress_complete:
+                    self.stream.write(self.terminator)
+                    self.flush()
+                    self._progress_width = 0
+                return
+
+            if self._progress_width:
+                self.stream.write(self.terminator)
+                self._progress_width = 0
+            self.stream.write(message + self.terminator)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
 def _configure_logging(verbose: int) -> None:
-    """Configure predictable omeify logging without enabling dependency chatter."""
+    """Configure compact ``-v`` and fully diagnostic ``-vv`` output."""
 
     level = logging.DEBUG if verbose >= 2 else logging.INFO if verbose == 1 else logging.WARNING
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-        force=True,
-    )
+    root = logging.getLogger()
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+        handler.close()
+    root.setLevel(logging.WARNING)
+
+    if verbose == 1:
+        root.addHandler(_CompactLogHandler())
+    else:
+        handler = logging.StreamHandler()
+        if verbose >= 2:
+            handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s %(levelname)s %(name)s: %(message)s",
+                    datefmt="%H:%M:%S",
+                )
+            )
+        else:
+            handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        root.addHandler(handler)
+
     logging.getLogger("omeify").setLevel(level)
 
 
@@ -221,8 +283,8 @@ def main() -> None:
     "--verbose",
     count=True,
     help=(
-        "Show stages and 5-second progress bars; repeat for debug details, "
-        "1-second progress, and tracebacks."
+        "Show compact stages and progress bars; repeat for timestamps, debug details, "
+        "1-second updates, and tracebacks."
     ),
 )
 def convert_command(
@@ -423,8 +485,8 @@ def convert_command(
     "--verbose",
     count=True,
     help=(
-        "Show stages and 5-second progress bars; repeat for debug details, "
-        "1-second progress, and tracebacks."
+        "Show compact stages and progress bars; repeat for timestamps, debug details, "
+        "1-second updates, and tracebacks."
     ),
 )
 def mutate_command(
