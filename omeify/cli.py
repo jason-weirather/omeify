@@ -300,6 +300,17 @@ def convert_command(
     help="Fusion QPTIFF field used for normalized channel names.",
 )
 @click.option(
+    "--rename-channels-json",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="JSON object mapping source names or zero-based indices to output names.",
+)
+@click.option(
+    "--rename-channels-by",
+    type=click.Choice(["name", "index"]),
+    default=None,
+    help="Interpret rename JSON keys explicitly as channel names or indices.",
+)
+@click.option(
     "--dtype",
     type=click.Choice(TARGET_DTYPES),
     required=True,
@@ -393,6 +404,8 @@ def mutate_command(
     output_path: Path,
     input_type: str,
     channel_name_field: str | None,
+    rename_channels_json: Path | None,
+    rename_channels_by: str | None,
     dtype: str,
     range_mode: str,
     series: int,
@@ -417,6 +430,10 @@ def mutate_command(
 
     log_level = logging.DEBUG if verbose >= 2 else logging.INFO if verbose == 1 else logging.WARNING
     logging.basicConfig(level=log_level, format="%(levelname)s %(name)s: %(message)s")
+    rename_channels, rename_mode = _load_channel_renames(
+        rename_channels_json,
+        rename_channels_by,  # type: ignore[arg-type]
+    )
     if output_json is not None:
         report_path = output_json.resolve()
         if report_path in {input_path.resolve(), output_path.resolve()}:
@@ -431,6 +448,8 @@ def mutate_command(
             output_path,
             input_type=input_type,  # type: ignore[arg-type]
             channel_name_field=channel_name_field,  # type: ignore[arg-type]
+            rename_channels=rename_channels,
+            rename_channels_by=rename_mode,
             pixel_size=pixel_size,
             dtype=dtype,  # type: ignore[arg-type]
             range_mode=range_mode,  # type: ignore[arg-type]

@@ -8,6 +8,12 @@ from typing import Literal
 import numpy as np
 
 from ._version import get_version_info
+from .conversion import (
+    ChannelRenameMapping,
+    RenameChannelsBy,
+    _apply_channel_renames,
+    _validate_channel_rename_mapping,
+)
 from .dtype_mutation import (
     DEFAULT_AUTO_MAX_NORMALIZED_RMSE,
     DEFAULT_SAMPLE_PIXELS_PER_CHANNEL,
@@ -35,6 +41,8 @@ def mutate(
     range_mode: RangeMode = "auto",
     series: int = 0,
     channel_name_field: Literal["name", "biomarker", "auto"] | None = None,
+    rename_channels: ChannelRenameMapping | None = None,
+    rename_channels_by: RenameChannelsBy | None = None,
     pixel_size: PixelSize | None = None,
     sample_pixels_per_channel: int = DEFAULT_SAMPLE_PIXELS_PER_CHANNEL,
     auto_max_normalized_rmse: float = DEFAULT_AUTO_MAX_NORMALIZED_RMSE,
@@ -66,6 +74,10 @@ def mutate(
         raise FileExistsError(f"Output already exists: {output_file}")
     if input_type not in PLANAR_INPUT_TYPES:
         raise ValueError(f"Unsupported input_type {input_type!r}")
+    normalized_renames, normalized_rename_mode = _validate_channel_rename_mapping(
+        rename_channels,
+        rename_channels_by,
+    )
     if dtype not in TARGET_DTYPES:
         raise ValueError("dtype must be 'uint8' or 'uint16'")
     if range_mode not in RANGE_MODES:
@@ -101,9 +113,15 @@ def mutate(
                 "invent one"
             )
 
+        source_channel_names = tuple(reader.channel_names)
+        output_channel_names = _apply_channel_renames(
+            source_channel_names,
+            normalized_renames,
+            normalized_rename_mode,
+        )
         plans = analyze_dtype_mutation(
             reader,
-            channel_names=reader.channel_names,
+            channel_names=source_channel_names,
             source_dtype=reader.dtype,
             dtype=dtype,
             range_mode=range_mode,
@@ -114,7 +132,7 @@ def mutate(
         writer = OMETiffWriter(
             output_file,
             image_type="multichannel",
-            channel_names=reader.channel_names,
+            channel_names=output_channel_names,
             pixel_size=effective_pixel_size,
             compression=compression,
             tile_size=tile_size,
@@ -175,6 +193,8 @@ def mutate(
             "input_type": input_type,
             "series": int(series),
             "channel_name_field": channel_name_field,
+            "rename_channels": dict(normalized_renames),
+            "rename_channels_by": normalized_rename_mode,
             "pixel_size_override": (
                 None if pixel_size is None else list(pixel_size.to_tuple())
             ),

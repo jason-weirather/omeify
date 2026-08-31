@@ -449,3 +449,127 @@ def test_mutation_cli_emits_structured_per_channel_report(tmp_path: Path) -> Non
         "B",
     ]
     assert output.exists()
+
+
+def test_mutation_python_api_supports_convert_channel_rename_semantics(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "rename-source.ome.tif"
+    name_output = tmp_path / "rename-by-name.ome.tif"
+    index_output = tmp_path / "rename-by-index.ome.tif"
+    data = np.arange(3 * 16 * 16, dtype=np.float32).reshape(3, 16, 16)
+    _write_float_ome(source, data, names=["A", "B", "C"])
+
+    name_report = mutate(
+        source,
+        name_output,
+        input_type="ome_tiff",
+        dtype="uint16",
+        range_mode="full",
+        rename_channels={"A": "Alpha", "C": "Gamma"},
+        rename_channels_by="name",
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+    assert [item["name"] for item in name_report["input_file"]["channels"]] == [
+        "A",
+        "B",
+        "C",
+    ]
+    assert name_report["image"]["channel_names"] == ["Alpha", "B", "Gamma"]
+    assert name_report["options"]["rename_channels"] == {"A": "Alpha", "C": "Gamma"}
+    assert name_report["options"]["rename_channels_by"] == "name"
+    assert [
+        item["channel_name"] for item in name_report["dtype_mutation"]["channels"]
+    ] == ["A", "B", "C"]
+    with OMETiffReader(name_output) as reader:
+        assert reader.channel_names == ("Alpha", "B", "Gamma")
+
+    index_report = mutate(
+        source,
+        index_output,
+        input_type="ome_tiff",
+        dtype="uint16",
+        range_mode="full",
+        rename_channels={0: "First", 2: "Third"},
+        rename_channels_by="index",
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        calculate_checksums=False,
+    )
+    assert index_report["image"]["channel_names"] == ["First", "B", "Third"]
+    assert index_report["options"]["rename_channels"] == {0: "First", 2: "Third"}
+    assert index_report["options"]["rename_channels_by"] == "index"
+
+    with pytest.raises(ValueError, match="explicitly set"):
+        mutate(
+            source,
+            tmp_path / "missing-mode.ome.tif",
+            input_type="ome_tiff",
+            dtype="uint16",
+            range_mode="full",
+            rename_channels={"A": "Alpha"},
+            compression="Uncompressed",
+            tile_size=16,
+            pyramid_levels=0,
+            calculate_checksums=False,
+        )
+
+
+def test_mutation_cli_accepts_channel_rename_json_with_interspersed_options(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "cli-rename-source.ome.tif"
+    output = tmp_path / "cli-rename-output.ome.tif"
+    rename_path = tmp_path / "renames.json"
+    report_path = tmp_path / "rename-report.json"
+    data = np.arange(2 * 16 * 16, dtype=np.float32).reshape(2, 16, 16)
+    _write_float_ome(source, data, names=["A", "B"])
+    rename_path.write_text(json.dumps({"A": "Alpha"}), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "mutate",
+            "--type",
+            "ome_tiff",
+            "--series",
+            "0",
+            "--dtype",
+            "uint16",
+            "--range-mode",
+            "full",
+            "--rename-channels-by",
+            "name",
+            "--rename-channels-json",
+            str(rename_path),
+            str(source),
+            "--compression",
+            "Uncompressed",
+            "--tile-size",
+            "16",
+            "--pyramid-levels",
+            "0",
+            "--no-checksums",
+            "--output-json",
+            str(report_path),
+            "--verbose",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["image"]["channel_names"] == ["Alpha", "B"]
+    assert report["options"]["rename_channels"] == {"A": "Alpha"}
+    assert report["options"]["rename_channels_by"] == "name"
+    with OMETiffReader(output) as reader:
+        assert reader.channel_names == ("Alpha", "B")
+
+    help_result = CliRunner().invoke(main, ["mutate", "--help"])
+    assert help_result.exit_code == 0
+    assert "--rename-channels-json" in help_result.output
+    assert "--rename-channels-by" in help_result.output
