@@ -28,6 +28,7 @@ def verify_output(
     output_path: Path,
     *,
     provenance_json: str | None,
+    software: str,
 ) -> dict[str, object]:
     """Verify OME metadata, TIFF storage, decoding, and lossless spot values."""
 
@@ -35,6 +36,7 @@ def verify_output(
         "ome_tiff_recognized": False,
         "bigtiff": False,
         "output_byte_order": None,
+        "software_tag_matches": False,
         "image_count_matches": False,
         "series_names_match": False,
         "metadata_matches_specs": False,
@@ -66,6 +68,16 @@ def verify_output(
         verification["output_byte_order"] = (
             "big" if output.byteorder == ">" else "little"
         )
+        try:
+            actual_software = str(output.pages[0].aspage().tags["Software"].value)
+        except KeyError as exc:
+            raise ValueError("Written TIFF does not contain a Software tag") from exc
+        if actual_software != software:
+            raise ValueError(
+                f"TIFF Software tag {actual_software!r} does not match "
+                f"requested value {software!r}"
+            )
+        verification["software_tag_matches"] = True
 
         omexml = output.ome_metadata
         if not omexml:

@@ -51,6 +51,7 @@ def convert(
     downsample: DownsampleMethod = "mean",
     max_workers: int | None = None,
     display_uuid: bool = True,
+    software: str | None = None,
     overwrite: bool = True,
     cache_directory: str | Path | None = None,
 ) -> dict[str, object]:
@@ -159,6 +160,7 @@ def convert(
             downsample=downsample,
             max_workers=max_workers,
             display_uuid=display_uuid,
+            software=software,
             overwrite=overwrite,
             cache_directory=cache_directory,
             icc_profile=getattr(reader, "icc_profile", None),

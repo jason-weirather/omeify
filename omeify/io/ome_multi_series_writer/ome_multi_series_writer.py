@@ -10,6 +10,7 @@ from omeify.io.ome_tiff_writer import (
     JPEGSubsampling,
     _JPEG_SUBSAMPLING_FACTORS,
     _OUTPUT_BYTEORDER,
+    _normalize_software_tag,
     _validate_tile_size,
 )
 from omeify.utils.generate_ome_xml import (
@@ -44,6 +45,7 @@ class OMEMultiSeriesWriter:
         pyramid_levels: int | None = None,
         max_workers: int | None = None,
         display_uuid: bool = True,
+        software: str | None = None,
         overwrite: bool = True,
         cache_directory: str | Path | None = None,
     ) -> None:
@@ -72,6 +74,7 @@ class OMEMultiSeriesWriter:
                 raise ValueError("max_workers must be at least one")
             self.max_workers = max_workers
         self.display_uuid = bool(display_uuid)
+        self.software = _normalize_software_tag(software)
         self.overwrite = bool(overwrite)
         self.cache_directory = (
             None if cache_directory is None else Path(cache_directory)
@@ -123,6 +126,7 @@ class OMEMultiSeriesWriter:
             prepared,
             omexml,
             provenance_json=provenance_json,
+            software=self.software,
         )
 
         return {
@@ -166,6 +170,7 @@ class OMEMultiSeriesWriter:
                 "tile_size": self.tile_size,
                 "pyramid_levels": self.pyramid_levels,
                 "display_uuid": self.display_uuid,
+                "software": self.software,
                 "max_workers": self.max_workers,
             },
         }
@@ -211,6 +216,7 @@ class OMEMultiSeriesWriter:
         omexml: str,
         *,
         provenance_json: str | None,
+        software: str,
     ) -> dict[str, object]:
         with tempfile.TemporaryDirectory(
             prefix="omeify-multiseries-",
@@ -241,11 +247,13 @@ class OMEMultiSeriesWriter:
                     omexml,
                     tile_size=self.tile_size,
                     max_workers=self.max_workers,
+                    software=software,
                 )
                 verification = verify_output(
                     prepared,
                     temporary_output,
                     provenance_json=provenance_json,
+                    software=software,
                 )
                 os.replace(temporary_output, self.output_path)
             finally:

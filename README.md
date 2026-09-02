@@ -375,6 +375,7 @@ Useful conversion options:
 --rename-channels-by      name or index
 --pixel-size-x/y/unit     Explicit physical-size override; default unit µm
 --omit-uuid               Omit the optional OME root UUID
+--software TEXT           Override the TIFF Software tag; default "omeify <version>"
 --workers N               TIFF compression workers
 ```
 
@@ -723,6 +724,11 @@ report = OMETiffWriter(
 ).write(image)
 ```
 
+The TIFF `Software` tag defaults to `omeify <version>`. Applications using omeify as their
+file-writing layer can identify themselves instead with `software="my-app 1.2.3"`. This changes
+only the TIFF `Software` tag; the minimized OME-XML `Creator` still identifies the omeify version
+that generated the OME metadata.
+
 Use `image_type="rgb"` for `YXS` `uint8` RGB data. RGB is written as one logical OME channel
 with `SamplesPerPixel=3`. Use `image_type="label"` for one integer `YX` label raster; label
 pyramids use nearest-neighbor downsampling and lossless compression. The image-type argument is
@@ -765,6 +771,7 @@ series = (
 report = OMEMultiSeriesWriter(
     "segmentation.ome.tif",
     compression="Deflate",
+    software="example-segmenter 1.0",
 ).write(
     series,
     provenance={
@@ -779,6 +786,9 @@ Array-backed series may use NumPy memory maps; the writer reads bounded regions 
 materialize the complete stack. Advanced callers use `OMEImageSeries.from_source()` with the same
 `PlaneReaderSource` boundary as the ordinary writer. Continuous series default to deterministic
 2× mean pyramids. Label series require nearest-neighbor pyramids. Series names must be unique.
+Like the ordinary writer, `OMEMultiSeriesWriter` defaults the TIFF `Software` tag to
+`omeify <version>` and accepts a caller-supplied `software=` override.
+
 A series may override the writer default with `compression="JPEG"`, which is permitted only for
 `uint8` continuous or RGB visualization series; label series remain lossless.
 

@@ -367,6 +367,50 @@ def test_public_ome_tiff_writer_emits_miti_profiled_multichannel_output(
         )
 
 
+def test_writer_software_tag_defaults_to_omeify_and_accepts_override(
+    tmp_path: Path,
+) -> None:
+    data = np.zeros((1, 16, 16), dtype=np.uint16)
+    default_output = tmp_path / "default-software.ome.tif"
+    custom_output = tmp_path / "custom-software.ome.tif"
+
+    default_report = OMETiffWriter(
+        default_output,
+        image_type="multichannel",
+        channel_names=["DAPI"],
+        pixel_size=PixelSize(0.5, 0.5, "µm"),
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+    ).write(data)
+    custom_report = OMETiffWriter(
+        custom_output,
+        image_type="multichannel",
+        channel_names=["DAPI"],
+        pixel_size=PixelSize(0.5, 0.5, "µm"),
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        software="downstream-app 2.4",
+    ).write(data)
+
+    with tifffile.TiffFile(default_output) as tiff:
+        assert str(tiff.pages[0].tags["Software"].value).startswith("omeify ")
+    with tifffile.TiffFile(custom_output) as tiff:
+        assert tiff.pages[0].tags["Software"].value == "downstream-app 2.4"
+    assert default_report["verification"]["software_tag_matches"] is True
+    assert custom_report["verification"]["software_tag_matches"] is True
+    assert custom_report["options"]["software"] == "downstream-app 2.4"
+
+    with pytest.raises(ValueError, match="non-empty string"):
+        OMETiffWriter(
+            tmp_path / "bad-software.ome.tif",
+            channel_names=["DAPI"],
+            pixel_size=PixelSize(0.5, 0.5, "µm"),
+            software="   ",
+        )
+
+
 def test_generic_rgb_writer_defaults_to_lossless_lzw(tmp_path: Path) -> None:
     writer = OMETiffWriter(
         tmp_path / "rgb-default.ome.tif",

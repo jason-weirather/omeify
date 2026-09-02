@@ -6,7 +6,6 @@ from pathlib import Path
 
 import tifffile
 
-from omeify._version import __version__
 from omeify.io.ome_tiff_writer import (
     JPEGSubsampling,
     OMETiffWriter,
@@ -164,10 +163,10 @@ def write_output(
     *,
     tile_size: int,
     max_workers: int,
+    software: str,
 ) -> None:
     """Write all base Images and their SubIFD pyramids into one BigTIFF."""
 
-    software = f"omeify {__version__}"
     with tifffile.TiffWriter(
         output_path,
         bigtiff=True,

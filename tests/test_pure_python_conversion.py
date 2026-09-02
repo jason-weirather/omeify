@@ -795,6 +795,28 @@ def test_strip_source_and_mismatched_output_grid(tmp_path: Path) -> None:
         np.testing.assert_array_equal(tif.series[0].levels[1].asarray(), _mean2(data))
 
 
+def test_convert_forwards_software_tag_override(tmp_path: Path) -> None:
+    data = np.arange(2 * 16 * 16, dtype=np.uint16).reshape(2, 16, 16)
+    source = tmp_path / "source-software.ome.tif"
+    output = tmp_path / "output-software.ome.tif"
+    _write_source(source, data)
+
+    report = convert(
+        source,
+        output,
+        input_type="ome_tiff",
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        software="wrapper-pipeline 3.1",
+    )
+
+    assert report["options"]["software"] == "wrapper-pipeline 3.1"
+    assert report["verification"]["software_tag_matches"] is True
+    with tifffile.TiffFile(output) as tiff:
+        assert tiff.pages[0].tags["Software"].value == "wrapper-pipeline 3.1"
+
+
 def test_float32_dtype_and_miti_type_are_preserved(tmp_path: Path) -> None:
     data = np.linspace(0.0, 1.0, 2 * 33 * 47, dtype=np.float32).reshape(2, 33, 47)
     source = tmp_path / "source-float.ome.tif"

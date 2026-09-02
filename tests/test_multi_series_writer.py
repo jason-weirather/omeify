@@ -63,6 +63,7 @@ def test_multi_series_writer_preserves_heterogeneous_series_and_provenance(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=1,
+        software="example-segmenter 2.0",
     ).write(series, provenance=provenance)
 
     assert report["miti_header"]["is_valid"] is True
@@ -72,6 +73,8 @@ def test_multi_series_writer_preserves_heterogeneous_series_and_provenance(
     }
     assert report["verification"]["provenance_annotation_linked"] is True
     assert report["verification"]["base_pixel_values_match"] is True
+    assert report["verification"]["software_tag_matches"] is True
+    assert report["options"]["software"] == "example-segmenter 2.0"
     assert [item["name"] for item in report["series"]] == [
         "Normalized signal",
         "Object labels",
@@ -83,6 +86,7 @@ def test_multi_series_writer_preserves_heterogeneous_series_and_provenance(
     ]
 
     with tifffile.TiffFile(output) as tiff:
+        assert tiff.pages[0].tags["Software"].value == "example-segmenter 2.0"
         assert tiff.is_ome
         assert len(tiff.series) == 2
         assert [item.name for item in tiff.series] == [

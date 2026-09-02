@@ -42,6 +42,21 @@ _OUTPUT_COMPRESSION_CODES = {
 }
 
 
+def _normalize_software_tag(software: str | None) -> str:
+    """Return the TIFF Software tag value used by final OME-TIFF outputs."""
+
+    if software is None:
+        return f"omeify {__version__}"
+    if not isinstance(software, str):
+        raise TypeError("software must be a string or None")
+    value = software.strip()
+    if not value:
+        raise ValueError("software must be a non-empty string when supplied")
+    if "\x00" in value:
+        raise ValueError("software must not contain NUL characters")
+    return value
+
+
 @runtime_checkable
 class PlaneReaderSource(Protocol):
     """Source contract used by the streaming OME-TIFF writer."""
@@ -476,6 +491,7 @@ class OMETiffWriter:
         downsample: DownsampleMethod | None = None,
         max_workers: int | None = None,
         display_uuid: bool = True,
+        software: str | None = None,
         overwrite: bool = True,
         cache_directory: str | Path | None = None,
         icc_profile: bytes | None = None,
@@ -513,6 +529,7 @@ class OMETiffWriter:
             if self.max_workers < 1:
                 raise ValueError("max_workers must be at least one")
         self.display_uuid = bool(display_uuid)
+        self.software = _normalize_software_tag(software)
         self.overwrite = bool(overwrite)
         self.cache_directory = (
             Path(cache_directory) if cache_directory is not None else None
@@ -818,6 +835,7 @@ class OMETiffWriter:
                     else None
                 ),
                 "display_uuid": self.display_uuid,
+                "software": self.software,
                 "max_workers": self.max_workers,
             },
         }
@@ -972,7 +990,6 @@ class OMETiffWriter:
             if spec.icc_profile is not None:
                 common_options["iccprofile"] = spec.icc_profile
 
-        software = f"omeify {__version__}"
         total_subresolutions = len(level_paths)
         with tifffile.TiffWriter(
             output_path,
@@ -993,7 +1010,7 @@ class OMETiffWriter:
                 ),
                 shape=level_shapes[0],
                 description=omexml.encode("utf-8"),
-                software=software,
+                software=self.software,
                 subifds=total_subresolutions,
                 resolution=_resolution(spec.pixel_size, 1),
                 resolutionunit="CENTIMETER",
@@ -1049,6 +1066,7 @@ class OMETiffWriter:
             "ome_tiff_recognized": False,
             "bigtiff": False,
             "output_byte_order": None,
+            "software_tag_matches": False,
             "byte_order_metadata_matches_tiff": False,
             "significant_bits_matches_dtype": False,
             "tiff_data_mapping_matches": False,
@@ -1092,6 +1110,17 @@ class OMETiffWriter:
                     f"byte order {_OUTPUT_BYTEORDER!r}"
                 )
             verification["output_byte_order"] = "big" if actual_byteorder == ">" else "little"
+
+            try:
+                actual_software = str(output.pages[0].aspage().tags["Software"].value)
+            except KeyError as exc:
+                raise ValueError("Written TIFF does not contain a Software tag") from exc
+            if actual_software != self.software:
+                raise ValueError(
+                    f"TIFF Software tag {actual_software!r} does not match "
+                    f"requested value {self.software!r}"
+                )
+            verification["software_tag_matches"] = True
 
             omexml = output.ome_metadata
             if not omexml:
