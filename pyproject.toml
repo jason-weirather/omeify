@@ -7,7 +7,7 @@ name = "omeify"
 version = "0.13.1"
 description = "Convert tissue images into metadata-minimized, pyramidal OME-TIFF"
 readme = "README.md"
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [

@@ -1,61 +1,64 @@
 # omeify
 
-`omeify` reads supported microscopy TIFF-family formats and writes predictable, tiled,
-pyramidal OME-TIFF. It preserves the native pixel dtype and never rescales or casts during normal
-conversion. Pixel values remain exact with lossless output and are approximate when JPEG is
-selected. Omeify rebuilds pyramids from the full-resolution raster and constructs a minimized OME
-header instead of copying arbitrary source metadata.
+`omeify` is a Python toolkit for the OME-TIFF file boundary. Its main goal is to make reading,
+writing, and normalizing microscopy images into OME-TIFF predictable while keeping tight control
+over which metadata enters the resulting file.
+
+In practice, omeify focuses on three jobs:
+
+1. **Read and write OME-TIFF deliberately.** It provides bounded regional readers plus
+   single-image and heterogeneous multi-series writers for tiled, pyramidal OME-TIFF.
+2. **Convert supported microscopy formats into OME-TIFF.** Conversion uses explicit source
+   profiles rather than guessing from file extensions, normalizes layout, rebuilds pyramids, and
+   verifies the written result before installation.
+3. **Minimize and control OME metadata.** Omeify constructs a new OME-XML document from a small,
+   explicit vocabulary instead of copying arbitrary vendor metadata into the output.
+
+The normal `convert` workflow is fidelity-first: it preserves the source numeric dtype and does not
+rescale intensities or explicitly cast pixel values. With lossless compression, pixel values remain
+exact; brightfield profiles that use JPEG intentionally re-encode RGB pixels. The separate `mutate`
+workflow exists for cases where changing dtype or numeric scale is scientifically intended and
+should be measured and reported rather than hidden inside conversion.
+
+Omeify's metadata policy is guided by the minimum-information approach described in
+[Schapiro *et al.*, **MITI Minimum Information guidelines for highly multiplexed tissue images**,
+*Nature Methods* 19, 262-267 (2022)](https://doi.org/10.1038/s41592-022-01415-4). MITI is broader
+than an OME-TIFF header: it also covers biospecimen, reagent, acquisition, instrument, processing,
+and analysis metadata. Omeify applies the minimum-information principle specifically at the image
+file boundary. It preserves or generates the metadata needed to interpret the OME-TIFF, and it does
+not invent experimental facts or carry unrelated source text forward merely because it was present
+in the input file.
 
 > **Deidentification boundary:** metadata minimization avoids carrying vendor descriptions,
 > filenames, user names, scanner identifiers, dates, and other arbitrary source text into the
 > generated OME-XML. It does not inspect pixels for burned-in labels or other identifying content.
 > Inspection reports are diagnostic and may expose source metadata.
 
-## What omeify provides
+## Interfaces
 
-- Explicit readers for supported vendor TIFFs and OME-TIFF
-- Bounded regional access without materializing a whole slide
-- Canonical planar multichannel, interleaved RGB, and label-image representations
-- One ordinary writer for a single homogeneous OME Image
-- One multi-series writer for named heterogeneous OME Images
-- One shared internal engine for writer validation, pyramid construction, TIFF encoding,
-  verification, scratch cleanup, and atomic installation
-- Deterministic dtype mutation with a quantitative per-channel loss report
-- TIFF and OME metadata inspection without decoding the complete raster
-- OME 2016-06 schema validation and a bundled MITI-aligned header profile
+Omeify is intended to be useful both from the command line and as a Python library. The command
+line is the fastest way to inspect and normalize files, so it is introduced first; the public Python
+API exposes the same readers, writers, conversion workflows, and validation boundaries for
+applications that need to build on omeify.
 
-Omeify owns the image-file boundary. It does not own segmentation, overlapping inference tiles,
-object reconciliation, patch scheduling, region measurements, or image-analysis policy.
+### Command line
 
-## Installation
+The CLI uses explicit subcommands with deliberately different responsibilities:
 
-Omeify supports Python 3.10 through 3.14.
+| Command | Purpose | What makes it distinct |
+|---|---|---|
+| `omeify inspect` | Inspect TIFF structure and metadata | Format-agnostic TIFF diagnostics. It does not require an omeify conversion profile and can inspect any TIFF layout understood by tifffile without materializing the complete raster. |
+| `omeify convert` | Normalize a supported source into OME-TIFF | Fidelity-first conversion. It preserves the source numeric dtype and scale, does not perform intensity rescaling or an explicit dtype cast, rebuilds pyramids, minimizes metadata, and verifies the output. |
+| `omeify mutate` | Create an intentionally dtype-mutated OME-TIFF | Uses the same normalized writer path as `convert`, but explicitly changes the numeric representation and reports the selected per-channel mapping and anticipated quantization loss. |
+| `omeify version` | Report omeify and dependency versions | Provides a compact version string or a JSON description of the image-I/O software stack for reproducibility and diagnostics. |
 
-```bash
-python -m pip install .
-```
-
-For development:
-
-```bash
-python -m pip install -e '.[dev]'
-pytest
-ruff check .
-```
-
-The package is licensed under Apache-2.0. The authoritative package version is the static
-`[project].version` value in `pyproject.toml`. Installed code reads distribution metadata; direct
-source-tree imports fall back to the neighboring `pyproject.toml`.
-
-## Quick start
-
-Inspect a TIFF before choosing a conversion profile:
+Start by inspecting an unfamiliar TIFF:
 
 ```bash
 omeify inspect input.tif
 ```
 
-Convert a planar multiplex image:
+Convert a planar multiplex image without changing its dtype or intensity scale:
 
 ```bash
 omeify convert input.qptiff output.ome.tif \
@@ -77,7 +80,8 @@ omeify convert source.ome.tif normalized.ome.tif \
   --type ome_tiff
 ```
 
-Create an explicit integer representation of a floating-point multiplex image:
+When changing the numeric representation is intentional, use `mutate` rather than hiding that
+operation inside conversion:
 
 ```bash
 omeify mutate source.ome.tif compact.ome.tif \
@@ -86,6 +90,54 @@ omeify mutate source.ome.tif compact.ome.tif \
   --range-mode auto \
   --output-json compact.mutation.json
 ```
+
+Use `omeify COMMAND --help` for the complete option set. Detailed command behavior is documented
+in the [command-line reference](#command-line-reference).
+
+### Python library
+
+The same boundaries are public Python APIs. `convert()` and `mutate()` mirror the command-line
+workflows; `TiffInspector` provides programmatic inspection; format-specific readers expose bounded
+regional I/O; and `OMETiffWriter` / `OMEMultiSeriesWriter` provide the normalized writer contracts.
+See the [Python API](#python-api) section for examples.
+
+## Installation
+
+Omeify requires Python 3.10 or newer.
+
+From a repository checkout:
+
+```bash
+python -m pip install .
+```
+
+For development:
+
+```bash
+python -m pip install -e '.[dev]'
+pytest
+ruff check .
+```
+
+The package is licensed under Apache-2.0. The authoritative package version is the static
+`[project].version` value in `pyproject.toml`. Installed code reads distribution metadata; direct
+source-tree imports fall back to the neighboring `pyproject.toml`.
+
+## Scope and capabilities
+
+- Explicit readers for supported vendor TIFFs and OME-TIFF
+- Bounded regional access without materializing a whole slide
+- Canonical planar multichannel, interleaved RGB, and label-image representations
+- One ordinary writer for a single homogeneous OME Image
+- One multi-series writer for named heterogeneous OME Images
+- One shared internal engine for writer validation, pyramid construction, TIFF encoding,
+  verification, scratch cleanup, and atomic installation
+- Deterministic dtype mutation with a quantitative per-channel loss report
+- TIFF and OME metadata inspection without decoding the complete raster
+- OME 2016-06 schema validation and a bundled MITI-aligned header profile
+
+Omeify owns the image-file boundary. It does not own segmentation, overlapping inference tiles,
+object reconciliation, patch scheduling, region measurements, or image-analysis policy.
 
 ## Supported inputs
 
@@ -205,7 +257,7 @@ OME metadata.
 A source ICC profile is retained for RGB output when present. Arbitrary vendor descriptions and
 other free text are not copied.
 
-## Command-line interface
+## Command-line reference
 
 Omeify uses explicit subcommands:
 
@@ -694,10 +746,28 @@ different outputs.
 ## Metadata minimization and MITI alignment
 
 Omeify constructs a new OME-XML document instead of copying arbitrary source metadata. The guiding
-resource is:
+publication is the MITI minimum-information work cited in the introduction:
 
-> Schapiro D, Yapp C, Sokolov A, et al. MITI minimum information guidelines for highly multiplexed
-> tissue images. *Nature Methods.* 2022;19:262-267. doi:10.1038/s41592-022-01415-4.
+[Schapiro D, Yapp C, Sokolov A, et al. **MITI Minimum Information guidelines for highly
+multiplexed tissue images.** *Nature Methods.* 2022;19:262-267.
+doi:10.1038/s41592-022-01415-4.](https://doi.org/10.1038/s41592-022-01415-4)
+
+MITI describes a broader dataset-level metadata standard and recommends OME-TIFF for raster image
+data. Omeify applies that minimum-information philosophy narrowly to the OME-TIFF file boundary:
+retain the information required to interpret the raster, make every additional field deliberate,
+and leave biospecimen, reagent, acquisition, instrument, processing, and analysis records to
+companion metadata systems rather than synthesizing them inside the image header.
+
+Only a small set of source information is eligible to cross that boundary automatically:
+
+| Source information | Omeify policy | Why it is retained or rejected |
+|---|---|---|
+| Pixel dtype and image geometry | Preserved by `convert`; dtype changes occur only through explicit mutation | The numeric representation and dimensions are intrinsic to interpreting the raster, and conversion should not silently change them. |
+| Channel names | Read from supported source metadata, normalized according to the selected profile, and optionally renamed explicitly | Logical channel identity is needed to interpret planar multiplex data. |
+| Physical pixel size | Read from supported source metadata or standard TIFF calibration, or supplied as an explicit override | Spatial calibration is required by omeify's normalized output contract and is important for quantitative interpretation. |
+| RGB ICC profile | Preserved when present on supported RGB input | Color interpretation can depend on the source color profile. |
+| Vendor descriptions, filenames, scanner fields, dates, user names, and unrelated TIFF text | Not copied into generated OME-XML | Arbitrary free text is not required to interpret the normalized raster and defeats strict metadata control. |
+| Biospecimen, reagent, instrument, acquisition, processing, and analysis metadata | Not inferred or invented | These are important MITI companion records, but omeify does not manufacture experimental facts that were not supplied through an explicit contract. |
 
 The normalized header is validated against:
 
@@ -705,30 +775,25 @@ The normalized header is validated against:
 omeify/schemas/miti_ome_tiff_header.schema.json
 ```
 
-The schema implements the MITI OME-TIFF header minimums plus structural requirements needed to
-interpret the generated file mechanically.
+The schema implements omeify's MITI-aligned OME-TIFF header minimums plus structural requirements
+needed to interpret the generated file mechanically.
 
-| Header value | Omeify policy |
-|---|---|
-| `Image ID`, `Pixels ID` | Required generated identifiers |
-| `BigEndian`, `DimensionOrder`, `Interleaved` | Required and checked against TIFF storage |
-| `PhysicalSizeX`, `PhysicalSizeY`, units | Required |
-| `SizeX`, `SizeY`, `SizeC`, `SizeZ`, `SizeT` | Required |
-| `Type`, `SignificantBits` | Required and checked against stored samples |
-| Channel `ID`, `Name`, `SamplesPerPixel` | Required |
-| `TiffData IFD`, `PlaneCount` | Required and checked against physical top-level IFDs |
-| `Image/@Name` | Omitted for ordinary output; required and caller supplied for multi-series output |
-| Root `UUID` | Generated by default; optional |
-| Root `Creator` | Generated from the omeify version |
-| Empty `LightPath` | Generated without inventing acquisition metadata |
-| Pyramid `MapAnnotation` | Generated and linked when reduced levels exist |
-| ICC profile | Preserved for RGB when supplied |
-| Multi-series JSON provenance | Optional, caller supplied, canonicalized, and linked from every image |
-
-MITI companion records for biospecimens, reagents, acquisition, instruments, processing, and
-analysis remain important to a complete dataset but are outside the minimized OME-TIFF header.
-Omeify does not synthesize experimental facts that were not supplied through an explicit supported
-contract.
+| Header value | Omeify policy | Why it is present |
+|---|---|---|
+| `Image ID`, `Pixels ID` | Required generated identifiers | Provide unambiguous internal references for the OME object graph without copying source identifiers. |
+| `BigEndian`, `DimensionOrder`, `Interleaved` | Required and checked against TIFF storage | Describe how logical pixels map onto the physical TIFF representation. |
+| `PhysicalSizeX`, `PhysicalSizeY`, units | Required | Preserve spatial calibration. |
+| `SizeX`, `SizeY`, `SizeC`, `SizeZ`, `SizeT` | Required | Define the dimensional extent of the OME image. |
+| `Type`, `SignificantBits` | Required and checked against stored samples | Make the numeric sample representation explicit and verifiable. |
+| Channel `ID`, `Name`, `SamplesPerPixel` | Required | Identify logical channels and distinguish planar data from interleaved RGB samples. |
+| `TiffData IFD`, `PlaneCount` | Required and checked against physical top-level IFDs | Map OME planes onto the TIFF container unambiguously. |
+| `Image/@Name` | Omitted for ordinary output; required and caller supplied for multi-series output | Avoids carrying arbitrary source image names while still giving multi-series files an explicit navigation identity. |
+| Root `UUID` | Generated by default; optional | Gives the generated OME document a file-level identifier when desired. |
+| Root `Creator` | Generated from the omeify version | Records the software that constructed the OME metadata rather than asserting source acquisition provenance. |
+| Empty `LightPath` | Generated without inventing acquisition metadata | Satisfies the supported OME channel structure without fabricating instrument details. |
+| Pyramid `MapAnnotation` | Generated and linked when reduced levels exist | Describes the reconstructed pyramid hierarchy to OME-aware consumers. |
+| ICC profile | Preserved for RGB when supplied | Retains source color-management information when it is relevant to pixel interpretation. |
+| Multi-series JSON provenance | Optional, caller supplied, canonicalized, and linked from every image | Allows downstream applications to attach explicit structured provenance without opening the door to arbitrary copied source metadata. |
 
 ## Validation and verification
 
