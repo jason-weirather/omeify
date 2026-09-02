@@ -5,25 +5,14 @@ from typing import Sequence
 
 import numpy as np
 
-from omeify.io.ome_tiff_writer import DownsampleMethod, PlaneReaderSource
+from omeify.io._writer import (
+    ArraySource,
+    DownsampleMethod,
+    PlaneReaderSource,
+    resolve_downsample,
+)
 from omeify.io.pixel_size import PixelSize
 from omeify.io.spec import ImageType, OMEImageSpec
-from omeify.io.tiff import ArrayPlaneReader, PlaneReader
-
-
-class _ArraySeriesSource:
-    def __init__(self, array: np.ndarray, spec: OMEImageSpec) -> None:
-        self._array = np.asarray(array)
-        self._spec = spec
-
-    def plane_readers(self, *, cache_mib: int = 64) -> list[PlaneReader]:
-        del cache_mib
-        if self._spec.axes == "CYX":
-            return [
-                ArrayPlaneReader(self._array[index])
-                for index in range(self._spec.plane_count)
-            ]
-        return [ArrayPlaneReader(self._array)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,10 +39,11 @@ class OMEImageSeries:
             raise TypeError("source must implement PlaneReaderSource")
         if not isinstance(self.spec, OMEImageSpec):
             raise TypeError("spec must be an OMEImageSpec")
-        if self.downsample not in {"mean", "nearest"}:
-            raise ValueError("downsample must be 'mean' or 'nearest'")
-        if self.spec.is_label and self.downsample != "nearest":
-            raise ValueError("Label-image series require nearest-neighbor downsampling")
+        object.__setattr__(
+            self,
+            "downsample",
+            resolve_downsample(self.spec.image_type, self.downsample),
+        )
         if self.compression is not None:
             if not isinstance(self.compression, str) or not self.compression.strip():
                 raise ValueError("series compression must be a non-empty string or None")
@@ -97,14 +87,11 @@ class OMEImageSeries:
             pixel_size=pixel_size,
             icc_profile=icc_profile,
         )
-        effective_downsample = downsample or (
-            "nearest" if image_type == "label" else "mean"
-        )
         return cls(
             name=name,
-            source=_ArraySeriesSource(array, spec),
+            source=ArraySource(array, spec),
             spec=spec,
-            downsample=effective_downsample,
+            downsample=resolve_downsample(image_type, downsample),
             compression=compression,
         )
 
@@ -135,13 +122,10 @@ class OMEImageSeries:
             pixel_size=pixel_size,
             icc_profile=icc_profile,
         )
-        effective_downsample = downsample or (
-            "nearest" if image_type == "label" else "mean"
-        )
         return cls(
             name=name,
             source=source,
             spec=spec,
-            downsample=effective_downsample,
+            downsample=resolve_downsample(image_type, downsample),
             compression=compression,
         )

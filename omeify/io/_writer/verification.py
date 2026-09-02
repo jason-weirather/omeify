@@ -1,0 +1,323 @@
+from __future__ import annotations
+
+import threading
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+import numpy as np
+import tifffile
+from lxml import etree
+
+from omeify.io.spec import OMEImageSpec
+from omeify.io.tiff import TiffPlaneReader
+
+from .configuration import OUTPUT_BYTEORDER, OUTPUT_COMPRESSION_CODES
+from .model import PreparedImage
+from .pyramid import series_layout_matches
+
+OME_NAMESPACE = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
+PYRAMID_NAMESPACE = "openmicroscopy.org/PyramidResolution"
+
+
+@dataclass(frozen=True, slots=True)
+class ContainerVerification:
+    """Verified container identity plus parsed OME metadata."""
+
+    output_byte_order: str
+    omexml: str
+    root: etree._Element
+    namespace: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class RasterVerification:
+    """Successful common TIFF-series, storage, and pixel verification."""
+
+    all_lossless: bool
+    jpeg_subsampling_checked: bool | None
+    icc_profiles_checked: bool | None
+    series_checked: int
+    planes_checked: int
+    points_per_plane: int
+
+
+def verify_container(
+    output: tifffile.TiffFile,
+    *,
+    software: str,
+) -> ContainerVerification:
+    """Verify shared BigTIFF identity, byte order, Software tag, and OME XML."""
+
+    if not output.is_ome:
+        raise ValueError("Written TIFF is not recognized as OME-TIFF")
+    if not output.is_bigtiff:
+        raise ValueError("Written output is not BigTIFF")
+    actual_byteorder = output.byteorder
+    if actual_byteorder not in {"<", ">"}:
+        raise ValueError(f"Unexpected TIFF byte order {actual_byteorder!r}")
+    if actual_byteorder != OUTPUT_BYTEORDER:
+        raise ValueError(
+            f"Output TIFF byte order {actual_byteorder!r} does not match "
+            f"configured byte order {OUTPUT_BYTEORDER!r}"
+        )
+    try:
+        actual_software = str(output.pages[0].aspage().tags["Software"].value)
+    except KeyError as exc:
+        raise ValueError("Written TIFF does not contain a Software tag") from exc
+    if actual_software != software:
+        raise ValueError(
+            f"TIFF Software tag {actual_software!r} does not match "
+            f"requested value {software!r}"
+        )
+    omexml = output.ome_metadata
+    if not omexml:
+        raise ValueError("Written OME-TIFF does not contain OME-XML metadata")
+    parser = etree.XMLParser(resolve_entities=False, no_network=True)
+    root = etree.fromstring(omexml.encode("utf-8"), parser=parser)
+    return ContainerVerification(
+        output_byte_order=("big" if actual_byteorder == ">" else "little"),
+        omexml=omexml,
+        root=root,
+        namespace={"ome": OME_NAMESPACE},
+    )
+
+
+def verify_prepared_images(
+    output: tifffile.TiffFile,
+    prepared: Sequence[PreparedImage],
+) -> RasterVerification:
+    """Verify common series layouts, TIFF storage, decoding, and exact lossless pixels."""
+
+    images = tuple(prepared)
+    if len(output.series) != len(images):
+        raise ValueError(
+            f"Output contains {len(output.series)} TIFF series; expected {len(images)}"
+        )
+    top_level_count = sum(item.spec.plane_count for item in images)
+    if len(output.pages) != top_level_count:
+        raise ValueError(
+            f"Output contains {len(output.pages)} top-level IFDs; expected "
+            f"{top_level_count}"
+        )
+
+    page_offset = 0
+    total_planes = 0
+    points_per_plane = 0
+    all_lossless = all(item.compression.lossless for item in images)
+    any_subsampling = any(
+        item.compression.subsampling is not None for item in images
+    )
+    any_icc = any(item.spec.icc_profile is not None for item in images)
+    top_level_pages = list(output.pages)
+
+    for series_index, (series, item) in enumerate(
+        zip(output.series, images, strict=True)
+    ):
+        spec = item.spec
+        if item.name is not None and series.name != item.name:
+            raise ValueError(
+                f"TIFF series {series_index} name {series.name!r} does not "
+                f"match {item.name!r}"
+            )
+        if np.dtype(series.dtype).newbyteorder("=") != spec.dtype:
+            raise TypeError(
+                f"TIFF series {series_index} dtype {series.dtype} does not "
+                f"match {spec.dtype}"
+            )
+        if not series_layout_matches(
+            str(series.axes),
+            series.shape,
+            spec.output_axes,
+            spec.output_shape,
+        ):
+            raise ValueError(
+                f"TIFF series {series_index} axes/shape {series.axes!r} "
+                f"{tuple(series.shape)} do not match {spec.output_axes!r} "
+                f"{spec.output_shape}"
+            )
+        if len(series.levels) != len(item.level_shapes):
+            raise ValueError(
+                f"TIFF series {series_index} has {len(series.levels)} levels; "
+                f"expected {len(item.level_shapes)}"
+            )
+        for level_index, (level, expected_shape) in enumerate(
+            zip(series.levels, item.level_shapes, strict=True)
+        ):
+            if not series_layout_matches(
+                str(level.axes),
+                level.shape,
+                spec.output_axes,
+                expected_shape,
+            ):
+                raise ValueError(
+                    f"TIFF series {series_index} level {level_index} shape "
+                    f"{tuple(level.shape)} does not match {expected_shape}"
+                )
+
+        frames = top_level_pages[page_offset : page_offset + spec.plane_count]
+        page_offset += spec.plane_count
+        verify_storage(frames, item)
+        coordinates = representative_coordinates(spec.size_y, spec.size_x)
+        points_per_plane = max(points_per_plane, len(coordinates))
+        output_readers = frame_readers(frames)
+        input_readers = (
+            item.source.plane_readers(cache_mib=16)
+            if item.compression.lossless
+            else None
+        )
+        try:
+            if input_readers is not None and len(input_readers) != spec.plane_count:
+                raise ValueError(
+                    f"Source supplied {len(input_readers)} verification readers; "
+                    f"expected {spec.plane_count}"
+                )
+            for plane_index, output_reader in enumerate(output_readers):
+                for y, x in coordinates:
+                    output_value = output_reader.read_region(
+                        y,
+                        y + 1,
+                        x,
+                        x + 1,
+                    )[0, 0, ...]
+                    if input_readers is None:
+                        continue
+                    source_value = input_readers[plane_index].read_region(
+                        y,
+                        y + 1,
+                        x,
+                        x + 1,
+                    )[0, 0, ...]
+                    if not np.array_equal(source_value, output_value):
+                        raise ValueError(
+                            "Lossless base-image verification failed at "
+                            f"series {series_index}, plane {plane_index}, "
+                            f"y={y}, x={x}: source={source_value}, "
+                            f"output={output_value}"
+                        )
+        finally:
+            for reader in output_readers:
+                reader.clear_cache()
+            if input_readers is not None:
+                for reader in input_readers:
+                    reader.clear_cache()
+        total_planes += spec.plane_count
+
+    return RasterVerification(
+        all_lossless=all_lossless,
+        jpeg_subsampling_checked=(True if any_subsampling else None),
+        icc_profiles_checked=(True if any_icc else None),
+        series_checked=len(images),
+        planes_checked=total_planes,
+        points_per_plane=points_per_plane,
+    )
+
+
+def representative_coordinates(
+    height: int,
+    width: int,
+) -> tuple[tuple[int, int], ...]:
+    return tuple(
+        sorted(
+            {
+                (0, 0),
+                (height // 2, width // 2),
+                (height - 1, width - 1),
+            }
+        )
+    )
+
+
+def verify_storage(
+    frames: Sequence[tifffile.TiffPage | tifffile.TiffFrame],
+    prepared: PreparedImage,
+) -> None:
+    """Verify tiled base and SubIFD storage for one prepared image."""
+
+    spec = prepared.spec
+    compression = prepared.compression
+    expected_compression = OUTPUT_COMPRESSION_CODES[compression.name]
+    expected_subifds = len(prepared.level_shapes) - 1
+    if len(frames) != spec.plane_count:
+        raise ValueError(
+            f"{prepared.display_name.capitalize()} has {len(frames)} top-level "
+            f"pages; expected {spec.plane_count}"
+        )
+    for plane_index, frame in enumerate(frames):
+        page = frame.aspage()
+        verify_page_layout(
+            page,
+            spec=spec,
+            expected_compression=expected_compression,
+            expected_subsampling=compression.subsampling,
+            reduced=False,
+            context=f"{prepared.display_name} plane {plane_index}",
+        )
+        subpages = list(page.pages) if page.pages is not None else []
+        if len(subpages) != expected_subifds:
+            raise ValueError(
+                f"{prepared.display_name.capitalize()} plane {plane_index} has "
+                f"{len(subpages)} SubIFDs; expected {expected_subifds}"
+            )
+        for level_index, subframe in enumerate(subpages, start=1):
+            verify_page_layout(
+                subframe.aspage(),
+                spec=spec,
+                expected_compression=expected_compression,
+                expected_subsampling=compression.subsampling,
+                reduced=True,
+                context=(
+                    f"{prepared.display_name} plane {plane_index} "
+                    f"level {level_index}"
+                ),
+            )
+    if spec.icc_profile is not None:
+        output_icc = frames[0].aspage().iccprofile
+        if output_icc is None or bytes(output_icc) != spec.icc_profile:
+            raise ValueError(
+                f"{prepared.display_name.capitalize()} did not preserve its ICC profile"
+            )
+
+
+def frame_readers(
+    frames: Sequence[tifffile.TiffPage | tifffile.TiffFrame],
+) -> list[TiffPlaneReader]:
+    lock = threading.RLock()
+    return [TiffPlaneReader(frame.aspage(), lock=lock) for frame in frames]
+
+
+def verify_page_layout(
+    page: tifffile.TiffPage,
+    *,
+    spec: OMEImageSpec,
+    expected_compression: int,
+    expected_subsampling: tuple[int, int] | None,
+    reduced: bool,
+    context: str,
+) -> None:
+    if not page.is_tiled:
+        raise ValueError(f"{context} is not tiled")
+    if int(page.compression) != expected_compression:
+        raise ValueError(f"{context} does not use the requested TIFF compression")
+    if int(page.samplesperpixel) != spec.samples_per_pixel:
+        raise ValueError(f"{context} has the wrong SamplesPerPixel")
+    if spec.is_rgb:
+        if int(page.photometric) not in {2, 6} or int(page.planarconfig) != 1:
+            raise ValueError(f"{context} does not use contiguous RGB storage")
+    elif int(page.photometric) != 1:
+        raise ValueError(f"{context} does not use grayscale photometric storage")
+    if expected_subsampling is not None:
+        try:
+            actual = tuple(
+                int(value) for value in page.tags["YCbCrSubSampling"].value
+            )
+        except (KeyError, TypeError) as exc:
+            raise ValueError(
+                f"{context} has no readable JPEG subsampling tag"
+            ) from exc
+        if actual != expected_subsampling:
+            raise ValueError(
+                f"{context} JPEG subsampling {actual} does not match "
+                f"{expected_subsampling}"
+            )
+    if reduced and not (int(page.subfiletype) & 1):
+        raise ValueError(f"{context} is not marked as reduced resolution")

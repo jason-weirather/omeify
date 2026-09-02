@@ -18,11 +18,8 @@ import omeify.workflow as workflow_module
 from omeify import PixelSize
 from omeify.cli import _CompactLogHandler, main
 from omeify.dtype_mutation import DTypeMutationSource, analyze_dtype_mutation
-from omeify.io.ome_tiff_writer import (
-    OMETiffWriter,
-    _iter_downsampled_tiles,
-    _iter_tiles,
-)
+from omeify.io._writer.pyramid import iter_downsampled_tiles, iter_tiles
+from omeify.io.ome_tiff_writer import OMETiffWriter
 from omeify.io.tiff import ArrayPlaneReader
 from omeify.progress import ProgressLogger
 
@@ -68,9 +65,9 @@ def test_progress_logger_reports_start_periodic_progress_and_completion(caplog) 
 def test_tile_iterators_emit_progress_without_changing_pixels(caplog) -> None:
     data = np.arange(32 * 32, dtype=np.uint16).reshape(32, 32)
 
-    with caplog.at_level(logging.INFO, logger="omeify.io.ome_tiff_writer"):
+    with caplog.at_level(logging.INFO, logger="omeify.io._writer"):
         tiles = list(
-            _iter_tiles(
+            iter_tiles(
                 [ArrayPlaneReader(data)],
                 (1, 32, 32),
                 axes="CYX",
@@ -87,9 +84,9 @@ def test_tile_iterators_emit_progress_without_changing_pixels(caplog) -> None:
     assert "Writing test tiles [####################] 100%" in caplog.text
 
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger="omeify.io.ome_tiff_writer"):
+    with caplog.at_level(logging.INFO, logger="omeify.io._writer"):
         downsampled = list(
-            _iter_downsampled_tiles(
+            iter_downsampled_tiles(
                 [ArrayPlaneReader(data)],
                 (1, 16, 16),
                 axes="CYX",
@@ -110,13 +107,17 @@ def test_writer_logs_pyramid_final_assembly_verification_and_cleanup(
     monkeypatch,
     caplog,
 ) -> None:
-    import omeify.io.ome_tiff_writer as writer_module
+    import omeify.io._writer.preparation as preparation_module
 
-    monkeypatch.setattr(writer_module, "OMESchemaValidator", _AlwaysValidSchema)
+    monkeypatch.setattr(
+        preparation_module,
+        "OMESchemaValidator",
+        _AlwaysValidSchema,
+    )
     output = tmp_path / "progress.ome.tif"
     image = np.arange(32 * 32, dtype=np.uint16).reshape(32, 32)
 
-    with caplog.at_level(logging.INFO, logger="omeify.io.ome_tiff_writer"):
+    with caplog.at_level(logging.INFO, logger="omeify.io._writer"):
         report = OMETiffWriter(
             output,
             image_type="multichannel",
@@ -264,9 +265,13 @@ def test_mutate_uses_shared_writer_through_dtype_transform_adapter(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    import omeify.io.ome_tiff_writer as writer_module
+    import omeify.io._writer.preparation as preparation_module
 
-    monkeypatch.setattr(writer_module, "OMESchemaValidator", _AlwaysValidSchema)
+    monkeypatch.setattr(
+        preparation_module,
+        "OMESchemaValidator",
+        _AlwaysValidSchema,
+    )
     source = tmp_path / "source.ome.tif"
     output = tmp_path / "mutated.ome.tif"
     data = np.arange(2 * 16 * 16, dtype=np.float32).reshape(2, 16, 16)
@@ -435,3 +440,16 @@ def test_verbose_help_describes_single_and_repeated_levels() -> None:
         assert "timestamps, debug details" in result.output
         assert "1-second" in result.output
         assert "tracebacks" in result.output
+
+
+def test_public_writers_share_one_internal_construction_engine() -> None:
+    import omeify.io._writer as shared_writer
+    import omeify.io.ome_tiff_writer as single_writer
+    from omeify.io.ome_multi_series_writer import (
+        ome_multi_series_writer as multi_writer,
+    )
+
+    assert single_writer.WriterEngine is shared_writer.WriterEngine
+    assert multi_writer.WriterEngine is shared_writer.WriterEngine
+    assert single_writer.prepare_image is shared_writer.prepare_image
+    assert multi_writer.prepare_image is shared_writer.prepare_image

@@ -17,7 +17,8 @@ from omeify import (
     convert,
 )
 from omeify.conversion import _default_compression
-from omeify.io.ome_tiff_writer import _compression_settings, _mean_downsample_2x
+from omeify.io._writer.configuration import compression_settings
+from omeify.io._writer.pyramid import mean_downsample_2x
 
 
 def _write_source(
@@ -564,7 +565,7 @@ def test_indica_mif_conversion_rebuilds_pyramid_and_writes_micrometer_scale(
 
     expected_level = np.stack(
         [
-            _mean_downsample_2x(
+            mean_downsample_2x(
                 plane,
                 ((plane.shape[0] + 1) // 2, (plane.shape[1] + 1) // 2),
             )
@@ -686,7 +687,7 @@ def test_conversion_compression_defaults_are_profile_specific() -> None:
 
 
 def test_brightfield_profiles_default_to_conservative_jpeg_policy() -> None:
-    settings = _compression_settings(
+    settings = compression_settings(
         "JPEG",
         np.dtype("uint8"),
         is_rgb=True,
@@ -961,7 +962,7 @@ def test_explicit_pyramid_level_count_must_be_possible(tmp_path: Path) -> None:
 
 def test_mean_downsample_preserves_signed_integer_dtype() -> None:
     data = np.array([[-3, -2], [2, 3]], dtype=np.int16)
-    result = _mean_downsample_2x(data, (1, 1))
+    result = mean_downsample_2x(data, (1, 1))
     assert result.dtype == np.dtype("int16")
     assert result[0, 0] == 0
 
@@ -991,7 +992,7 @@ def test_click_group_exposes_version_inspect_mutate_and_convert() -> None:
     result = CliRunner().invoke(main, ["version", "--json"])
     assert result.exit_code == 0
     version_info = json.loads(result.output)
-    assert version_info["omeify"] == "0.13.0"
+    assert version_info["omeify"] == "0.13.1"
     assert "tifffile" in version_info
 
     eager_result = CliRunner().invoke(main, ["--version"])
@@ -1067,7 +1068,7 @@ def test_pyproject_is_the_version_authority() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with pyproject.open("rb") as handle:
         project_version = tomllib.load(handle)["project"]["version"]
-    assert __version__ == project_version == "0.13.0"
+    assert __version__ == project_version == "0.13.1"
 
 
 def test_bundled_miti_json_schema_is_available() -> None:
@@ -1111,3 +1112,19 @@ def test_convert_helper_dogfoods_public_ome_tiff_writer(
     )
 
     assert called["value"] is True
+
+
+def test_pyproject_declares_apache_2_license() -> None:
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with pyproject.open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+
+    assert project["license"] == "Apache-2.0"
+    assert project["license-files"] == ["LICENSE"]
+    assert "License :: OSI Approved :: Apache Software License" in project["classifiers"]
+    assert "License :: OSI Approved :: MIT License" not in project["classifiers"]
