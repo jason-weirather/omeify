@@ -392,18 +392,32 @@ def convert_command(
 @click.option(
     "--dtype",
     type=click.Choice(TARGET_DTYPES),
-    required=True,
-    help="Unsigned integer dtype for the mutated OME-TIFF.",
+    default=None,
+    help=(
+        "Convert floating-point pixels to this unsigned integer dtype. "
+        "Mutually exclusive with --float32-mantissa-bits."
+    ),
+)
+@click.option(
+    "--float32-mantissa-bits",
+    type=click.IntRange(min=0, max=22),
+    default=None,
+    help=(
+        "Keep float32 storage but retain only N stored fraction bits. This is lossy and "
+        "can improve LZW compression. N=11 retains 12 bits of significand precision, "
+        "comparable to a 12-bit acquisition such as Akoya PhenoImager HT Extended Range. "
+        "Mutually exclusive with --dtype."
+    ),
 )
 @click.option(
     "--range-mode",
     type=click.Choice(RANGE_MODES),
-    default="auto",
-    show_default=True,
+    default=None,
     help=(
-        "auto preserves source scale when measured unit-rounding loss is small or integer "
-        "ancestry evidence is strong; preserve forces no rescaling; full maps each channel's "
-        "exact minimum and maximum to the dtype limits."
+        "Integer dtype mutation only; defaults to auto. Auto preserves source scale when "
+        "measured unit-rounding loss is small or integer ancestry evidence is strong; "
+        "preserve forces no rescaling; full maps each channel's exact minimum and maximum "
+        "to the dtype limits."
     ),
 )
 @click.option("--series", type=click.IntRange(min=0), default=0, show_default=True)
@@ -412,7 +426,7 @@ def convert_command(
     type=click.IntRange(min=1024),
     default=DEFAULT_SAMPLE_PIXELS_PER_CHANNEL,
     show_default=True,
-    help="Deterministic spatial sample used for lattice and loss estimates.",
+    help="Integer dtype mutation only: deterministic spatial sample for lattice and loss estimates.",
 )
 @click.option(
     "--auto-max-normalized-rmse",
@@ -420,8 +434,9 @@ def convert_command(
     default=DEFAULT_AUTO_MAX_NORMALIZED_RMSE,
     show_default=True,
     help=(
-        "Largest unit-rounding RMSE, as a fraction of the sampled nonzero p0.1-p99.9 "
-        "intensity span, that auto mode may accept without strong integer-lattice evidence."
+        "Integer dtype mutation only: largest unit-rounding RMSE, as a fraction of the "
+        "sampled nonzero p0.1-p99.9 intensity span, that auto mode may accept without "
+        "strong integer-lattice evidence."
     ),
 )
 @click.option("--omit-uuid", is_flag=True, help="Omit the optional OME root UUID.")
@@ -492,8 +507,9 @@ def mutate_command(
     channel_name_field: str | None,
     rename_channels_json: Path | None,
     rename_channels_by: str | None,
-    dtype: str,
-    range_mode: str,
+    dtype: str | None,
+    float32_mantissa_bits: int | None,
+    range_mode: str | None,
     series: int,
     sample_pixels_per_channel: int,
     auto_max_normalized_rmse: float,
@@ -511,9 +527,17 @@ def mutate_command(
     overwrite: bool,
     verbose: int,
 ) -> None:
-    """Create a dtype-mutated OME-TIFF from planar floating-point INPUT_PATH."""
+    """Create an explicitly pixel-mutated OME-TIFF from planar floating-point INPUT_PATH."""
 
     _configure_logging(verbose)
+    if (dtype is None) == (float32_mantissa_bits is None):
+        raise click.UsageError(
+            "Choose exactly one mutation: --dtype or --float32-mantissa-bits."
+        )
+    if float32_mantissa_bits is not None and range_mode is not None:
+        raise click.UsageError(
+            "--range-mode is only valid with --dtype."
+        )
     rename_channels, rename_mode = _load_channel_renames(
         rename_channels_json,
         rename_channels_by,  # type: ignore[arg-type]
@@ -536,6 +560,7 @@ def mutate_command(
             rename_channels_by=rename_mode,
             pixel_size=pixel_size,
             dtype=dtype,  # type: ignore[arg-type]
+            float32_mantissa_bits=float32_mantissa_bits,
             range_mode=range_mode,  # type: ignore[arg-type]
             series=series,
             sample_pixels_per_channel=sample_pixels_per_channel,

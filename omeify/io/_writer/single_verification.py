@@ -38,7 +38,6 @@ def verify_single_output(
         "samples_per_pixel_match": False,
         "photometric_matches": False,
         "compression_matches_requested": False,
-        "predictor_matches_requested": False,
         "jpeg_subsampling_matches_requested": None,
         "subifd_layout_matches": False,
         "all_levels_tiled": False,
@@ -161,7 +160,6 @@ def verify_single_output(
         verification["samples_per_pixel_match"] = True
         verification["photometric_matches"] = True
         verification["compression_matches_requested"] = True
-        verification["predictor_matches_requested"] = True
         verification["jpeg_subsampling_matches_requested"] = (
             raster.jpeg_subsampling_checked
         )

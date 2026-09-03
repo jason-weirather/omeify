@@ -19,7 +19,6 @@ from omeify import (
     TiffInspector,
 )
 from omeify.cli import main
-from omeify.io._writer.configuration import compression_settings
 from omeify.io._writer.precision import round_float32_mantissa
 from omeify.io.tiff import TiffPlaneReader
 from omeify.utils.ome_schema_validator import OMESchemaValidator
@@ -424,7 +423,7 @@ def test_float32_writer_can_trim_mantissa_and_declare_reduced_significant_bits(
         ],
         dtype=np.float32,
     )
-    expected = round_float32_mantissa(data, 10)
+    expected = round_float32_mantissa(data, 11)
 
     report = OMETiffWriter(
         output,
@@ -434,12 +433,12 @@ def test_float32_writer_can_trim_mantissa_and_declare_reduced_significant_bits(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        float32_mantissa_bits=10,
+        float32_mantissa_bits=11,
     ).write(data)
 
-    assert report["image"]["significant_bits"] == 19
-    assert report["image"]["float32_mantissa_bits"] == 10
-    assert report["image"]["float_precision_bits"] == 11
+    assert report["image"]["significant_bits"] == 20
+    assert report["image"]["float32_mantissa_bits"] == 11
+    assert report["image"]["float_precision_bits"] == 12
     assert report["verification"]["significant_bits_matches_spec"] is True
     assert report["verification"]["base_pixel_values_match"] is True
     with tifffile.TiffFile(output) as tiff:
@@ -449,7 +448,7 @@ def test_float32_writer_can_trim_mantissa_and_declare_reduced_significant_bits(
             detail=1,
         ).report["ome"]["images"][0]
         assert pixels["pixel_type"] == "float"
-        assert pixels["significant_bits"] == 19
+        assert pixels["significant_bits"] == 20
         np.testing.assert_array_equal(tiff.series[0].asarray(), expected)
 
 
@@ -494,7 +493,7 @@ def test_float32_precision_trimming_is_applied_to_pyramid_values(tmp_path: Path)
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=1,
-        float32_mantissa_bits=10,
+        float32_mantissa_bits=11,
     ).write(data)
 
     with tifffile.TiffFile(output) as tiff:
@@ -502,50 +501,7 @@ def test_float32_precision_trimming_is_applied_to_pyramid_values(tmp_path: Path)
             values = np.asarray(level.asarray(), dtype=np.float32)
             raw = values.view(np.uint32)
             finite = np.isfinite(values)
-            assert np.all((raw[finite] & np.uint32((1 << 13) - 1)) == 0)
-
-
-def test_compression_settings_expose_float_predictor_three() -> None:
-    floating = compression_settings(
-        "LZW",
-        np.dtype("float32"),
-        is_rgb=False,
-        jpeg_quality=90,
-        jpeg_subsampling="444",
-        predictor="floatingpoint",
-    )
-    integer_auto = compression_settings(
-        "LZW",
-        np.dtype("uint16"),
-        is_rgb=False,
-        jpeg_quality=90,
-        jpeg_subsampling="444",
-        predictor="auto",
-    )
-
-    assert floating.predictor == 3
-    assert floating.predictor_name == "floatingpoint"
-    assert integer_auto.predictor == 2
-    assert integer_auto.predictor_name == "horizontal"
-
-    with pytest.raises(ValueError, match="floatingpoint TIFF prediction requires"):
-        compression_settings(
-            "LZW",
-            np.dtype("uint16"),
-            is_rgb=False,
-            jpeg_quality=90,
-            jpeg_subsampling="444",
-            predictor="floatingpoint",
-        )
-    with pytest.raises(ValueError, match="requires LZW, Deflate, or ZSTD"):
-        compression_settings(
-            "Uncompressed",
-            np.dtype("float32"),
-            is_rgb=False,
-            jpeg_quality=90,
-            jpeg_subsampling="444",
-            predictor="floatingpoint",
-        )
+            assert np.all((raw[finite] & np.uint32((1 << 12) - 1)) == 0)
 
 
 def test_generic_rgb_writer_defaults_to_lossless_lzw(tmp_path: Path) -> None:

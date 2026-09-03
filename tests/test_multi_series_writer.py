@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -12,11 +13,17 @@ from omeify import (
     OMEImageSeries,
     OMEMultiSeriesWriter,
     OMETiffReader,
+    OMETiffWriter,
     PixelSize,
 )
 from omeify.utils.generate_ome_xml import OMEIFY_PROVENANCE_NAMESPACE
 
 _OME_NAMESPACE = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
+
+
+def test_public_writers_do_not_expose_tiff_predictor_controls() -> None:
+    assert "predictor" not in inspect.signature(OMETiffWriter).parameters
+    assert "predictor" not in inspect.signature(OMEMultiSeriesWriter).parameters
 
 
 def _mean2(values: np.ndarray) -> np.ndarray:
@@ -173,17 +180,17 @@ def test_multi_series_float32_precision_trim_skips_non_float32_series(
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
-        float32_mantissa_bits=10,
+        float32_mantissa_bits=11,
     ).write(series)
 
-    assert report["series"][0]["significant_bits"] == 19
-    assert report["series"][0]["float32_mantissa_bits"] == 10
+    assert report["series"][0]["significant_bits"] == 20
+    assert report["series"][0]["float32_mantissa_bits"] == 11
     assert report["series"][1]["significant_bits"] == 16
     assert report["series"][1]["float32_mantissa_bits"] is None
     with tifffile.TiffFile(output) as tiff:
         signal = np.asarray(tiff.series[0].asarray(), dtype=np.float32)
         raw = signal.view(np.uint32)
-        assert np.all((raw & np.uint32((1 << 13) - 1)) == 0)
+        assert np.all((raw & np.uint32((1 << 12) - 1)) == 0)
         np.testing.assert_array_equal(tiff.series[1].asarray(), labels)
 
 

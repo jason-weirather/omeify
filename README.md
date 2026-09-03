@@ -17,8 +17,8 @@ In practice, omeify focuses on three jobs:
 The normal `convert` workflow is fidelity-first: it preserves the source numeric dtype and does not
 rescale intensities or explicitly cast pixel values. With lossless compression, pixel values remain
 exact; brightfield profiles that use JPEG intentionally re-encode RGB pixels. The separate `mutate`
-workflow exists for cases where changing dtype or numeric scale is scientifically intended and
-should be measured and reported rather than hidden inside conversion.
+workflow exists for cases where changing dtype, numeric scale, or retained float precision is
+scientifically intended and should be explicit rather than hidden inside conversion.
 
 Omeify's metadata policy is guided by the minimum-information approach described in
 [Schapiro *et al.*, **MITI Minimum Information guidelines for highly multiplexed tissue images**,
@@ -49,7 +49,7 @@ The CLI uses explicit subcommands with deliberately different responsibilities:
 |---|---|---|
 | `omeify inspect` | Inspect TIFF structure and metadata | Format-agnostic TIFF diagnostics. It does not require an omeify conversion profile and can inspect any TIFF layout understood by tifffile without materializing the complete raster. |
 | `omeify convert` | Normalize a supported source into OME-TIFF | Fidelity-first conversion. It preserves the source numeric dtype and scale, does not perform intensity rescaling or an explicit dtype cast, rebuilds pyramids, minimizes metadata, and verifies the output. |
-| `omeify mutate` | Create an intentionally dtype-mutated OME-TIFF | Uses the same normalized writer path as `convert`, but explicitly changes the numeric representation and reports the selected per-channel mapping and anticipated quantization loss. |
+| `omeify mutate` | Create an intentionally pixel-mutated OME-TIFF | Uses the same normalized writer path as `convert`, but explicitly changes either numeric dtype or float32 precision. Integer dtype mutation reports its per-channel mapping and anticipated quantization loss; float32 precision mutation preserves dtype and exponent range while reducing stored fraction precision. |
 | `omeify version` | Report omeify and dependency versions | Provides a compact version string or a JSON description of the image-I/O software stack for reproducibility and diagnostics. |
 
 Start by inspecting an unfamiliar TIFF:
@@ -81,7 +81,7 @@ omeify convert source.ome.tif normalized.ome.tif \
 ```
 
 When changing the numeric representation is intentional, use `mutate` rather than hiding that
-operation inside conversion:
+operation inside conversion. Integer dtype mutation remains available:
 
 ```bash
 omeify mutate source.ome.tif compact.ome.tif \
@@ -90,6 +90,19 @@ omeify mutate source.ome.tif compact.ome.tif \
   --range-mode auto \
   --output-json compact.mutation.json
 ```
+
+For processed float32 data that should remain float32 while carrying less numerical precision:
+
+```bash
+omeify mutate source.ome.tif compact-float.ome.tif \
+  --type ome_tiff \
+  --float32-mantissa-bits 11 \
+  --compression LZW
+```
+
+Retaining 11 stored float32 fraction bits provides 12 bits of binary significand precision while
+preserving the float32 exponent range. This is a useful precision target for processed data derived
+from nominal 12-bit acquisitions such as Akoya PhenoImager HT Extended Range output.
 
 Use `omeify COMMAND --help` for the complete option set. Detailed command behavior is documented
 in the [command-line reference](#command-line-reference).
@@ -132,7 +145,7 @@ source-tree imports fall back to the neighboring `pyproject.toml`.
 - One multi-series writer for named heterogeneous OME Images
 - One shared internal engine for writer validation, pyramid construction, TIFF encoding,
   verification, scratch cleanup, and atomic installation
-- Deterministic dtype mutation with a quantitative per-channel loss report
+- Explicit pixel mutation: deterministic float-to-integer dtype conversion with a quantitative per-channel loss report, plus float32 mantissa-precision trimming
 - TIFF and OME metadata inspection without decoding the complete raster
 - OME 2016-06 schema validation and a bundled MITI-aligned header profile
 
@@ -211,12 +224,12 @@ interleaved RGB image has one physical plane containing three samples. Pyramid S
 additional OME planes.
 
 `SignificantBits` normally records the full storage width of the output dtype, such as 8 for
-`uint8`, 16 for `uint16`, and 32 for ordinary `float32`. When the Python writer is explicitly
-asked to trim float32 mantissa precision, `Type` remains `float` while `SignificantBits` records
-the IEEE-754 bits left meaningful by that transform: one sign bit, eight exponent bits, and the
-requested retained fraction bits. For example, retaining 10 float32 fraction bits writes
-`SignificantBits=19`. This preserves float32 dynamic range while providing approximately
-float16-like significand precision.
+`uint8`, 16 for `uint16`, and 32 for ordinary `float32`. When float32 mantissa precision is
+explicitly trimmed, `Type` remains `float` while `SignificantBits` records the IEEE-754 bits left
+meaningful by that transform: one sign bit, eight exponent bits, and the requested retained
+fraction bits. For example, retaining 11 float32 fraction bits writes `SignificantBits=20` while
+providing 12 bits of binary significand precision. The distinction matters: this remains float32
+storage with the float32 exponent range; it is not a 20-bit acquisition or a 20-bit integer image.
 
 ### Pyramid policy
 
@@ -268,7 +281,7 @@ Omeify uses explicit subcommands:
 
 ```text
 omeify convert   Normalize a supported source into OME-TIFF
-omeify mutate    Create an explicitly dtype-mutated OME-TIFF
+omeify mutate    Create an explicitly pixel-mutated OME-TIFF
 omeify inspect   Inspect TIFF structure and metadata
 omeify version   Show package and dependency versions
 ```
@@ -382,10 +395,14 @@ Common conversion options:
 
 ### `omeify mutate`
 
-`mutate` currently converts planar `float32` or `float64` channels to `uint8` or `uint16`. It never
-edits the input in place. The source is scanned by bounded regions, one fixed mapping is selected
-per full-resolution channel, and transformed regions are passed through the same ordinary writer
-used by conversion.
+`mutate` owns explicit pixel-value changes. It never edits the input in place, and exactly one
+mutation must be selected:
+
+- `--dtype uint8|uint16` performs the existing float-to-unsigned-integer mutation.
+- `--float32-mantissa-bits N` keeps float32 storage but rounds the stored fraction to `N` bits.
+
+Integer dtype mutation scans the source by bounded regions, selects one fixed mapping per
+full-resolution channel, and reports the anticipated quantization loss:
 
 ```bash
 omeify mutate halo-float.tif compact.ome.tif \
@@ -395,7 +412,26 @@ omeify mutate halo-float.tif compact.ome.tif \
   --output-json compact.mutation.json
 ```
 
-The three range modes have distinct meanings:
+Float32 precision mutation is intended for processed floating-point rasters whose computational
+precision exceeds the meaningful precision of the measurement. The recommended starting point for
+processed Akoya PhenoImager HT data is 11 retained fraction bits:
+
+```bash
+omeify mutate halo-float.ome.tif halo-float-compact.ome.tif \
+  --type ome_tiff \
+  --float32-mantissa-bits 11 \
+  --compression LZW \
+  --output-json halo-float-compact.mutation.json
+```
+
+`--float32-mantissa-bits 11` retains 12 bits of binary significand precision. The output remains
+float32 and keeps the float32 exponent range, while lower fraction bits are rounded using nearest,
+ties-to-even rounding. Base pixels are precision-trimmed before encoding, rebuilt pyramid levels
+are rounded to the same precision, and OME `SignificantBits` is written as 20
+(1 sign + 8 exponent + 11 retained fraction bits). This is lossy by design and belongs in `mutate`,
+not fidelity-preserving `convert`.
+
+For integer dtype mutation, the three range modes have distinct meanings:
 
 - `auto` first evaluates unit-preserving nearest-integer rounding. It accepts that mapping when the
   rounded range fits and the source has strong integer-lattice evidence or the measured normalized
@@ -415,7 +451,7 @@ output = clip(rint((source - offset) / quantum), dtype range)
 `rint` uses nearest-even rounding. The inverse approximation is
 `source ≈ output * quantum + offset`.
 
-The mutation report records, per channel:
+The integer dtype mutation report records, per channel:
 
 - exact minimum, maximum, zero count, negative count, and non-finite counts
 - deterministic percentiles and integer-lattice diagnostics
@@ -427,6 +463,16 @@ The mutation report records, per channel:
 Automatic per-channel scaling preserves ordering within a channel but changes raw comparability
 between independently scaled channels or slides. A cohort that requires common intensity units
 should reuse fixed mappings instead of selecting a new automatic mapping per slide.
+
+Important mutation options:
+
+```text
+--dtype TYPE                    Convert to uint8 or uint16; exclusive with mantissa trimming
+--float32-mantissa-bits N       Retain N float32 fraction bits; range 0..22
+--range-mode MODE               auto, preserve, or full; integer dtype mutation only
+--compression NAME              LZW, Deflate, ZSTD, or Uncompressed
+--output-json PATH              Write the structured mutation report
+```
 
 ### `omeify inspect`
 
@@ -511,6 +557,8 @@ policy remains separate from OME serialization.
 
 ### Mutation
 
+Integer dtype mutation:
+
 ```python
 from omeify import mutate
 
@@ -524,6 +572,20 @@ report = mutate(
 
 for channel in report["dtype_mutation"]["channels"]:
     print(channel["channel_name"], channel["mapping"])
+```
+
+Float32 precision mutation:
+
+```python
+report = mutate(
+    "source.ome.tif",
+    "compact-float.ome.tif",
+    input_type="ome_tiff",
+    float32_mantissa_bits=11,
+    compression="LZW",
+)
+
+print(report["float_precision_mutation"])
 ```
 
 ### Pixel size
@@ -624,8 +686,8 @@ report = OMETiffWriter(
 ).write(image)
 ```
 
-For quantitative float32 images, the writer also exposes two Python-only storage controls. They
-are intentionally not command-line conversion options while their tradeoffs are being evaluated:
+For callers that explicitly need the low-level writer rather than the `mutate` workflow,
+`float32_mantissa_bits=N` remains available as a Python writer control:
 
 ```python
 report = OMETiffWriter(
@@ -634,23 +696,14 @@ report = OMETiffWriter(
     channel_names=("DAPI",),
     pixel_size=PixelSize(0.5, 0.5, "µm"),
     compression="LZW",
-    predictor="floatingpoint",   # TIFF Predictor=3
-    float32_mantissa_bits=10,     # optional lossy precision trim
+    float32_mantissa_bits=11,
 ).write(image)
 ```
 
-`predictor="floatingpoint"` enables TIFF floating-point Predictor 3 before LZW, Deflate, or ZSTD
-compression. Predictor 3 is lossless. `predictor="auto"` is the default and preserves omeify's
-existing behavior: integer lossless compression uses horizontal prediction while floating-point
-data uses no predictor unless explicitly requested. `predictor="none"` disables prediction.
-
-`float32_mantissa_bits=N` is a separate, explicitly lossy operation. It keeps the float32 dtype
-and exponent range but rounds every base and pyramid pixel to `N` stored fraction bits using
-nearest, ties-to-even rounding. `N=23` preserves full float32 precision; `N=10` provides
-approximately float16-like significand precision without float16's narrow exponent range. The
-output report records the retained fraction bits, binary precision, and resulting OME
-`SignificantBits` value. NaN and infinity bit patterns are left unchanged by the precision
-transform.
+The option keeps float32 storage and exponent range while rounding every base and pyramid pixel to
+`N` stored fraction bits using nearest, ties-to-even rounding. `N=23` preserves full float32
+precision. For user-facing file mutation, prefer `omeify mutate --float32-mantissa-bits N` so the
+operation is explicit in the workflow and structured report.
 
 Use `image_type="rgb"` for `YXS uint8` RGB and `image_type="label"` for one integer `YX` label
 raster. `image_type` is writer policy, not a private TIFF tag. OME-TIFF itself does not intrinsically
@@ -712,9 +765,9 @@ report = OMEMultiSeriesWriter(
 Series names must be unique. Array-backed series may use NumPy memory maps. Advanced callers use
 `OMEImageSeries.from_source()` with the same `PlaneReaderSource` boundary as the ordinary writer.
 
-The multi-series writer accepts the same `predictor=` and `float32_mantissa_bits=` controls. A
-float32 precision setting is applied only to float32 series; integer, label, RGB, and float64
-series retain their source precision.
+The multi-series writer accepts the same `float32_mantissa_bits=` precision control. A float32
+precision setting is applied only to float32 series; integer, label, RGB, and float64 series retain
+their source precision.
 
 The optional provenance mapping must contain finite JSON-serializable values. It is serialized once
 as canonical JSON, stored in a namespaced OME `MapAnnotation`, and linked from every OME Image.
@@ -874,7 +927,7 @@ destroy an existing valid output.
 - Supported image models are two-dimensional `YX`, planar `CYX`, and interleaved `YXS` RGB.
   Non-singleton Z and T workflows require an explicit future plane-selection contract.
 - RGB writing is restricted to interleaved `uint8` samples.
-- Dtype mutation currently supports planar floating-point input to `uint8` or `uint16`.
+- Mutation supports planar floating-point input to `uint8` or `uint16`, or float32-to-float32 precision trimming through retained mantissa bits.
 - Metadata minimization does not detect identifying text embedded in pixels.
 - `inspect` reports source metadata and must be reviewed before sharing.
 

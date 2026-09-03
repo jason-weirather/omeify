@@ -20,6 +20,8 @@ from .dtype_mutation import (
     TargetDType,
     analyze_dtype_mutation,
 )
+from .io._writer.configuration import normalize_float32_mantissa_bits
+from .io._writer.precision import float32_significant_bits
 from .io.ome_tiff_writer import DownsampleMethod, OMETiffWriter
 from .io.pixel_size import PixelSize
 from .io.source_reader import PLANAR_INPUT_TYPES, PlanarInputType, source_reader
@@ -37,14 +39,17 @@ from .workflow import (
 
 LOGGER = logging.getLogger(__name__)
 
+FLOAT32_PRECISION_MUTATION_PROTOCOL_VERSION = "1.0"
+
 
 def mutate(
     input_path: str | Path,
     output_path: str | Path,
     *,
     input_type: PlanarInputType,
-    dtype: TargetDType,
-    range_mode: RangeMode = "auto",
+    dtype: TargetDType | None = None,
+    float32_mantissa_bits: int | None = None,
+    range_mode: RangeMode | None = None,
     series: int = 0,
     channel_name_field: Literal["name", "biomarker", "auto"] | None = None,
     rename_channels: ChannelRenameMapping | None = None,
@@ -62,12 +67,17 @@ def mutate(
     overwrite: bool = True,
     cache_directory: str | Path | None = None,
 ) -> dict[str, object]:
-    """Write a dtype-mutated OME-TIFF from one planar floating-point source.
+    """Write an explicitly pixel-mutated OME-TIFF from one planar float source.
 
-    The current mutation operation is deliberately narrow: it converts a
-    planar float32 or float64 source to uint8 or uint16. The source is scanned
-    channel by channel to select and report one fixed mapping for each channel,
-    then the transformed planes stream through the normal :class:`OMETiffWriter`.
+    Exactly one mutation is selected:
+
+    * ``dtype=`` converts float32/float64 pixels to uint8 or uint16 using the
+      existing measured and reported dtype-mutation policy.
+    * ``float32_mantissa_bits=`` keeps float32 storage and exponent range while
+      rounding the stored fraction to the requested number of bits.
+
+    Both operations stream through the same :class:`OMETiffWriter` used by
+    conversion and rebuild all pyramid levels from the mutated representation.
     """
 
     input_file, output_file = validate_image_paths(
@@ -81,21 +91,49 @@ def mutate(
         rename_channels,
         rename_channels_by,
     )
-    if dtype not in TARGET_DTYPES:
-        raise ValueError("dtype must be 'uint8' or 'uint16'")
-    if range_mode not in RANGE_MODES:
-        raise ValueError("range_mode must be 'auto', 'preserve', or 'full'")
+
+    dtype_requested = dtype is not None
+    precision_requested = float32_mantissa_bits is not None
+    if dtype_requested == precision_requested:
+        raise ValueError(
+            "mutate requires exactly one pixel mutation: set dtype= or "
+            "float32_mantissa_bits=, but not both"
+        )
+
+    normalized_mantissa_bits: int | None = None
+    effective_range_mode: RangeMode | None = None
+    if dtype_requested:
+        if dtype not in TARGET_DTYPES:
+            raise ValueError("dtype must be 'uint8' or 'uint16'")
+        effective_range_mode = "auto" if range_mode is None else range_mode
+        if effective_range_mode not in RANGE_MODES:
+            raise ValueError("range_mode must be 'auto', 'preserve', or 'full'")
+    else:
+        if range_mode is not None:
+            raise ValueError("range_mode is only valid with dtype mutation")
+        normalized_mantissa_bits = normalize_float32_mantissa_bits(
+            float32_mantissa_bits
+        )
+        assert normalized_mantissa_bits is not None
+        if normalized_mantissa_bits == 23:
+            raise ValueError(
+                "float32_mantissa_bits=23 retains full float32 precision; use convert "
+                "when no pixel-value mutation is intended"
+            )
+
     if pixel_size is not None and not isinstance(pixel_size, PixelSize):
         raise TypeError("pixel_size must be a PixelSize instance")
     if compression.strip().lower() in {"jpeg", "jpg"}:
-        raise ValueError("dtype-mutated quantitative channels require lossless compression")
+        raise ValueError("quantitative mutation output requires lossless compression")
 
+    operation = "dtype" if dtype_requested else "float32_precision"
     start_epoch = time.time()
     LOGGER.info(
-        "Mutate workflow: opening %s as input type %s, series %s",
+        "Mutate workflow: opening %s as input type %s, series %s; operation=%s",
         input_file,
         input_type,
         int(series),
+        operation,
     )
     reader = source_reader(
         input_file,
@@ -105,15 +143,21 @@ def mutate(
     )
     with reader:
         if reader.is_rgb:
-            raise ValueError("dtype mutation currently supports planar grayscale channels only")
+            raise ValueError("mutation currently supports planar grayscale channels only")
         if reader.output_axes not in {"YX", "CYX"}:
             raise ValueError(
-                f"dtype mutation requires planar YX or CYX output, found {reader.output_axes!r}"
+                f"mutation requires planar YX or CYX output, found {reader.output_axes!r}"
             )
         if not np.issubdtype(reader.dtype, np.floating):
             raise TypeError(
-                f"dtype mutation requires float32 or float64 input, found {reader.dtype}"
+                f"mutation requires float32 or float64 input, found {reader.dtype}"
             )
+        if precision_requested and reader.dtype != np.dtype("float32"):
+            raise TypeError(
+                "float32 mantissa mutation requires float32 input; "
+                f"found {reader.dtype}"
+            )
+
         source_pixel_size = reader.pixel_size
         effective_pixel_size = pixel_size or source_pixel_size
         if effective_pixel_size is None:
@@ -142,35 +186,102 @@ def mutate(
             output_channel_names,
             rename_mode=normalized_rename_mode,
         )
+
+        dtype_mutation_report: dict[str, object] | None = None
+        float_precision_report: dict[str, object] | None = None
+
+        if dtype_requested:
+            assert dtype is not None
+            assert effective_range_mode is not None
+            LOGGER.info(
+                "Mutation boundary: %s -> %s using range mode %s; source metadata and "
+                "geometry remain on the shared conversion path",
+                reader.dtype,
+                dtype,
+                effective_range_mode,
+            )
+            LOGGER.info(
+                "Scanning every full-resolution channel before writing so each channel gets "
+                "one fixed, auditable mapping"
+            )
+            analysis_started = time.monotonic()
+            plans = analyze_dtype_mutation(
+                reader,
+                channel_names=source_channel_names,
+                source_dtype=reader.dtype,
+                dtype=dtype,
+                range_mode=effective_range_mode,
+                sample_pixels_per_channel=sample_pixels_per_channel,
+                auto_max_normalized_rmse=auto_max_normalized_rmse,
+            )
+            LOGGER.info(
+                "Mutation planning completed in %s",
+                readable_runtime(time.monotonic() - analysis_started),
+            )
+            transformed = DTypeMutationSource(reader, plans)
+            output_dtype = np.dtype(dtype)
+            writer_mantissa_bits = None
+            dtype_mutation_report = {
+                "protocol_version": DTYPE_MUTATION_PROTOCOL_VERSION,
+                "source_dtype": reader.dtype.name,
+                "target_dtype": dtype,
+                "range_mode": effective_range_mode,
+                "rounding": "nearest, ties to even",
+                "clipping_policy": "none for finite source values",
+                "automatic_range_policy": {
+                    "near_integer_tolerance": 0.01,
+                    "moderate_near_integer_fraction": 0.10,
+                    "moderate_enrichment_over_uniform_fractional_parts": 5.0,
+                    "strong_near_integer_fraction": 0.50,
+                    "strong_enrichment_over_uniform_fractional_parts": 10.0,
+                    "maximum_unit_rounding_normalized_rmse": float(
+                        auto_max_normalized_rmse
+                    ),
+                    "decision": (
+                        "Auto preserves unit scale when the nearest-integer range fits the "
+                        "target dtype and either full-resolution nonzero values provide "
+                        "strong integer-lattice evidence or unit-rounding RMSE is within the "
+                        "configured fraction of the sampled nonzero robust intensity span; "
+                        "otherwise it uses a zero-anchored linear mapping."
+                    ),
+                },
+                "channels": [plan.report for plan in plans],
+            }
+        else:
+            assert normalized_mantissa_bits is not None
+            transformed = reader
+            output_dtype = np.dtype("float32")
+            writer_mantissa_bits = normalized_mantissa_bits
+            precision_bits = normalized_mantissa_bits + 1
+            significant_bits = float32_significant_bits(normalized_mantissa_bits)
+            LOGGER.info(
+                "Mutation boundary: float32 storage retained with %s fraction bits "
+                "(%s-bit significand precision, OME SignificantBits=%s)",
+                normalized_mantissa_bits,
+                precision_bits,
+                significant_bits,
+            )
+            float_precision_report = {
+                "protocol_version": FLOAT32_PRECISION_MUTATION_PROTOCOL_VERSION,
+                "source_dtype": "float32",
+                "target_dtype": "float32",
+                "float32_mantissa_bits": normalized_mantissa_bits,
+                "float_significand_precision_bits": precision_bits,
+                "ome_significant_bits": significant_bits,
+                "rounding": "nearest, ties to even",
+                "lossy": True,
+                "storage_dtype_preserved": True,
+                "float32_exponent_range_preserved": True,
+                "description": (
+                    "The float32 storage type and exponent range are preserved while lower "
+                    "fraction bits are rounded away before writing. Pyramid levels are rebuilt "
+                    "from the precision-trimmed representation and rounded to the same precision."
+                ),
+            }
+
         LOGGER.info(
-            "Mutation boundary: %s -> %s using range mode %s; source metadata and geometry "
-            "remain on the shared conversion path",
-            reader.dtype,
-            dtype,
-            range_mode,
-        )
-        LOGGER.info(
-            "Scanning every full-resolution channel before writing so each channel gets one "
-            "fixed, auditable mapping"
-        )
-        analysis_started = time.monotonic()
-        plans = analyze_dtype_mutation(
-            reader,
-            channel_names=source_channel_names,
-            source_dtype=reader.dtype,
-            dtype=dtype,
-            range_mode=range_mode,
-            sample_pixels_per_channel=sample_pixels_per_channel,
-            auto_max_normalized_rmse=auto_max_normalized_rmse,
-        )
-        LOGGER.info(
-            "Mutation planning completed in %s",
-            readable_runtime(time.monotonic() - analysis_started),
-        )
-        transformed = DTypeMutationSource(reader, plans)
-        LOGGER.info(
-            "Using the same OME-TIFF writer as convert through a streaming dtype-transform "
-            "adapter (compression=%s, tile=%s, downsample=%s)",
+            "Using the shared OME-TIFF writer through a streaming mutation adapter "
+            "(compression=%s, tile=%s, downsample=%s)",
             compression,
             tile_size,
             downsample,
@@ -187,6 +298,7 @@ def mutate(
             max_workers=max_workers,
             display_uuid=display_uuid,
             software=software,
+            float32_mantissa_bits=writer_mantissa_bits,
             overwrite=overwrite,
             cache_directory=cache_directory,
         )
@@ -195,7 +307,7 @@ def mutate(
             transformed,
             axes=reader.output_axes,
             shape=reader.output_shape,
-            dtype=np.dtype(dtype),
+            dtype=output_dtype,
         )
         LOGGER.info(
             "Shared writer path completed in %s",
@@ -214,7 +326,7 @@ def mutate(
     options = dict(write_report["options"])
     options.update(
         {
-            "operation": "dtype",
+            "operation": operation,
             "input_type": input_type,
             "series": int(series),
             "channel_name_field": channel_name_field,
@@ -223,17 +335,23 @@ def mutate(
             "pixel_size_override": (
                 None if pixel_size is None else list(pixel_size.to_tuple())
             ),
-            "dtype": dtype,
-            "range_mode": range_mode,
-            "sample_pixels_per_channel": int(sample_pixels_per_channel),
-            "auto_max_normalized_rmse": float(auto_max_normalized_rmse),
         }
     )
-
+    if dtype_requested:
+        options.update(
+            {
+                "dtype": dtype,
+                "range_mode": effective_range_mode,
+                "sample_pixels_per_channel": int(sample_pixels_per_channel),
+                "auto_max_normalized_rmse": float(auto_max_normalized_rmse),
+            }
+        )
+    else:
+        options["float32_mantissa_bits"] = normalized_mantissa_bits
 
     stop_epoch = time.time()
     report: dict[str, object] = {
-        "operation": "dtype",
+        "operation": operation,
         "ome": write_report["ome"],
         "miti_header": write_report["miti_header"],
         "input_file": input_report,
@@ -241,32 +359,6 @@ def mutate(
         "image": write_report["image"],
         "pyramid": write_report["pyramid"],
         "verification": write_report["verification"],
-        "dtype_mutation": {
-            "protocol_version": DTYPE_MUTATION_PROTOCOL_VERSION,
-            "source_dtype": input_report["dtype"],
-            "target_dtype": dtype,
-            "range_mode": range_mode,
-            "rounding": "nearest, ties to even",
-            "clipping_policy": "none for finite source values",
-            "automatic_range_policy": {
-                "near_integer_tolerance": 0.01,
-                "moderate_near_integer_fraction": 0.10,
-                "moderate_enrichment_over_uniform_fractional_parts": 5.0,
-                "strong_near_integer_fraction": 0.50,
-                "strong_enrichment_over_uniform_fractional_parts": 10.0,
-                "maximum_unit_rounding_normalized_rmse": float(
-                    auto_max_normalized_rmse
-                ),
-                "decision": (
-                    "Auto preserves unit scale when the nearest-integer range fits the target "
-                    "dtype and either full-resolution nonzero values provide strong "
-                    "integer-lattice evidence or unit-rounding RMSE is within the configured "
-                    "fraction of the sampled nonzero robust intensity span; otherwise it uses "
-                    "a zero-anchored linear mapping."
-                ),
-            },
-            "channels": [plan.report for plan in plans],
-        },
         "options": options,
         "mutation_stats": {
             "start_time": datetime.fromtimestamp(start_epoch).strftime("%Y-%m-%d %H:%M:%S"),
@@ -280,6 +372,11 @@ def mutate(
         },
         "versions": get_version_info(),
     }
+    if dtype_mutation_report is not None:
+        report["dtype_mutation"] = dtype_mutation_report
+    if float_precision_report is not None:
+        report["float_precision_mutation"] = float_precision_report
+
     LOGGER.info(
         "Mutate complete: %s (%s bytes) in %s",
         output_file,

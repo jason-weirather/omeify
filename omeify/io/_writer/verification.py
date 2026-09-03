@@ -248,7 +248,6 @@ def verify_storage(
             page,
             spec=spec,
             expected_compression=expected_compression,
-            expected_predictor=compression.predictor,
             expected_subsampling=compression.subsampling,
             reduced=False,
             context=f"{prepared.display_name} plane {plane_index}",
@@ -264,8 +263,7 @@ def verify_storage(
                 subframe.aspage(),
                 spec=spec,
                 expected_compression=expected_compression,
-                expected_predictor=compression.predictor,
-                expected_subsampling=compression.subsampling,
+                    expected_subsampling=compression.subsampling,
                 reduced=True,
                 context=(
                     f"{prepared.display_name} plane {plane_index} "
@@ -292,7 +290,6 @@ def verify_page_layout(
     *,
     spec: OMEImageSpec,
     expected_compression: int,
-    expected_predictor: int | None,
     expected_subsampling: tuple[int, int] | None,
     reduced: bool,
     context: str,
@@ -301,14 +298,6 @@ def verify_page_layout(
         raise ValueError(f"{context} is not tiled")
     if int(page.compression) != expected_compression:
         raise ValueError(f"{context} does not use the requested TIFF compression")
-    predictor_tag = page.tags.get("Predictor")
-    actual_predictor = 1 if predictor_tag is None else int(predictor_tag.value)
-    normalized_expected_predictor = 1 if expected_predictor is None else expected_predictor
-    if actual_predictor != normalized_expected_predictor:
-        raise ValueError(
-            f"{context} TIFF Predictor={actual_predictor} does not match "
-            f"requested Predictor={normalized_expected_predictor}"
-        )
     if int(page.samplesperpixel) != spec.samples_per_pixel:
         raise ValueError(f"{context} has the wrong SamplesPerPixel")
     if spec.is_rgb:

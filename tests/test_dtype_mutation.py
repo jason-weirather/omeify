@@ -10,6 +10,7 @@ from click.testing import CliRunner
 
 from omeify import OMETiffReader, PixelSize, mutate
 from omeify.cli import main
+from omeify.io._writer.precision import round_float32_mantissa
 
 
 def _write_float_ome(path: Path, data: np.ndarray, names: list[str] | None = None) -> None:
@@ -555,4 +556,109 @@ def test_mutation_cli_accepts_channel_rename_json_with_interspersed_options(
     assert help_result.exit_code == 0
     assert "--rename-channels-json" in help_result.output
     assert "--rename-channels-by" in help_result.output
+    assert "--float32-mantissa-bits" in help_result.output
     assert "--software" not in help_result.output
+
+def test_mutation_cli_trims_float32_mantissa_and_updates_ome_significant_bits(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "float32-precision-source.ome.tif"
+    output = tmp_path / "float32-precision-output.ome.tif"
+    report_path = tmp_path / "float32-precision-report.json"
+    data = np.linspace(0.0, 4095.0, 32 * 48, dtype=np.float32).reshape(1, 32, 48)
+    data[0, 3::7, 5::11] += np.float32(0.123456)
+    _write_float_ome(source, data, names=["DAPI"])
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "mutate",
+            str(source),
+            str(output),
+            "--type",
+            "ome_tiff",
+            "--float32-mantissa-bits",
+            "11",
+            "--compression",
+            "Uncompressed",
+            "--tile-size",
+            "16",
+            "--pyramid-levels",
+            "0",
+            "--output-json",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["operation"] == "float32_precision"
+    assert report["output_file"]["dtype"] == "float32"
+    assert report["image"]["float32_mantissa_bits"] == 11
+    assert report["image"]["float_precision_bits"] == 12
+    assert report["image"]["significant_bits"] == 20
+    precision = report["float_precision_mutation"]
+    assert precision["float32_mantissa_bits"] == 11
+    assert precision["float_significand_precision_bits"] == 12
+    assert precision["ome_significant_bits"] == 20
+
+    with OMETiffReader(output) as reader:
+        assert reader.dtype == np.dtype("float32")
+        assert reader.inspection_report["ome"]["images"][0]["significant_bits"] == 20
+        np.testing.assert_array_equal(
+            reader.asarray(),
+            round_float32_mantissa(data, 11)[0],
+        )
+
+
+def test_mutation_cli_requires_exactly_one_pixel_mutation(tmp_path: Path) -> None:
+    source = tmp_path / "mutation-choice-source.ome.tif"
+    data = np.arange(16 * 16, dtype=np.float32).reshape(1, 16, 16)
+    _write_float_ome(source, data, names=["DAPI"])
+
+    missing = CliRunner().invoke(
+        main,
+        [
+            "mutate",
+            str(source),
+            str(tmp_path / "missing.ome.tif"),
+            "--type",
+            "ome_tiff",
+        ],
+    )
+    assert missing.exit_code == 2
+    assert "Choose exactly one mutation" in missing.output
+
+    both = CliRunner().invoke(
+        main,
+        [
+            "mutate",
+            str(source),
+            str(tmp_path / "both.ome.tif"),
+            "--type",
+            "ome_tiff",
+            "--dtype",
+            "uint16",
+            "--float32-mantissa-bits",
+            "11",
+        ],
+    )
+    assert both.exit_code == 2
+    assert "Choose exactly one mutation" in both.output
+
+
+def test_float32_precision_mutation_rejects_full_precision_noop(tmp_path: Path) -> None:
+    source = tmp_path / "full-precision-source.ome.tif"
+    data = np.arange(16 * 16, dtype=np.float32).reshape(1, 16, 16)
+    _write_float_ome(source, data, names=["DAPI"])
+
+    with pytest.raises(ValueError, match="use convert"):
+        mutate(
+            source,
+            tmp_path / "full-precision-output.ome.tif",
+            input_type="ome_tiff",
+            float32_mantissa_bits=23,
+            compression="Uncompressed",
+            tile_size=16,
+            pyramid_levels=0,
+        )

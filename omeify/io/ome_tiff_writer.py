@@ -13,7 +13,6 @@ from omeify.io._writer import (
     DownsampleMethod,
     JPEGSubsampling,
     PlaneReaderSource,
-    PredictorMode,
     WriterEngine,
     WriterSettings,
     prepare_image,
@@ -58,7 +57,6 @@ class OMETiffWriter:
         max_workers: int | None = None,
         display_uuid: bool = True,
         software: str | None = None,
-        predictor: PredictorMode = "auto",
         float32_mantissa_bits: int | None = None,
         overwrite: bool = True,
         cache_directory: str | Path | None = None,
@@ -79,7 +77,6 @@ class OMETiffWriter:
             max_workers=max_workers,
             display_uuid=display_uuid,
             software=software,
-            predictor=predictor,
             float32_mantissa_bits=float32_mantissa_bits,
             overwrite=overwrite,
             cache_directory=cache_directory,
@@ -102,7 +99,6 @@ class OMETiffWriter:
         self.max_workers = settings.max_workers
         self.display_uuid = settings.display_uuid
         self.software = settings.software
-        self.predictor = settings.predictor
         self.float32_mantissa_bits = settings.float32_mantissa_bits
         self.overwrite = settings.overwrite
         self.cache_directory = settings.cache_directory
@@ -287,7 +283,6 @@ class OMETiffWriter:
                 ),
                 "display_uuid": self.display_uuid,
                 "software": self.software,
-                "predictor": compression.predictor_name,
                 "float32_mantissa_bits": prepared.float32_mantissa_bits,
                 "max_workers": self.max_workers,
             },

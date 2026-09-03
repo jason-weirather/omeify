@@ -84,7 +84,6 @@ def prepare_image(
         is_rgb=spec.is_rgb,
         jpeg_quality=settings.jpeg_quality,
         jpeg_subsampling=settings.jpeg_subsampling,
-        predictor=settings.predictor,
     )
     validate_lossy_compression(
         image_type=spec.image_type,
@@ -103,12 +102,11 @@ def prepare_image(
         pyramid_levels=settings.pyramid_levels,
     )
     LOGGER.info(
-        "Writer plan for %s: compression=%s (%s), predictor=%s, tile=%sx%s, workers=%s, "
+        "Writer plan for %s: compression=%s (%s), tile=%sx%s, workers=%s, "
         "downsample=%s, subresolution-levels=%s, float-mantissa-bits=%s",
         display_name,
         compression.name,
         "lossless" if compression.lossless else "lossy",
-        compression.predictor_name,
         settings.tile_size,
         settings.tile_size,
         settings.max_workers,
