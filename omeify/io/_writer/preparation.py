@@ -25,6 +25,7 @@ from .configuration import (
 )
 from .model import PlaneReaderSource, PreparedImage
 from .pyramid import auto_level_shapes
+from .precision import prepare_float_precision
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,6 +55,11 @@ def prepare_image(
         raise TypeError("source must implement PlaneReaderSource")
     if not isinstance(spec, OMEImageSpec):
         raise TypeError("spec must be an OMEImageSpec")
+    source, spec, float32_mantissa_bits = prepare_float_precision(
+        source,
+        spec,
+        settings.float32_mantissa_bits,
+    )
     effective_downsample = resolve_downsample(spec.image_type, downsample)
     display_name = "image" if name is None else f"series {name!r}"
 
@@ -78,6 +84,7 @@ def prepare_image(
         is_rgb=spec.is_rgb,
         jpeg_quality=settings.jpeg_quality,
         jpeg_subsampling=settings.jpeg_subsampling,
+        predictor=settings.predictor,
     )
     validate_lossy_compression(
         image_type=spec.image_type,
@@ -96,16 +103,18 @@ def prepare_image(
         pyramid_levels=settings.pyramid_levels,
     )
     LOGGER.info(
-        "Writer plan for %s: compression=%s (%s), tile=%sx%s, workers=%s, "
-        "downsample=%s, subresolution-levels=%s",
+        "Writer plan for %s: compression=%s (%s), predictor=%s, tile=%sx%s, workers=%s, "
+        "downsample=%s, subresolution-levels=%s, float-mantissa-bits=%s",
         display_name,
         compression.name,
         "lossless" if compression.lossless else "lossy",
+        compression.predictor_name,
         settings.tile_size,
         settings.tile_size,
         settings.max_workers,
         effective_downsample,
         len(level_shapes) - 1,
+        float32_mantissa_bits,
     )
     LOGGER.info(
         "%s pyramid shapes: %s",
@@ -121,6 +130,7 @@ def prepare_image(
         downsample=effective_downsample,
         compression=compression,
         level_shapes=level_shapes,
+        float32_mantissa_bits=float32_mantissa_bits,
         name=name,
     )
 

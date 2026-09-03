@@ -555,3 +555,4 @@ def test_mutation_cli_accepts_channel_rename_json_with_interspersed_options(
     assert help_result.exit_code == 0
     assert "--rename-channels-json" in help_result.output
     assert "--rename-channels-by" in help_result.output
+    assert "--software" not in help_result.output

@@ -144,6 +144,49 @@ def test_multi_series_writer_preserves_heterogeneous_series_and_provenance(
         np.testing.assert_array_equal(reader.asarray(), labels)
 
 
+def test_multi_series_float32_precision_trim_skips_non_float32_series(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "mixed-precision.ome.tif"
+    pixel_size = PixelSize(0.5, 0.5, "µm")
+    intensity = np.linspace(0.0, 50.0, 32 * 32, dtype=np.float32).reshape(32, 32)
+    labels = (np.arange(32 * 32, dtype=np.uint16).reshape(32, 32) % 17)
+    series = (
+        OMEImageSeries.from_array(
+            "Signal",
+            intensity,
+            image_type="multichannel",
+            channel_names=("DAPI",),
+            pixel_size=pixel_size,
+        ),
+        OMEImageSeries.from_array(
+            "Labels",
+            labels,
+            image_type="label",
+            channel_names=("Labels",),
+            pixel_size=pixel_size,
+        ),
+    )
+
+    report = OMEMultiSeriesWriter(
+        output,
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+        float32_mantissa_bits=10,
+    ).write(series)
+
+    assert report["series"][0]["significant_bits"] == 19
+    assert report["series"][0]["float32_mantissa_bits"] == 10
+    assert report["series"][1]["significant_bits"] == 16
+    assert report["series"][1]["float32_mantissa_bits"] is None
+    with tifffile.TiffFile(output) as tiff:
+        signal = np.asarray(tiff.series[0].asarray(), dtype=np.float32)
+        raw = signal.view(np.uint32)
+        assert np.all((raw & np.uint32((1 << 13) - 1)) == 0)
+        np.testing.assert_array_equal(tiff.series[1].asarray(), labels)
+
+
 def test_multi_series_writer_rejects_ambiguous_names_and_non_json_provenance(
     tmp_path: Path,
 ) -> None:

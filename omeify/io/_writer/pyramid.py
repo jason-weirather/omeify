@@ -15,6 +15,7 @@ from omeify.progress import ProgressLogger
 
 from .configuration import DownsampleMethod, OUTPUT_BYTEORDER
 from .model import PreparedImage
+from .precision import round_float32_mantissa
 
 LOGGER = logging.getLogger(__name__)
 
@@ -184,6 +185,7 @@ def downsample_region(
     out_x0: int,
     out_x1: int,
     method: DownsampleMethod,
+    float32_mantissa_bits: int | None = None,
 ) -> np.ndarray:
     input_y0 = out_y0 * 2
     input_y1 = min(reader.height, out_y1 * 2)
@@ -192,12 +194,16 @@ def downsample_region(
     block = reader.read_region(input_y0, input_y1, input_x0, input_x1)
     out_shape = (out_y1 - out_y0, out_x1 - out_x0)
     if method == "nearest":
-        return np.ascontiguousarray(
+        result = np.ascontiguousarray(
             block[::2, ::2, ...][: out_shape[0], : out_shape[1], ...]
         )
-    if method == "mean":
-        return np.ascontiguousarray(mean_downsample_2x(block, out_shape))
-    raise AssertionError(f"Unhandled downsample method {method}")
+    elif method == "mean":
+        result = np.ascontiguousarray(mean_downsample_2x(block, out_shape))
+    else:
+        raise AssertionError(f"Unhandled downsample method {method}")
+    if float32_mantissa_bits is not None:
+        result = round_float32_mantissa(result, float32_mantissa_bits)
+    return result
 
 
 def iter_tiles(
@@ -271,6 +277,7 @@ def iter_downsampled_tiles(
     plane_count: int,
     tile_size: int,
     method: DownsampleMethod,
+    float32_mantissa_bits: int | None = None,
     progress_label: str | None = None,
 ) -> Iterable[np.ndarray]:
     """Yield one downsampled tiled level from readers for the preceding level."""
@@ -310,6 +317,7 @@ def iter_downsampled_tiles(
                             out_x0=x0,
                             out_x1=x1,
                             method=method,
+                            float32_mantissa_bits=float32_mantissa_bits,
                         )
                         yielded_tiles += 1
                         yield tile
@@ -483,6 +491,7 @@ def write_temporary_level(
                 plane_count=spec.plane_count,
                 tile_size=tile_size,
                 method=prepared.downsample,
+                float32_mantissa_bits=prepared.float32_mantissa_bits,
                 progress_label=progress_label,
             ),
             **options,

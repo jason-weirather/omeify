@@ -14,6 +14,7 @@ from omeify.io.spec import ImageType
 DownsampleMethod = Literal["mean", "nearest"]
 JPEGSubsampling = Literal["444", "422", "420", "411"]
 LossyCompressionPolicy = Literal["rgb-only", "non-label"]
+PredictorMode = Literal["auto", "none", "horizontal", "floatingpoint"]
 
 OUTPUT_BYTEORDER: Literal["<", ">"] = "<"
 JPEG_SUBSAMPLING_FACTORS: dict[JPEGSubsampling, tuple[int, int]] = {
@@ -38,7 +39,8 @@ class CompressionSettings:
     name: str
     tifffile_value: str | None
     compression_args: dict[str, object] | None
-    predictor: bool | None
+    predictor: int | None
+    predictor_name: Literal["none", "horizontal", "floatingpoint"]
     lossless: bool
     subsampling: tuple[int, int] | None = None
 
@@ -56,6 +58,8 @@ class WriterSettings:
     max_workers: int
     display_uuid: bool
     software: str
+    predictor: PredictorMode
+    float32_mantissa_bits: int | None
     overwrite: bool
     cache_directory: Path | None
 
@@ -72,6 +76,8 @@ class WriterSettings:
         max_workers: int | None,
         display_uuid: bool,
         software: str | None,
+        predictor: PredictorMode,
+        float32_mantissa_bits: int | None,
         overwrite: bool,
         cache_directory: str | Path | None,
     ) -> WriterSettings:
@@ -94,6 +100,10 @@ class WriterSettings:
             raise TypeError("display_uuid must be a boolean")
         if not isinstance(overwrite, bool):
             raise TypeError("overwrite must be a boolean")
+        normalized_predictor = normalize_predictor_mode(predictor)
+        normalized_float32_mantissa_bits = normalize_float32_mantissa_bits(
+            float32_mantissa_bits
+        )
         return cls(
             output_path=Path(output_path),
             compression_name=compression_name.strip(),
@@ -104,6 +114,8 @@ class WriterSettings:
             max_workers=normalized_workers,
             display_uuid=display_uuid,
             software=normalize_software_tag(software),
+            predictor=normalized_predictor,
+            float32_mantissa_bits=normalized_float32_mantissa_bits,
             overwrite=overwrite,
             cache_directory=(
                 None if cache_directory is None else Path(cache_directory)
@@ -126,6 +138,28 @@ def normalize_software_tag(software: str | None) -> str:
     return value
 
 
+def normalize_predictor_mode(value: PredictorMode) -> PredictorMode:
+    """Validate the public TIFF predictor policy."""
+
+    if value not in {"auto", "none", "horizontal", "floatingpoint"}:
+        raise ValueError(
+            "predictor must be 'auto', 'none', 'horizontal', or 'floatingpoint'"
+        )
+    return value
+
+
+def normalize_float32_mantissa_bits(value: int | None) -> int | None:
+    """Validate retained float32 fraction bits for precision trimming."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("float32_mantissa_bits must be an integer or None")
+    if value < 0 or value > 23:
+        raise ValueError("float32_mantissa_bits must be between 0 and 23")
+    return value
+
+
 def compression_settings(
     name: str,
     dtype: np.dtype[object],
@@ -133,45 +167,81 @@ def compression_settings(
     is_rgb: bool,
     jpeg_quality: int,
     jpeg_subsampling: JPEGSubsampling,
+    predictor: PredictorMode,
 ):
     """Resolve one public compression name into tifffile options."""
 
     normalized = name.strip().lower().replace("_", "-")
-    integer = np.issubdtype(dtype, np.integer)
     if normalized in {"uncompressed", "none", "no", "false"}:
-        return CompressionSettings("Uncompressed", None, None, None, True)
+        predictor_code, predictor_name = _resolve_predictor(
+            predictor,
+            dtype,
+            compression="Uncompressed",
+        )
+        return CompressionSettings(
+            "Uncompressed",
+            None,
+            None,
+            predictor_code,
+            predictor_name,
+            True,
+        )
     if normalized == "lzw":
+        predictor_code, predictor_name = _resolve_predictor(
+            predictor,
+            dtype,
+            compression="LZW",
+        )
         return CompressionSettings(
             "LZW",
             "lzw",
             None,
-            True if integer else None,
+            predictor_code,
+            predictor_name,
             True,
         )
     if normalized in {"deflate", "zlib"}:
+        predictor_code, predictor_name = _resolve_predictor(
+            predictor,
+            dtype,
+            compression="Deflate",
+        )
         return CompressionSettings(
             "Deflate",
             "deflate",
             {"level": 6},
-            True if integer else None,
+            predictor_code,
+            predictor_name,
             True,
         )
     if normalized in {"zstd", "zstandard"}:
+        predictor_code, predictor_name = _resolve_predictor(
+            predictor,
+            dtype,
+            compression="ZSTD",
+        )
         return CompressionSettings(
             "ZSTD",
             "zstd",
             {"level": 3},
-            True if integer else None,
+            predictor_code,
+            predictor_name,
             True,
         )
     if normalized in {"jpeg", "jpg"}:
         if dtype != np.dtype("uint8"):
             raise ValueError("JPEG output is restricted to uint8 images")
+        predictor_code, predictor_name = _resolve_predictor(
+            predictor,
+            dtype,
+            compression="JPEG",
+        )
         return CompressionSettings(
             "JPEG",
             "jpeg",
             {"level": jpeg_quality},
-            None,
+            predictor_code,
+            predictor_name,
             False,
             JPEG_SUBSAMPLING_FACTORS[jpeg_subsampling] if is_rgb else None,
         )
@@ -179,6 +249,40 @@ def compression_settings(
         f"Unsupported compression {name!r}; choose LZW, Deflate, ZSTD, "
         "JPEG, or Uncompressed"
     )
+
+
+def _resolve_predictor(
+    mode: PredictorMode,
+    dtype: np.dtype[object],
+    *,
+    compression: str,
+) -> tuple[int | None, Literal["none", "horizontal", "floatingpoint"]]:
+    """Resolve one public predictor mode to the TIFF Predictor tag value."""
+
+    normalized_dtype = np.dtype(dtype)
+    compressed = compression in {"LZW", "Deflate", "ZSTD"}
+    integer = np.issubdtype(normalized_dtype, np.integer)
+    floating = np.issubdtype(normalized_dtype, np.floating)
+
+    if mode == "auto":
+        if compressed and integer:
+            return 2, "horizontal"
+        return None, "none"
+    if mode == "none":
+        return None, "none"
+    if not compressed:
+        raise ValueError(
+            f"TIFF predictor {mode!r} requires LZW, Deflate, or ZSTD compression"
+        )
+    if mode == "horizontal":
+        if not integer:
+            raise ValueError("horizontal TIFF prediction requires integer pixels")
+        return 2, "horizontal"
+    if mode == "floatingpoint":
+        if not floating:
+            raise ValueError("floatingpoint TIFF prediction requires floating-point pixels")
+        return 3, "floatingpoint"
+    raise AssertionError(mode)
 
 
 def resolve_downsample(

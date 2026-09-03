@@ -27,6 +27,7 @@ def verify_single_output(
         "software_tag_matches": False,
         "byte_order_metadata_matches_tiff": False,
         "significant_bits_matches_dtype": False,
+        "significant_bits_matches_spec": False,
         "tiff_data_mapping_matches": False,
         "channel_sample_layout_matches": False,
         "pyramid_annotation_linked": False,
@@ -37,6 +38,7 @@ def verify_single_output(
         "samples_per_pixel_match": False,
         "photometric_matches": False,
         "compression_matches_requested": False,
+        "predictor_matches_requested": False,
         "jpeg_subsampling_matches_requested": None,
         "subifd_layout_matches": False,
         "all_levels_tiled": False,
@@ -80,8 +82,12 @@ def verify_single_output(
         if declared_significant_bits != spec.significant_bits:
             raise ValueError(
                 f"OME SignificantBits={declared_significant_bits} does not match "
-                f"dtype width {spec.significant_bits}"
+                f"the writer specification {spec.significant_bits}"
             )
+        verification["significant_bits_matches_spec"] = True
+        # Retain the historical report key for compatibility. The writer spec
+        # defaults to the dtype width and may deliberately declare fewer
+        # significant bits after float mantissa trimming.
         verification["significant_bits_matches_dtype"] = True
 
         channels = pixels.findall("./ome:Channel", namespaces=namespace)
@@ -155,6 +161,7 @@ def verify_single_output(
         verification["samples_per_pixel_match"] = True
         verification["photometric_matches"] = True
         verification["compression_matches_requested"] = True
+        verification["predictor_matches_requested"] = True
         verification["jpeg_subsampling_matches_requested"] = (
             raster.jpeg_subsampling_checked
         )

@@ -13,6 +13,7 @@ from omeify.io._writer import (
     DownsampleMethod,
     JPEGSubsampling,
     PlaneReaderSource,
+    PredictorMode,
     WriterEngine,
     WriterSettings,
     prepare_image,
@@ -57,6 +58,8 @@ class OMETiffWriter:
         max_workers: int | None = None,
         display_uuid: bool = True,
         software: str | None = None,
+        predictor: PredictorMode = "auto",
+        float32_mantissa_bits: int | None = None,
         overwrite: bool = True,
         cache_directory: str | Path | None = None,
         icc_profile: bytes | None = None,
@@ -76,6 +79,8 @@ class OMETiffWriter:
             max_workers=max_workers,
             display_uuid=display_uuid,
             software=software,
+            predictor=predictor,
+            float32_mantissa_bits=float32_mantissa_bits,
             overwrite=overwrite,
             cache_directory=cache_directory,
         )
@@ -97,6 +102,8 @@ class OMETiffWriter:
         self.max_workers = settings.max_workers
         self.display_uuid = settings.display_uuid
         self.software = settings.software
+        self.predictor = settings.predictor
+        self.float32_mantissa_bits = settings.float32_mantissa_bits
         self.overwrite = settings.overwrite
         self.cache_directory = settings.cache_directory
         self.icc_profile = None if icc_profile is None else bytes(icc_profile)
@@ -195,6 +202,7 @@ class OMETiffWriter:
             settings=self._settings,
             lossy_policy="rgb-only",
         )
+        spec = prepared.spec
 
         metadata_started = time.monotonic()
         xml_info = generate_ome_xml(
@@ -249,6 +257,12 @@ class OMETiffWriter:
                 "interleaved": spec.is_rgb,
                 "pixel_size": list(spec.pixel_size.to_tuple()),
                 "significant_bits": spec.significant_bits,
+                "float32_mantissa_bits": prepared.float32_mantissa_bits,
+                "float_precision_bits": (
+                    None
+                    if prepared.float32_mantissa_bits is None
+                    else prepared.float32_mantissa_bits + 1
+                ),
                 "icc_profile_present": spec.icc_profile is not None,
             },
             "pyramid": {
@@ -273,6 +287,8 @@ class OMETiffWriter:
                 ),
                 "display_uuid": self.display_uuid,
                 "software": self.software,
+                "predictor": compression.predictor_name,
+                "float32_mantissa_bits": prepared.float32_mantissa_bits,
                 "max_workers": self.max_workers,
             },
         }

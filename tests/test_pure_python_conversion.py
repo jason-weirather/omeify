@@ -693,6 +693,7 @@ def test_brightfield_profiles_default_to_conservative_jpeg_policy() -> None:
         is_rgb=True,
         jpeg_quality=90,
         jpeg_subsampling="444",
+        predictor="auto",
     )
 
     assert settings.name == "JPEG"
@@ -992,7 +993,7 @@ def test_click_group_exposes_version_inspect_mutate_and_convert() -> None:
     result = CliRunner().invoke(main, ["version", "--json"])
     assert result.exit_code == 0
     version_info = json.loads(result.output)
-    assert version_info["omeify"] == "0.13.1"
+    assert version_info["omeify"] == "0.14.0"
     assert "tifffile" in version_info
 
     eager_result = CliRunner().invoke(main, ["--version"])
@@ -1018,6 +1019,7 @@ def test_click_group_exposes_version_inspect_mutate_and_convert() -> None:
     assert "indica_mif" in convert_help.output
     assert "--jpeg-quality" in convert_help.output
     assert "--jpeg-subsampling" in convert_help.output
+    assert "--software" not in convert_help.output
 
 
 def test_cli_svs_type_routes_to_rgb_converter(tmp_path: Path) -> None:
@@ -1068,7 +1070,7 @@ def test_pyproject_is_the_version_authority() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with pyproject.open("rb") as handle:
         project_version = tomllib.load(handle)["project"]["version"]
-    assert __version__ == project_version == "0.13.1"
+    assert __version__ == project_version == "0.14.0"
 
 
 def test_bundled_miti_json_schema_is_available() -> None:

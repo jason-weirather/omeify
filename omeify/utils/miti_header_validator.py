@@ -358,11 +358,11 @@ def _validate_record(
     if (
         expected_bits is not None
         and significant_bits is not None
-        and significant_bits != expected_bits
+        and significant_bits > expected_bits
     ):
         errors.append(
             f"Image[{image_index}]/Pixels SignificantBits={significant_bits!r} does not "
-            f"match Type={pixel_type!r} storage width ({expected_bits})"
+            f"fit within Type={pixel_type!r} storage width ({expected_bits})"
         )
 
     channel_ids = [channel.get("id") for channel in channels]

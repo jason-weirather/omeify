@@ -36,6 +36,7 @@ class OMEImageSpec:
     channel_names: tuple[str, ...]
     pixel_size: PixelSize
     icc_profile: bytes | None = None
+    significant_bits_override: int | None = None
 
     def __post_init__(self) -> None:
         image_type = str(self.image_type)
@@ -56,6 +57,18 @@ class OMEImageSpec:
         object.__setattr__(self, "pixel_size", normalize_ome_pixel_size(self.pixel_size))
         if self.icc_profile is not None:
             object.__setattr__(self, "icc_profile", bytes(self.icc_profile))
+        if self.significant_bits_override is not None:
+            if (
+                isinstance(self.significant_bits_override, bool)
+                or not isinstance(self.significant_bits_override, int)
+            ):
+                raise TypeError("significant_bits_override must be an integer or None")
+            storage_bits = int(self.dtype.itemsize * 8)
+            if not 1 <= self.significant_bits_override <= storage_bits:
+                raise ValueError(
+                    "significant_bits_override must be between 1 and the dtype storage width "
+                    f"({storage_bits})"
+                )
 
         if len(self.axes) != len(self.shape):
             raise ValueError(f"Shape {self.shape} does not match axes {self.axes!r}")
@@ -171,6 +184,8 @@ class OMEImageSpec:
 
     @property
     def significant_bits(self) -> int:
+        if self.significant_bits_override is not None:
+            return self.significant_bits_override
         return int(self.dtype.itemsize * 8)
 
     @property

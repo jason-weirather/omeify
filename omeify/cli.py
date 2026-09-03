@@ -214,12 +214,6 @@ def main() -> None:
 )
 @click.option("--omit-uuid", is_flag=True, help="Omit the optional OME root UUID.")
 @click.option(
-    "--software",
-    type=str,
-    default=None,
-    help='Override the TIFF Software tag; default "omeify <version>".',
-)
-@click.option(
     "--output-json",
     type=click.Path(dir_okay=False, path_type=Path),
     help="Write the conversion report to this JSON file instead of stdout.",
@@ -301,7 +295,6 @@ def convert_command(
     rename_channels_json: Path | None,
     rename_channels_by: str | None,
     omit_uuid: bool,
-    software: str | None,
     output_json: Path | None,
     cache_directory: Path | None,
     compression: str | None,
@@ -345,7 +338,6 @@ def convert_command(
             rename_channels_by=rename_mode,
             pixel_size=pixel_size,
             display_uuid=not omit_uuid,
-            software=software,
             compression=compression,
             jpeg_quality=jpeg_quality,
             jpeg_subsampling=jpeg_subsampling,  # type: ignore[arg-type]
@@ -434,12 +426,6 @@ def convert_command(
 )
 @click.option("--omit-uuid", is_flag=True, help="Omit the optional OME root UUID.")
 @click.option(
-    "--software",
-    type=str,
-    default=None,
-    help='Override the TIFF Software tag; default "omeify <version>".',
-)
-@click.option(
     "--output-json",
     type=click.Path(dir_okay=False, path_type=Path),
     help="Write the mutation report to this JSON file instead of stdout.",
@@ -512,7 +498,6 @@ def mutate_command(
     sample_pixels_per_channel: int,
     auto_max_normalized_rmse: float,
     omit_uuid: bool,
-    software: str | None,
     output_json: Path | None,
     cache_directory: Path | None,
     compression: str,
@@ -561,7 +546,6 @@ def mutate_command(
             downsample=downsample,  # type: ignore[arg-type]
             max_workers=workers,
             display_uuid=not omit_uuid,
-            software=software,
             overwrite=overwrite,
             cache_directory=cache_directory,
         )
