@@ -58,9 +58,8 @@ def packet():
 def connections(monkeypatch, packet):
     seen = []
     summary = {
-        "overview": {"text": "A TIFF timestamp is present.", "evidence": [{
-            "record_id": "m1", "quote": packet["records"][0]["value"],
-        }]}, "findings": [], "cautions": [],
+        "overview": {"text": "A TIFF timestamp is present.", "record_ids": ["m1"]},
+        "findings": [], "cautions": [],
     }
 
     @contextmanager

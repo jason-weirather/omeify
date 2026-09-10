@@ -23,7 +23,10 @@
       "const": "1.0"
     },
     "prompt_version": {
-      "const": "1.0"
+      "enum": [
+        "1.0",
+        "2.0"
+      ]
     },
     "source": {
       "type": "object",
@@ -94,8 +97,7 @@
       ],
       "properties": {
         "record_id": {
-          "type": "string",
-          "pattern": "^m[1-9][0-9]*$"
+          "$ref": "#/$defs/record_id"
         },
         "quote": {
           "type": "string",
@@ -113,9 +115,7 @@
       ],
       "properties": {
         "text": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 800
+          "$ref": "#/$defs/statement_text"
         },
         "evidence": {
           "type": "array",
@@ -139,22 +139,10 @@
       ],
       "properties": {
         "category": {
-          "type": "string",
-          "enum": [
-            "date",
-            "identifier",
-            "path",
-            "acquisition",
-            "channel",
-            "calibration",
-            "processing",
-            "other"
-          ]
+          "$ref": "#/$defs/finding_category"
         },
         "label": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 100
+          "$ref": "#/$defs/finding_label"
         },
         "value": {
           "type": "string",
@@ -162,9 +150,7 @@
           "maxLength": 2048
         },
         "interpretation": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 500
+          "$ref": "#/$defs/finding_interpretation"
         },
         "evidence": {
           "type": "array",
@@ -203,7 +189,7 @@
           "maxItems": 16
         }
       },
-      "description": "Model-authored interpretation. Quotes and extracted values are checked against the supplied evidence records; prose remains advisory, not scientifically verified."
+      "description": "Advisory model interpretation with metadata values and evidence quotations. Prompt 1.0 supplied model-copied substrings checked locally; prompt 2.0 selects records and omeify copies their complete values locally. Record references and exact quotations do not prove that the prose is supported or scientifically correct."
     },
     "record": {
       "type": "object",
@@ -217,8 +203,7 @@
       ],
       "properties": {
         "id": {
-          "type": "string",
-          "pattern": "^m[1-9][0-9]*$"
+          "$ref": "#/$defs/record_id"
         },
         "locations": {
           "type": "array",
@@ -343,6 +328,114 @@
           "$ref": "#/$defs/coverage"
         }
       }
+    },
+    "record_id": {
+      "type": "string",
+      "pattern": "^m[1-9][0-9]*$"
+    },
+    "statement_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 800
+    },
+    "finding_category": {
+      "type": "string",
+      "enum": [
+        "date",
+        "identifier",
+        "path",
+        "acquisition",
+        "channel",
+        "calibration",
+        "processing",
+        "other"
+      ]
+    },
+    "finding_label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "finding_interpretation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "model_statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "record_ids"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/statement_text"
+        },
+        "record_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/record_id"
+          },
+          "minItems": 1,
+          "maxItems": 8
+        }
+      },
+      "description": "Advisory model prose with references to supplied records. Omeify copies evidence quotations locally; the model does not reproduce them."
+    },
+    "model_finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_id",
+        "category",
+        "label",
+        "interpretation"
+      ],
+      "properties": {
+        "record_id": {
+          "$ref": "#/$defs/record_id"
+        },
+        "category": {
+          "$ref": "#/$defs/finding_category"
+        },
+        "label": {
+          "$ref": "#/$defs/finding_label"
+        },
+        "interpretation": {
+          "$ref": "#/$defs/finding_interpretation"
+        }
+      },
+      "description": "Select and interpret one supplied metadata record. Its exact value and evidence quotation are copied by omeify, never authored by the model. Use overview/cautions for statements supported by multiple records."
+    },
+    "model_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overview",
+        "findings",
+        "cautions"
+      ],
+      "properties": {
+        "overview": {
+          "$ref": "#/$defs/model_statement"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/model_finding"
+          },
+          "maxItems": 80
+        },
+        "cautions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/model_statement"
+          },
+          "maxItems": 16
+        }
+      },
+      "description": "Prompt protocol 2.0: select records and supply advisory interpretation. The request binds record_id to an enum of IDs actually supplied. This is not the final report summary, which includes locally copied values and quotations."
     }
   }
 }

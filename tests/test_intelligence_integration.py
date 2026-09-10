@@ -37,17 +37,17 @@ def endpoint(tmp_path, monkeypatch):
             state["requests"].append({"path": self.path, "body": body})
             packet = json.loads(body["messages"][-1]["content"])
             record = next(r for r in packet["records"] if r["value"] == "SYNTHETIC-SLIDE")
-            evidence = [{"record_id": record["id"], "quote": record["value"]}]
             summary = {
-                "overview": {"text": "The metadata includes a slide label.", "evidence": evidence},
+                "overview": {"text": "The metadata includes a slide label.",
+                             "record_ids": [record["id"]]},
                 "findings": [{
-                    "category": "identifier", "label": "Slide label", "value": record["value"],
-                    "interpretation": "This is a synthetic test label.", "evidence": evidence,
+                    "record_id": record["id"], "category": "identifier", "label": "Slide label",
+                    "interpretation": "This is a synthetic test label.",
                 }],
                 "cautions": [],
             }
             if state["mode"] == "bad-evidence":
-                summary["overview"]["evidence"][0]["quote"] = "INVENTED"
+                summary["overview"]["record_ids"][0] = "m999999"
             content = "not JSON" if state["mode"] == "bad-json" else json.dumps(summary)
             response = {
                 "id": "fixture-completion", "object": "chat.completion", "created": 1,
@@ -112,7 +112,10 @@ def test_actual_request_schema_identity_lifetime_and_failure_modes(endpoint, tmp
     assert request["path"] == "/v1/chat/completions"
     wire = request["body"]
     assert wire["response_format"]["type"] == "json_schema"
-    assert wire["response_format"]["json_schema"]["schema"] == metadata_summary_schema()
+    sent_packet = json.loads(wire["messages"][-1]["content"])
+    assert wire["response_format"]["json_schema"]["schema"] == metadata_summary_schema(
+        record_ids=[record["id"] for record in sent_packet["records"]],
+    )
     assert "tools" not in wire
     assert "DO_NOT_SEND_CURRENT_FILENAME" not in json.dumps(wire)
     runtime = sheetbend.Runtime().snapshot()

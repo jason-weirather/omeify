@@ -771,7 +771,7 @@ def _intelligence_tree(report: dict[str, Any], max_text_length: int | None) -> _
     coverage_node.children.extend(node(warning) for warning in coverage["warnings"])
     root.children.append(coverage_node)
     root.children.append(node(
-        "Quoted evidence was checked; interpretation may still be wrong or incomplete. "
+        "Values and quotations come from cited records; interpretation may be wrong or incomplete. "
         "No raster pixels inspected. This is not a deidentification or sharing clearance."
     ))
     return root

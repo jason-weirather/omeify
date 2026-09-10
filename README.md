@@ -538,9 +538,11 @@ flag or use model output to alter images.
 
 The summary looks for dates, identifiers, embedded paths and filenames, acquisition
 and scanner details, channel/marker labels, physical calibration and units, and
-software/processing provenance. Findings retain their source spelling and include
-quoted evidence. Internal OME object IDs are distinguished from specimen or
-person identifiers in the requested interpretation. Dates are not normalized into
+software/processing provenance. The model selects useful metadata records and
+interprets them; Python copies each selected record's exact value and quotation
+into the report. The model does not have to reproduce paths, dates, XML-decoded
+text, or Unicode correctly to preserve that evidence. Internal OME object IDs are
+distinguished from specimen or person identifiers in the requested interpretation. Dates are not normalized into
 an invented timezone or an assumed acquisition date.
 
 Omeify uses the existing Sheetbend configuration, not a second endpoint/key store:
@@ -609,22 +611,44 @@ omeify/schemas/tiff_inspection.schema.json          inspection schema 1.3
 omeify/schemas/metadata_intelligence.schema.json    intelligence schema 1.0
 ```
 
-The requested response schema is derived from the latter's summary definition.
-For grammar-based OpenAI-compatible servers, the model-facing copy is fully
+The packaged schema defines both the final `summary` and the model's smaller
+`model_response` selection contract. **Prompt protocol 2.0 selects records instead
+of asking the model to transcribe their values and quotations.** Each finding
+contains `record_id`, `category`, `label`, and `interpretation`; the overview and
+cautions contain `text` and `record_ids`. Every reference in the model-facing
+schema is restricted to an enum of the IDs actually supplied in this request.
+IDs are matched literally, not by list position or a guessed nearby record.
+
+For grammar-based OpenAI-compatible servers, the model-facing schema is fully
 inlined and keeps structural constraints (object shape, required fields, enums,
-and `additionalProperties`) while omitting regex, length, and array-count bounds
-that some backends cannot compile reliably. The complete packaged schema remains
-authoritative and is applied locally to every response, so this compatibility
-projection does not broaden what omeify accepts. Source identity, allowed scopes,
-coverage and the supplied evidence catalog are filled by omeify, not by the model.
-After full response-schema validation, each quote must occur verbatim in its
-referenced record and each extracted value must occur inside a cited quote. XML
-entity spellings are decoded during collection; evidence is checked against that
-extracted text. A failed request, invalid JSON, invented quote or invented extracted
-value is an error, not an empty “all clear” summary.
-The CLI exits nonzero and leaves an existing output report untouched. Run without
-`-i` for ordinary inspection. JSON validation and quote checking do not establish
-that the model's interpretation, classifications or coverage are correct.
+and `additionalProperties`) while omitting regex, length, and array-count bounds.
+The complete selection schema is validated locally before materialization. Omeify
+then checks each selected ID against the packet, copies its entire value into
+the final evidence quotation, and uses that same value for the corresponding
+finding. The materialized summary and complete report are validated against the
+full packaged report schema. Source identity, allowed scopes, coverage and the
+evidence catalog also come from omeify, not from the model.
+
+This removes exact-copy errors without fuzzy matching, Unicode normalization,
+path rewriting, accepting fabricated quotations, or silently discarding findings.
+Repeated IDs within a statement are deduplicated without changing their order.
+A composite/plain-text metadata record remains a complete record or collected
+excerpt rather than a model-selected substring; the interpretation can point out
+its interesting content. XML entity spellings are decoded by the collector, and
+that extracted text is preserved exactly. JSON contains the complete supplied
+value; `--max-text-length` still bounds its pretty-print preview.
+
+The final report layout remains intelligence schema **1.0**, with `prompt_version`
+**2.0** identifying record selection. Existing prompt-1.0 reports still validate.
+A failed request, invalid JSON, unknown reference, or violated local constraint
+is an error, not an empty “all clear” summary. Diagnostics identify the response
+field/index without echoing source values or model prose. The CLI exits nonzero
+and leaves an existing output report untouched. No retry, repair request, or
+source/model fallback is added. Run without `-i` for ordinary inspection.
+
+Exact source values and valid record references do **not** establish that the
+model chose the relevant record, interpreted it correctly, or found everything.
+Prose, classifications, and cautions remain advisory.
 
 > **Not deidentification or scientific validation.** A summary can miss information
 > or misinterpret genuine evidence. “Not reported” applies only to the supplied
@@ -763,8 +787,14 @@ print(packet["coverage"])
 ```
 
 `omeify.intelligence.summarize_metadata(packet)` is the explicit inference step;
-it returns the same schema-defined result that the inspector attaches. `metadata_summary_schema()` exposes the model-response schema for tests
-and integrations. Base tests use a model double; optional tests exercise real
+it returns the same schema-defined result that the inspector attaches.
+`metadata_summary_schema(record_ids=[record["id"] for record in packet["records"]])`
+exposes the exact model-facing schema for that packet; calling it without IDs
+returns the unbound selection schema for offline inspection. This is the selection
+protocol, not the materialized report summary. Caller-constructed packets must
+use records of at most 2,048 characters, as `collect_metadata()` already does;
+oversized records are rejected before inference rather than clipped silently.
+Base tests use a model double; optional tests exercise real
 Sheetbend selection/capability checks and the actual LLM/SDK adapter against a
 synthetic loopback server. These tests do not measure a model's scientific accuracy.
 

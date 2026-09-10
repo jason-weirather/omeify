@@ -41,13 +41,11 @@ def write_tiff(path: Path, description: str | None = None) -> None:
 
 def response_for(packet: dict) -> dict:
     record = next(r for r in packet["records"] if r["value"] == "SLIDE-017")
-    evidence = [{"record_id": record["id"], "quote": record["value"]}]
     return {
-        "overview": {"text": "Metadata includes a slide identifier.", "evidence": evidence},
+        "overview": {"text": "Metadata includes a slide identifier.", "record_ids": [record["id"]]},
         "findings": [{
-            "category": "identifier", "label": "Slide identifier", "value": "SLIDE-017",
+            "record_id": record["id"], "category": "identifier", "label": "Slide identifier",
             "interpretation": "A slide label, not necessarily a patient identifier.",
-            "evidence": evidence,
         }],
         "cautions": [],
     }
@@ -134,7 +132,9 @@ def test_summary_checks_evidence_and_request_contract(packet, model_double):
     sent, options = model_double["calls"][0]
     assert json.loads(sent) == packet
     assert options["stream"] is False
-    assert options["schema"] == ai.metadata_summary_schema()
+    assert options["schema"] == ai.metadata_summary_schema(
+        record_ids=[record["id"] for record in packet["records"]],
+    )
     assert options["options"] == {"max_tokens": 4096}
     assert "UNTRUSTED DATA" in options["system"]
     assert "tools" not in options and "attachments" not in options
@@ -157,9 +157,9 @@ def test_schema_is_packaged_authority(packet, model_double):
         '"maxItems"', '"minItems"', '"uniqueItems"',
     ):
         assert keyword not in serialized
-    assert model_schema["required"] == schema["$defs"]["summary"]["required"]
+    assert model_schema["required"] == schema["$defs"]["model_response"]["required"]
     assert model_schema["properties"]["findings"]["items"]["properties"]["category"]["enum"] == (
-        schema["$defs"]["finding"]["properties"]["category"]["enum"]
+        schema["$defs"]["finding_category"]["enum"]
     )
 
 
@@ -229,9 +229,9 @@ def test_invalid_json_is_not_repaired(packet, model_double, response):
 def test_schema_and_evidence_failures_are_not_all_clear(packet, model_double, change):
     summary = response_for(packet)
     if change == "unknown_record":
-        summary["findings"][0]["evidence"][0]["record_id"] = "m999999"
+        summary["findings"][0]["record_id"] = "m999999"
     elif change == "invented_quote":
-        summary["overview"]["evidence"][0]["quote"] = "INVENTED_SECRET"
+        summary["overview"]["quote"] = "INVENTED_SECRET"
     elif change == "invented_value":
         summary["findings"][0]["value"] = "INVENTED_SECRET"
     else:
@@ -477,7 +477,8 @@ def test_terminal_controls_are_escaped_but_json_retains_metadata(image_path, pac
     assert "\x1b" not in text and "\u202e" not in text
     assert r"\x1b" in text and r"\u202e" in text
     reported = json.loads(inspector.to_json())["intelligence"]["summary"]["overview"]
-    assert reported == summary["overview"]
+    assert reported["text"] == summary["overview"]["text"]
+    assert [e["record_id"] for e in reported["evidence"]] == summary["overview"]["record_ids"]
 
 
 def test_intelligence_extra_does_not_change_base_dependencies():
@@ -516,3 +517,220 @@ def test_cli_refuses_hardlinked_image_output(image_path, tmp_path, model_double)
     assert result.exit_code == 2
     assert image_path.read_bytes() == before
     assert not model_double["calls"]
+
+
+@pytest.mark.parametrize("value", [
+    r"C:\lab\2025\scan 01.tif",
+    r"\\server\share\sample\original.tif",
+    'Source "quoted" & exported\r\nwith\tspaces',
+    "0.498581 µm; μm is a different spelling",
+    "cafe\u0301 / café / specimen-β / 🔬",
+    "04/03/2025 10:20:30",
+    "000017",
+    "0.500000",
+    "x" * 2048,
+])
+def test_selected_values_and_quotes_are_copied_exactly(packet, model_double, value):
+    record = next(r for r in packet["records"] if r["value"] == "SLIDE-017")
+    summary = response_for(packet)
+    record["value"] = value
+    before = deepcopy(packet)
+    model_double["response"] = json.dumps(summary)
+    result = ai.summarize_metadata(packet)
+    finding = result["summary"]["findings"][0]
+    assert finding["value"] == value
+    assert finding["evidence"] == [{"record_id": record["id"], "quote": value}]
+    assert result["summary"]["overview"]["evidence"][0]["quote"] == value
+    assert packet == before
+    assert result["schema_version"] == "1.0"
+    assert result["prompt_version"] == "2.0"
+    # The model emitted neither literal values nor quotes. It cannot corrupt them.
+    assert "value" not in summary["findings"][0]
+    assert "quote" not in summary["overview"]
+    assert len(model_double["calls"]) == 1
+
+
+def test_model_schema_binds_every_reference_to_only_supplied_ids():
+    ids = ["m27", "m2", "m999"]  # Sparse and deliberately not in numeric order.
+    schema = ai.metadata_summary_schema(record_ids=ids)
+    props = schema["properties"]
+    selectors = [
+        props["overview"]["properties"]["record_ids"]["items"],
+        props["findings"]["items"]["properties"]["record_id"],
+        props["cautions"]["items"]["properties"]["record_ids"]["items"],
+    ]
+    for selector in selectors:
+        assert selector == {"type": "string", "enum": ids}
+        assert Draft202012Validator(selector).is_valid("m27")
+        assert not Draft202012Validator(selector).is_valid("m1")
+    for keyword in ('"$ref"', '"$defs"', '"pattern"', '"maxLength"', '"maxItems"'):
+        assert keyword not in json.dumps(schema)
+    unbound = ai.metadata_summary_schema()
+    assert "enum" not in unbound["properties"]["findings"]["items"]["properties"]["record_id"]
+    schema["properties"]["findings"]["items"]["properties"]["record_id"]["enum"].append("m5")
+    fresh = ai.metadata_summary_schema(record_ids=ids)
+    assert fresh["properties"]["findings"]["items"]["properties"]["record_id"]["enum"] == ids
+
+
+@pytest.mark.parametrize("ids", [[], ["m1", "m1"], ["x1"], [1], [True], [None]])
+def test_schema_helper_rejects_invalid_id_catalogs(ids):
+    with pytest.raises(ValueError):
+        ai.metadata_summary_schema(record_ids=ids)
+
+
+def test_schema_helper_rejects_string_in_place_of_catalog():
+    with pytest.raises(TypeError):
+        ai.metadata_summary_schema(record_ids="m1")
+
+
+@pytest.mark.parametrize("location", ["overview", "finding", "caution"])
+def test_unknown_reference_is_locally_rejected_with_precise_safe_location(
+    packet, model_double, location,
+):
+    summary = response_for(packet)
+    if location == "overview":
+        summary["overview"]["record_ids"] = ["m999999"]
+        expected = "$.overview.record_ids[0]"
+    elif location == "finding":
+        summary["findings"][0]["record_id"] = "m999999"
+        expected = "$.findings[0].record_id"
+    else:
+        summary["cautions"] = [{"text": "PRIVATE_PROSE", "record_ids": ["m999999"]}]
+        expected = "$.cautions[0].record_ids[0]"
+    model_double["response"] = json.dumps(summary)
+    # The model double deliberately ignores the ID enum, as a defective endpoint might.
+    with pytest.raises(ai.IntelligenceError) as error:
+        ai.summarize_metadata(packet)
+    assert expected in str(error.value)
+    assert "record ID that was not supplied" in str(error.value)
+    assert "PRIVATE_PROSE" not in str(error.value)
+    assert "SLIDE-017" not in str(error.value)
+    assert len(model_double["calls"]) == 1
+
+
+@pytest.mark.parametrize(("change", "path"), [
+    ("empty-evidence", "$.overview.record_ids"),
+    ("too-many-references", "$.overview.record_ids"),
+    ("too-many-findings", "$.findings"),
+    ("too-many-cautions", "$.cautions"),
+    ("long-label", "$.findings[0].label"),
+    ("long-interpretation", "$.findings[0].interpretation"),
+    ("long-overview", "$.overview.text"),
+])
+def test_full_response_constraints_are_checked_before_materialization(
+    packet, model_double, change, path,
+):
+    summary = response_for(packet)
+    if change == "empty-evidence":
+        summary["overview"]["record_ids"] = []
+    elif change == "too-many-references":
+        summary["overview"]["record_ids"] *= 9
+    elif change == "too-many-findings":
+        summary["findings"] *= 81
+    elif change == "too-many-cautions":
+        summary["cautions"] = [deepcopy(summary["overview"])] * 17
+    elif change == "long-label":
+        summary["findings"][0]["label"] = "X" * 101
+    elif change == "long-interpretation":
+        summary["findings"][0]["interpretation"] = "X" * 501
+    else:
+        summary["overview"]["text"] = "X" * 801
+    assert Draft202012Validator(ai.metadata_summary_schema()).is_valid(summary)
+    model_double["response"] = json.dumps(summary)
+    with pytest.raises(ai.IntelligenceError) as error:
+        ai.summarize_metadata(packet)
+    assert path in str(error.value)
+    assert "Intelligence response failed JSON Schema validation" in str(error.value)
+    assert len(model_double["calls"]) == 1
+
+
+def test_multirecord_statements_preserve_values_locations_and_reference_order(packet, model_double):
+    summary = response_for(packet)
+    ids = [r["id"] for r in reversed(packet["records"][:3])]
+    summary["overview"]["record_ids"] = [*ids, ids[0]]
+    summary["cautions"] = [{"text": "Compare these fields.", "record_ids": ids[:2]}]
+    model_double["response"] = json.dumps(summary)
+    report = ai.summarize_metadata(packet)
+    overview = report["summary"]["overview"]
+    assert [e["record_id"] for e in overview["evidence"]] == ids
+    catalog = {r["id"]: r for r in packet["records"]}
+    for statement in (overview, *report["summary"]["cautions"]):
+        for evidence in statement["evidence"]:
+            assert evidence["quote"] == catalog[evidence["record_id"]]["value"]
+    assert report["records"] == packet["records"]
+
+
+def test_valid_record_is_not_reassigned_by_position_or_value_similarity(packet, model_double):
+    summary = response_for(packet)
+    wanted = next(r for r in packet["records"] if r["value"] == "SLIDE-017")
+    other = next(r for r in packet["records"] if r["id"] != wanted["id"])
+    other["value"] = "SLIDE-018"
+    packet["records"].reverse()
+    model_double["response"] = json.dumps(summary)
+    finding = ai.summarize_metadata(packet)["summary"]["findings"][0]
+    assert finding["value"] == "SLIDE-017"
+    assert finding["evidence"][0]["record_id"] == wanted["id"]
+
+
+def test_overlong_record_is_rejected_before_inference_without_silent_clipping(packet, model_double):
+    packet["records"][0]["value"] = "X" * 2049
+    with pytest.raises(ai.IntelligenceError, match=r"collect_metadata\(\)"):
+        ai.summarize_metadata(packet)
+    assert not model_double["calls"]
+    assert packet["records"][0]["value"] == "X" * 2049
+
+
+def test_whitespace_only_record_cannot_become_a_finding(packet, model_double):
+    summary = response_for(packet)
+    record = next(r for r in packet["records"] if r["value"] == "SLIDE-017")
+    record["value"] = " \t\r\n"
+    model_double["response"] = json.dumps(summary)
+    with pytest.raises(ai.IntelligenceError, match="whitespace-only record"):
+        ai.summarize_metadata(packet)
+
+
+def test_existing_prompt_1_reports_still_satisfy_report_schema(packet, model_double):
+    report = ai.summarize_metadata(packet)
+    report["prompt_version"] = "1.0"
+    # The old protocol allowed an exact substring instead of the complete field.
+    finding = report["summary"]["findings"][0]
+    finding["value"] = "017"
+    finding["evidence"][0]["quote"] = "017"
+    resource = files("omeify.schemas").joinpath("metadata_intelligence.schema.json")
+    Draft202012Validator(json.loads(resource.read_text())).validate(report)
+
+
+def test_cli_unknown_record_error_preserves_existing_report_and_hides_prose(
+    image_path, packet, tmp_path, model_double,
+):
+    summary = response_for(packet)
+    summary["findings"][0]["record_id"] = "m999999"
+    summary["findings"][0]["interpretation"] = "PRIVATE_PROSE"
+    model_double["response"] = json.dumps(summary)
+    output = tmp_path / "previous.json"
+    output.write_text("previous report")
+    result = CliRunner().invoke(main, ["inspect", str(image_path), "-i", "-o", str(output)])
+    assert result.exit_code == 1
+    assert "$.findings[0].record_id" in result.output
+    assert "PRIVATE_PROSE" not in result.output
+    assert output.read_text() == "previous report"
+    assert len(model_double["calls"]) == 1
+
+
+def test_caller_mutation_cannot_change_the_evidence_snapshot(packet, model_double, monkeypatch):
+    original_schema = ai.metadata_summary_schema
+    original = deepcopy(packet)
+
+    def edit_caller_packet(**kwargs):
+        for record in packet["records"]:
+            if record["value"] == "SLIDE-017":
+                record["value"] = "NOT_THE_SENT_VALUE"
+                record["locations"] = ["NOT_THE_SENT_LOCATION"]
+        return original_schema(**kwargs)
+
+    monkeypatch.setattr(ai, "metadata_summary_schema", edit_caller_packet)
+    result = ai.summarize_metadata(packet)
+    assert json.loads(model_double["calls"][0][0]) == original
+    assert result["records"] == original["records"]
+    assert result["summary"]["findings"][0]["value"] == "SLIDE-017"
+    assert result["records"] != packet["records"]
