@@ -80,18 +80,65 @@ def _definition_schema(name: str) -> dict[str, Any]:
     return {"$schema": schema["$schema"], **schema["$defs"][name], "$defs": schema["$defs"]}
 
 
-def metadata_summary_schema() -> dict[str, Any]:
-    """Return the model-response schema derived from the packaged report contract.
+_MODEL_SCHEMA_OMIT = frozenset({
+    "$schema", "$id", "$defs", "title", "description",
+    "pattern", "minLength", "maxLength", "minItems", "maxItems", "uniqueItems",
+    "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+    "minProperties", "maxProperties",
+})
 
-    Only the response's reachable definitions are sent to the endpoint. The
-    coverage, source identity and evidence catalog are application-owned data.
+
+def _model_schema_projection(value: Any, definitions: dict[str, Any]) -> Any:
+    """Inline local references and keep only structural constraints for inference.
+
+    Some OpenAI-compatible llama.cpp-family servers compile JSON Schema into a
+    sampling grammar and reject otherwise valid schemas when references, large
+    repetition bounds, or length constraints make that grammar too complex.
+    Omeify therefore sends a small structural projection to the model and then
+    validates the returned object against the full packaged schema locally.
     """
 
-    schema = _definition_schema("summary")
-    schema["$defs"] = {
-        key: schema["$defs"][key] for key in ("evidence", "statement", "finding")
+    if isinstance(value, list):
+        return [_model_schema_projection(item, definitions) for item in value]
+    if not isinstance(value, dict):
+        return deepcopy(value)
+
+    reference = value.get("$ref")
+    if reference is not None:
+        prefix = "#/$defs/"
+        if not isinstance(reference, str) or not reference.startswith(prefix):
+            raise IntelligenceError(
+                "The packaged intelligence schema contains an unsupported reference."
+            )
+        name = reference[len(prefix):]
+        if name not in definitions:
+            raise IntelligenceError("The packaged intelligence schema contains an unknown reference.")
+        siblings = {key: item for key, item in value.items() if key != "$ref"}
+        if siblings:
+            raise IntelligenceError(
+                "The packaged intelligence schema uses reference siblings unexpectedly."
+            )
+        return _model_schema_projection(definitions[name], definitions)
+
+    return {
+        key: _model_schema_projection(item, definitions)
+        for key, item in value.items()
+        if key not in _MODEL_SCHEMA_OMIT
     }
-    return schema
+
+
+def metadata_summary_schema() -> dict[str, Any]:
+    """Return the compact JSON Schema sent to the selected inference endpoint.
+
+    The packaged metadata-intelligence schema remains authoritative. This
+    model-facing projection is fully dereferenced and intentionally omits
+    length/count/regex constraints that are re-applied by local validation after
+    inference. That keeps structured output useful across stricter grammar-based
+    OpenAI-compatible servers without weakening the accepted omeify result.
+    """
+
+    schema = _schema()
+    return _model_schema_projection(schema["$defs"]["summary"], schema["$defs"])
 
 
 def _validate(value: Any, schema: dict[str, Any], what: str) -> None:
@@ -239,9 +286,18 @@ def summarize_metadata(
             known_errors = (ConfigError, CredentialError, DependencyError, SelectionError)
         if isinstance(exc, known_errors):
             raise IntelligenceError(str(exc)) from exc
+        detail = str(exc).lower()
+        if "failed to initialize samplers" in detail and "failed to parse grammar" in detail:
+            raise IntelligenceError(
+                "The selected endpoint rejected the structured-output grammar while initializing "
+                "samplers. This is a JSON-Schema/grammar compatibility failure, not a "
+                "context-limit diagnosis. No source/model fallback was attempted."
+            ) from exc
+        status = getattr(exc, "status_code", None)
+        status_text = f", HTTP {status}" if isinstance(status, int) else ""
         raise IntelligenceError(
-            f"Intelligence request failed ({type(exc).__name__}); no source/model fallback was "
-            "attempted. Check the selected Sheetbend source and its context/output limits."
+            f"Intelligence request failed ({type(exc).__name__}{status_text}); no source/model "
+            "fallback was attempted. Provider response details were withheld."
         ) from exc
     summary = _parse_response(text, records)
     result = {

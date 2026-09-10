@@ -146,11 +146,32 @@ def test_summary_checks_evidence_and_request_contract(packet, model_double):
 def test_schema_is_packaged_authority(packet, model_double):
     resource = files("omeify.schemas").joinpath("metadata_intelligence.schema.json")
     schema = json.loads(resource.read_text())
+    model_schema = ai.metadata_summary_schema()
     Draft202012Validator.check_schema(schema)
-    Draft202012Validator.check_schema(ai.metadata_summary_schema())
+    Draft202012Validator.check_schema(model_schema)
     Draft202012Validator(schema).validate(ai.summarize_metadata(packet))
-    assert ai.metadata_summary_schema()["properties"] == schema["$defs"]["summary"]["properties"]
-    assert set(ai.metadata_summary_schema()["$defs"]) == {"evidence", "statement", "finding"}
+
+    serialized = json.dumps(model_schema)
+    for keyword in (
+        '"$ref"', '"$defs"', '"pattern"', '"maxLength"', '"minLength"',
+        '"maxItems"', '"minItems"', '"uniqueItems"',
+    ):
+        assert keyword not in serialized
+    assert model_schema["required"] == schema["$defs"]["summary"]["required"]
+    assert model_schema["properties"]["findings"]["items"]["properties"]["category"]["enum"] == (
+        schema["$defs"]["finding"]["properties"]["category"]["enum"]
+    )
+
+
+def test_full_local_schema_still_rejects_constraints_omitted_from_model_schema(
+    packet, model_double,
+):
+    summary = response_for(packet)
+    summary["findings"][0]["label"] = "x" * 101
+    assert Draft202012Validator(ai.metadata_summary_schema()).is_valid(summary)
+    model_double["response"] = json.dumps(summary)
+    with pytest.raises(ai.IntelligenceError, match="failed JSON Schema validation"):
+        ai.summarize_metadata(packet)
 
 
 def test_inspector_attaches_once_and_uses_independent_metadata_budget(image_path, model_double):
@@ -230,6 +251,19 @@ def test_provider_error_is_sanitized_no_retry_and_report_not_modified(image_path
         inspector.summarize_metadata()
     assert "DO_NOT_ECHO" not in str(error.value)
     assert inspector.report == before
+    assert len(model_double["calls"]) == 1
+
+
+def test_grammar_rejection_gets_specific_sanitized_diagnosis(image_path, model_double):
+    inspector = TiffInspector(image_path)
+    model_double["response"] = RuntimeError(
+        "Failed to initialize samplers: failed to parse grammar; DO_NOT_ECHO_SECRET"
+    )
+    with pytest.raises(ai.IntelligenceError, match="JSON-Schema/grammar compatibility") as error:
+        inspector.summarize_metadata()
+    assert "context-limit" in str(error.value)
+    assert "DO_NOT_ECHO" not in str(error.value)
+    assert "intelligence" not in inspector.report
     assert len(model_double["calls"]) == 1
 
 

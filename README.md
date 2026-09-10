@@ -610,12 +610,18 @@ omeify/schemas/metadata_intelligence.schema.json    intelligence schema 1.0
 ```
 
 The requested response schema is derived from the latter's summary definition.
-Source identity, allowed scopes, coverage and the supplied evidence catalog are
-filled by omeify, not by the model. After response-schema validation, each quote
-must occur verbatim in its referenced record and each extracted value must occur
-inside a cited quote. XML entity spellings are decoded during collection; evidence
-is checked against that extracted text. A failed request, invalid JSON, invented
-quote or invented extracted value is an error, not an empty “all clear” summary.
+For grammar-based OpenAI-compatible servers, the model-facing copy is fully
+inlined and keeps structural constraints (object shape, required fields, enums,
+and `additionalProperties`) while omitting regex, length, and array-count bounds
+that some backends cannot compile reliably. The complete packaged schema remains
+authoritative and is applied locally to every response, so this compatibility
+projection does not broaden what omeify accepts. Source identity, allowed scopes,
+coverage and the supplied evidence catalog are filled by omeify, not by the model.
+After full response-schema validation, each quote must occur verbatim in its
+referenced record and each extracted value must occur inside a cited quote. XML
+entity spellings are decoded during collection; evidence is checked against that
+extracted text. A failed request, invalid JSON, invented quote or invented extracted
+value is an error, not an empty “all clear” summary.
 The CLI exits nonzero and leaves an existing output report untouched. Run without
 `-i` for ordinary inspection. JSON validation and quote checking do not establish
 that the model's interpretation, classifications or coverage are correct.
