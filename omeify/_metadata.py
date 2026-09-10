@@ -217,7 +217,10 @@ def _priority(record: dict[str, Any]) -> int:
     return 2
 
 
-def collect_metadata(tiff: tifffile.TiffFile, *, max_chars: int = 16_000) -> dict[str, Any]:
+def collect_metadata(
+    tiff: tifffile.TiffFile, *, max_chars: int = 16_000,
+    calibration: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Collect an inspectable inference packet without reading raster pixels.
 
     ``max_chars`` caps the serialized records array, including JSON escaping and
@@ -226,6 +229,13 @@ def collect_metadata(tiff: tifffile.TiffFile, *, max_chars: int = 16_000) -> dic
     precedes prioritization so identifiers late in a header are not discarded
     merely because the ordinary inspection preview is short. Per-IFD round-robin
     selection avoids spending the entire budget on the first description.
+
+    ``calibration=`` can supply the same deterministic calibration report built
+    by TiffInspector. Its bounded numeric summaries become explicitly computed
+    evidence records, never raw TIFF metadata. At most one quarter of max_chars
+    is reserved for these records, with mismatches first and omissions counted.
+    Without this argument the packet contains raw metadata only; this function
+    never enumerates series or opens OME companion files to obtain context.
 
     This function is offline and requires no intelligence dependencies. The
     packet includes identifying source metadata and must be handled accordingly.
@@ -301,6 +311,27 @@ def collect_metadata(tiff: tifffile.TiffFile, *, max_chars: int = 16_000) -> dic
     queues = deque(deque(sorted(group, key=_priority)) for group in groups.values())
     selected: list[dict[str, Any]] = []
     used = 2  # JSON array brackets
+    computed = []
+    if calibration is not None:
+        from ._calibration import calibration_context
+
+        summaries = calibration_context(calibration)
+        priority = {"mismatch": 0, "partial": 1, "not_comparable": 2, "consistent": 3}
+        for index in sorted(
+            range(len(summaries)),
+            key=lambda i: priority[calibration["series"][i]["status"]],
+        ):
+            computed.append({
+                "id": f"m{len(records) + index + 1}", "origin": "computed",
+                "locations": [f"omeify/calibration/series[{index}]"],
+                "value": summaries[index], "truncated": False, "occurrences": 1,
+            })
+        for record in computed:
+            size = len(_json(record)) + (1 if selected else 0)
+            if len(record["value"]) <= _MAX_VALUE_CHARS and used + size <= max_chars // 4:
+                selected.append(record)
+                used += size
+    computed_included = len(selected)
     while queues:
         queue = queues.popleft()
         record = queue.popleft()
@@ -311,10 +342,13 @@ def collect_metadata(tiff: tifffile.TiffFile, *, max_chars: int = 16_000) -> dic
         if queue:
             queues.append(queue)
     coverage.update(
-        records_available=len(records), records_included=len(selected),
+        records_available=len(records) + len(computed), records_included=len(selected),
         records_truncated=sum(record["truncated"] for record in selected),
         metadata_chars=used,
     )
+    if calibration is not None:
+        coverage["computed_records_available"] = len(computed)
+        coverage["computed_records_included"] = computed_included
     if len(coverage["warnings"]) > 20:
         coverage["warnings"] = coverage["warnings"][:20] + ["Further directory warnings omitted."]
     return {"records": selected, "coverage": coverage}

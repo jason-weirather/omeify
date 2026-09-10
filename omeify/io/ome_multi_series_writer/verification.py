@@ -10,6 +10,7 @@ from omeify.io._writer import PreparedImage
 from omeify.io._writer.verification import (
     PYRAMID_NAMESPACE,
     verify_container,
+    verify_physical_calibration,
     verify_prepared_images,
 )
 from omeify.utils.generate_ome_xml import OMEIFY_PROVENANCE_NAMESPACE
@@ -124,6 +125,7 @@ def verify_output(
             )
             verification["provenance_annotation_linked"] = True
 
+        verification.update(verify_physical_calibration(output, root, images_expected))
         raster = verify_prepared_images(output, images_expected)
         verification["series_layouts_match"] = True
         verification["top_level_ifd_count_matches"] = True

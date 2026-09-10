@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/calibration.schema.json",
+  "title": "omeify deterministic TIFF/OME calibration comparison",
+  "description": "Numerical consistency of mapped local full-resolution X/Y metadata, not acquisition accuracy or format conformance. SubIFDs are deliberately excluded. Missing/ambiguous axes, pages, or mappings do not pass.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scope",
+    "comparison_unit",
+    "relative_tolerance",
+    "absolute_tolerance_um",
+    "max_page_entries",
+    "series"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "scope": {
+      "const": "full_resolution_xy"
+    },
+    "comparison_unit": {
+      "const": "µm"
+    },
+    "relative_tolerance": {
+      "type": "number",
+      "minimum": 0
+    },
+    "absolute_tolerance_um": {
+      "type": "number",
+      "minimum": 0
+    },
+    "max_page_entries": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "series": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/series"
+      }
+    }
+  },
+  "$defs": {
+    "ome_axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "unit",
+        "effective_unit",
+        "unit_defaulted",
+        "pixel_size_um",
+        "issue"
+      ],
+      "properties": {
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effective_unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit_defaulted": {
+          "type": "boolean"
+        },
+        "pixel_size_um": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "issue": {
+          "enum": [
+            null,
+            "missing_value",
+            "invalid_value",
+            "missing_unit",
+            "nonphysical_unit",
+            "unsupported_unit"
+          ]
+        }
+      }
+    },
+    "tiff_axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rational",
+        "pixels_per_unit",
+        "pixel_size_um",
+        "issue"
+      ],
+      "properties": {
+        "rational": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
+        "pixels_per_unit": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "pixel_size_um": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "issue": {
+          "enum": [
+            null,
+            "missing_tag",
+            "unreadable_tag",
+            "nonphysical_unit",
+            "unsupported_unit",
+            "invalid_resolution"
+          ]
+        }
+      }
+    },
+    "tiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resolution_unit",
+        "effective_resolution_unit",
+        "unit_defaulted",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "resolution_unit": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "effective_resolution_unit": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "unit_defaulted": {
+          "type": "boolean"
+        },
+        "x": {
+          "$ref": "#/$defs/tiff_axis"
+        },
+        "y": {
+          "$ref": "#/$defs/tiff_axis"
+        }
+      }
+    },
+    "axis_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "relative_difference"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "consistent",
+            "mismatch",
+            "not_comparable"
+          ]
+        },
+        "relative_difference": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ifd",
+        "tiff",
+        "axes",
+        "status"
+      ],
+      "properties": {
+        "ifd": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tiff": {
+          "$ref": "#/$defs/tiff"
+        },
+        "axes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "$ref": "#/$defs/axis_comparison"
+            },
+            "y": {
+              "$ref": "#/$defs/axis_comparison"
+            }
+          }
+        },
+        "status": {
+          "enum": [
+            "consistent",
+            "mismatch",
+            "partial",
+            "not_comparable"
+          ]
+        }
+      }
+    },
+    "series": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "series_index",
+        "ome_image_index",
+        "mapping_reason",
+        "status",
+        "ome",
+        "pages_total",
+        "pages_checked",
+        "scan_limited",
+        "checks"
+      ],
+      "properties": {
+        "series_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ome_image_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "mapping_reason": {
+          "enum": [
+            "local_tiff_data",
+            "no_ome",
+            "ambiguous_tiff_data",
+            "unmapped_ifd",
+            "incomplete_local_pages",
+            "incomplete_tiff_data",
+            "not_full_resolution_geometry",
+            "unreadable_ome",
+            "unsafe_ome",
+            "ome_scan_limit"
+          ]
+        },
+        "status": {
+          "enum": [
+            "consistent",
+            "mismatch",
+            "partial",
+            "not_comparable"
+          ]
+        },
+        "ome": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "x",
+                "y"
+              ],
+              "properties": {
+                "x": {
+                  "$ref": "#/$defs/ome_axis"
+                },
+                "y": {
+                  "$ref": "#/$defs/ome_axis"
+                }
+              }
+            }
+          ]
+        },
+        "pages_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pages_checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scan_limited": {
+          "type": "boolean"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/page"
+          }
+        }
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ from .model import PreparedImage
 from .verification import (
     PYRAMID_NAMESPACE,
     verify_container,
+    verify_physical_calibration,
     verify_prepared_images,
 )
 
@@ -152,6 +153,7 @@ def verify_single_output(
                 )
         verification["pyramid_annotation_linked"] = True
 
+        verification.update(verify_physical_calibration(output, root, (prepared,)))
         raster = verify_prepared_images(output, (prepared,))
         verification["dtype_matches_source"] = True
         verification["axes_match"] = True

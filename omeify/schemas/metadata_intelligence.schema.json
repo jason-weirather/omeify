@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jason-weirather/omeify/schemas/metadata_intelligence.schema.json",
   "title": "omeify metadata intelligence report",
-  "description": "Optional advisory inspection result with locally collected metadata evidence. TIFF directory locations identify storage; OME Image indices in XML paths are not asserted to be TIFF series indices. Not a deidentification or pixel quality assessment.",
+  "description": "Optional advisory inspection result with locally collected metadata evidence. TIFF directory locations identify storage; OME Image indices in XML paths are not asserted to be TIFF series indices. Not a deidentification or pixel quality assessment. Schema 1.1 permits explicitly computed calibration records and their coverage counts; prompt 2.1 explains reciprocal TIFF density and OME pixel length conventions.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,12 +20,16 @@
       "const": "omeify.schemas/metadata_intelligence.schema.json"
     },
     "schema_version": {
-      "const": "1.0"
+      "enum": [
+        "1.0",
+        "1.1"
+      ]
     },
     "prompt_version": {
       "enum": [
         "1.0",
-        "2.0"
+        "2.0",
+        "2.1"
       ]
     },
     "source": {
@@ -224,6 +228,13 @@
         "occurrences": {
           "type": "integer",
           "minimum": 1
+        },
+        "origin": {
+          "enum": [
+            "metadata",
+            "computed"
+          ],
+          "description": "Absent means source metadata, as in schema 1.0. Computed calibration evidence is generated locally by omeify, not stored in the TIFF."
         }
       }
     },
@@ -307,6 +318,14 @@
           "items": {
             "type": "string"
           }
+        },
+        "computed_records_available": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "computed_records_included": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

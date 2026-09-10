@@ -542,8 +542,8 @@ def test_selected_values_and_quotes_are_copied_exactly(packet, model_double, val
     assert finding["evidence"] == [{"record_id": record["id"], "quote": value}]
     assert result["summary"]["overview"]["evidence"][0]["quote"] == value
     assert packet == before
-    assert result["schema_version"] == "1.0"
-    assert result["prompt_version"] == "2.0"
+    assert result["schema_version"] == "1.1"
+    assert result["prompt_version"] == "2.1"
     # The model emitted neither literal values nor quotes. It cannot corrupt them.
     assert "value" not in summary["findings"][0]
     assert "quote" not in summary["overview"]
@@ -691,6 +691,7 @@ def test_whitespace_only_record_cannot_become_a_finding(packet, model_double):
 
 def test_existing_prompt_1_reports_still_satisfy_report_schema(packet, model_double):
     report = ai.summarize_metadata(packet)
+    report["schema_version"] = "1.0"
     report["prompt_version"] = "1.0"
     # The old protocol allowed an exact substring instead of the complete field.
     finding = report["summary"]["findings"][0]

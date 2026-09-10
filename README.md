@@ -211,7 +211,8 @@ physical-size metadata is not combined with TIFF tags; supply an explicit overri
 
 TIFF resolution values are interpreted as pixels per physical unit, converted to micrometers for
 inch or centimeter source units, and rounded to six significant digits to avoid carrying rational
-encoding noise into OME metadata.
+encoding noise into OME metadata. This reader normalization is separate from the
+inspection consistency check, which uses the original rational tags without that rounding.
 
 When no usable calibration remains, provide an explicit override:
 
@@ -516,8 +517,58 @@ omeify/schemas/tiff_inspection.schema.json
 
 Inspection reports TIFF-tag-derived and OME-declared calibration separately. For OME-TIFF,
 channel names, dimensions, dimension order, and OME physical sizes are parsed from OME-XML rather
-than guessed from TIFF pages. Inspection also reports the bundled MITI-header assessment and
-additional OME metadata outside omeify's minimized vocabulary.
+than guessed from TIFF pages. Series metadata is associated through local `TiffData` ranges and
+full-resolution geometry, not an assumption that TIFF series and OME Image indices coincide.
+Ambiguous or incomplete associations remain unassigned. Inspection also reports the bundled
+MITI-header assessment and additional OME metadata outside omeify's minimized vocabulary.
+
+#### Deterministic calibration agreement
+
+Every inspection, including detail 0 and runs without intelligence, compares **full-resolution
+X/Y** calibration where a local OME Image can be mapped unambiguously to the series' physical
+IFDs. The result is stored in `report["calibration"]`, defined by the packaged
+`omeify/schemas/calibration.schema.json` contract (version 1.0), and rendered under each series.
+
+TIFF `XResolution` and `YResolution` are **pixels per length**; OME `PhysicalSizeX` and
+`PhysicalSizeY` are **length per pixel**. TIFF's centimeter encoding and OME's µm encoding are
+compatible: 20,000 pixels/cm equals 0.5 µm/pixel. Omeify continues to write TIFF
+`ResolutionUnit=CENTIMETER` and explicit OME physical-size units, normally µm, with no new
+writer option or unit-policy change.
+
+The check converts both axes independently to µm/pixel using original TIFF rational values.
+Its documented tolerance is **1e-5 relative (10 parts per million), with zero absolute tolerance**:
+`abs(a - b) <= 1e-5 * max(abs(a), abs(b))`. This accommodates the existing six-significant-digit
+source normalization; it is not an estimate of microscope measurement uncertainty.
+
+| Result | Meaning |
+|---|---|
+| `consistent` | Every checked base-plane X/Y value agrees and all base-plane entries were checked. |
+| `mismatch` | At least one comparable X or Y value differs beyond the numerical tolerance. It does not decide which declaration is correct. |
+| `partial` | Some comparisons agree, but other values or entries cannot be compared. |
+| `not_comparable` | There is no usable comparison, for example no OME header, missing/nonphysical units, or an ambiguous mapping. It does **not** mean the image is uncalibrated. |
+
+The check reads real IFDs behind lightweight frames rather than inheriting their keyframe's
+calibration. It does not fill missing values from another axis or page. An absent TIFF
+`ResolutionUnit` uses TIFF's **inch** default and is flagged as defaulted; explicit unit 1 gives
+no absolute scale. Absent physical-size units in OME **2016-06** use its **µm** default and are
+flagged too. This does not add missing attributes to the source or make omeify's explicit-unit
+MITI-header requirement pass. Unknown units remain non-comparable.
+
+This is deliberately a base-plane check. SubIFDs have different sampling scales and are never
+compared directly against base OME sizes. It does not infer a resampling factor for arbitrary
+third-party pyramids from rounded dimensions. The shared writer independently verifies its
+known base and `2**level` pyramid scales against the intended pixel size before atomic install,
+including odd-sized images. Internal agreement cannot prove the original acquisition calibration
+was correct.
+
+Inspection bounds this check to **4,096 base-plane entries per file**, not per series, and an
+**8,388,608-character OME-XML limit** (bytes for byte-valued XML). The report retains page counts, skipped comparisons,
+original rational values, normalized lengths, unit-default flags, mapping reasons, per-axis
+relative differences, and scan-limit flags. Incomplete coverage never becomes `consistent`.
+Unresolved companion UUIDs are not followed or matched by filename. These checks do not perform
+full OME mapping validation, read raster pixels, edit images, or change inspection's exit status:
+a valid diagnostic report can describe a mismatch. Writer verification, in contrast, rejects a
+mismatch before installing the output.
 
 > **Inspection is not deidentification.** Text and JSON reports may contain source paths,
 > filenames, TIFF tags, vendor XML, scanner fields, or other identifying values. Review them before
@@ -576,16 +627,27 @@ Sources are cited by TIFF directory and metadata field. OME Image indices in XML
 paths are not assumed to equal TIFF series indices, and file-wide OME metadata is
 not incorrectly attributed only to the first stored plane.
 
-The model receives those records, not the file's current path/name, filesystem
-timestamps, ordinary inspection warnings, pixels, or attachments. Paths already
+The inspector also adds bounded, explicitly `origin="computed"` evidence records from its
+**same deterministic calibration report**. These records contain numeric results, mapping and
+coverage information, not file paths or arbitrary diagnostic exception text. They are labeled
+as computed evidence in the text tree, rather than presented as strings embedded in the TIFF.
+The system prompt explains reciprocal TIFF densities, centimeter/inch conversions, OME lengths,
+unit defaults, and the difference between a true mismatch and insufficient information. The
+model's prose remains advisory and does not replace or alter the deterministic verdict.
+
+The model receives these source and computed records, not the file's current path/name, filesystem
+timestamps, general inspection warnings, pixels, or attachments. Paths already
 embedded in metadata are intentionally included. It gets no callable tools or
 permission to open embedded paths/URLs. XML DTDs and known binary/pixel blocks are
 omitted; external XML entities are never expanded. No prompt or response log is
 written by omeify.
 
 The default **16,000-character serialized-record budget** includes record locations
-and JSON escaping, but excludes the small coverage object, instructions, response
-schema, and output. It is not a token/context-window guarantee. To change it:
+and JSON escaping, including computed calibration evidence, but excludes the small coverage
+object, instructions, response schema, and output. Computed records receive at most one quarter
+of that budget, prioritizing mismatch results before partial/non-comparable/consistent results.
+`computed_records_available` and `computed_records_included` make omissions visible; the complete
+deterministic results remain in the local inspection report. It is not a token/context-window guarantee. To change it:
 
 ```bash
 omeify inspect image.tif -i --intelligence-max-chars 32000
@@ -607,8 +669,8 @@ record budget, but does not remove the independent scan limits.
 The authoritative contracts are packaged JSON Schemas:
 
 ```text
-omeify/schemas/tiff_inspection.schema.json          inspection schema 1.3
-omeify/schemas/metadata_intelligence.schema.json    intelligence schema 1.0
+omeify/schemas/tiff_inspection.schema.json          inspection schema 1.4
+omeify/schemas/metadata_intelligence.schema.json    intelligence schema 1.1
 ```
 
 The packaged schema defines both the final `summary` and the model's smaller
@@ -638,8 +700,9 @@ its interesting content. XML entity spellings are decoded by the collector, and
 that extracted text is preserved exactly. JSON contains the complete supplied
 value; `--max-text-length` still bounds its pretty-print preview.
 
-The final report layout remains intelligence schema **1.0**, with `prompt_version`
-**2.0** identifying record selection. Existing prompt-1.0 reports still validate.
+New reports use intelligence schema **1.1**, with `prompt_version` **2.1** identifying
+record selection plus calibration guidance. Schema 1.0 reports with prompt 1.0/2.0 still validate;
+records without an `origin` field retain their original meaning as source metadata.
 A failed request, invalid JSON, unknown reference, or violated local constraint
 is an error, not an empty “all clear” summary. Diagnostics identify the response
 field/index without echoing source values or model prose. The CLI exits nonzero
@@ -784,6 +847,16 @@ with tifffile.TiffFile("image.ome.tif", _multifile=False) as tiff:
 
 print(packet["coverage"])
 # Inspect packet["records"] locally before any transmission.
+```
+
+The standalone collector does not enumerate series to create calibration context, which could
+open companion files in a caller-owned tifffile handle. To reproduce the inspector's packet
+locally on one handle:
+
+```python
+with tifffile.TiffFile("image.ome.tif", _multifile=False) as tiff:
+    inspector = TiffInspector.from_tiff(tiff, file_path="image.ome.tif")
+    packet = collect_metadata(tiff, calibration=inspector.report["calibration"])
 ```
 
 `omeify.intelligence.summarize_metadata(packet)` is the explicit inference step;
@@ -1107,10 +1180,18 @@ Before a temporary output replaces the destination, omeify checks:
 - output axes, full-resolution shape, and top-level IFD count
 - tiled storage, compression, SubIFDs, and reduced-resolution flags
 - rebuilt pyramid dimensions and linked pyramid annotations
+- re-read OME physical pixel sizes against the intended X/Y calibration, with explicit units
+- re-read TIFF resolution/unit tags on every base and SubIFD plane against the intended calibration
+  and the writer's known `2**level` sampling scale, including odd-sized pyramids
 - ICC profile preservation when supplied
 - representative-pixel decoding for lossy output
 - exact representative full-resolution values for lossless output
 - caller-supplied multi-series provenance and annotation links
+
+Successful single- and multi-series writer reports add `ome_physical_sizes_match_specs`,
+`tiff_calibration_matches_specs`, `pyramid_calibration_matches_specs`,
+`calibration_ifds_checked`, and `calibration_relative_tolerance` to their verification section.
+The calibration readback checks do not require any additional raster scan.
 
 The conversion report keeps OME schema validity, MITI-header validity, and binary-output
 verification as distinct structured sections.

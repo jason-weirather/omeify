@@ -321,3 +321,71 @@ def verify_page_layout(
             )
     if reduced and not (int(page.subfiletype) & 1):
         raise ValueError(f"{context} is not marked as reduced resolution")
+
+
+def verify_physical_calibration(
+    output: tifffile.TiffFile,
+    root: etree._Element,
+    prepared: Sequence[PreparedImage],
+) -> dict[str, object]:
+    """Re-read OME and every base/SubIFD calibration against the writer inputs.
+
+    The writer knows the sampling policy: scale is 2**level even when odd image
+    dimensions are rounded upward. Do not substitute base_width/level_width.
+    This verifies emitted metadata independently of the resolution encoder.
+    """
+
+    from omeify._calibration import (
+        CALIBRATION_REL_TOL,
+        compare_axis,
+        ome_calibration,
+        tiff_calibration,
+    )
+
+    images = root.findall(f"{{{OME_NAMESPACE}}}Image")
+    if len(images) != len(prepared):
+        raise ValueError("OME image count does not match calibration specifications")
+    ifd = 0
+    checked = 0
+    for image_index, (image, item) in enumerate(zip(images, prepared, strict=True)):
+        pixels = image.find(f"{{{OME_NAMESPACE}}}Pixels")
+        declared = ome_calibration(pixels)
+        expected = item.spec.pixel_size.converted_to("µm")
+        for axis in ("x", "y"):
+            value = declared[axis]
+            if value["unit_defaulted"] or compare_axis(
+                value["pixel_size_um"], getattr(expected, axis),
+            )["status"] != "consistent":
+                raise ValueError(
+                    f"OME Image {image_index} PhysicalSize{axis.upper()} calibration "
+                    "does not match the writer specification with explicit units"
+                )
+        for plane in range(item.spec.plane_count):
+            page = output.pages[ifd].aspage()
+            ifd += 1
+            subpages = list(page.pages) if page.pages is not None else []
+            if len(subpages) != len(item.level_shapes) - 1:
+                raise ValueError("SubIFD count does not match calibration level specifications")
+            for level, frame in enumerate([page, *subpages]):
+                actual = tiff_calibration(frame.aspage())
+                if actual["resolution_unit"] != 3:
+                    raise ValueError(
+                        f"TIFF calibration for image {image_index}, plane {plane}, level {level} "
+                        "must explicitly use ResolutionUnit=CENTIMETER"
+                    )
+                for axis in ("x", "y"):
+                    if compare_axis(
+                        actual[axis]["pixel_size_um"], getattr(expected, axis) * (2**level),
+                    )["status"] != "consistent":
+                        raise ValueError(
+                            f"TIFF {axis.upper()} calibration for image {image_index}, "
+                            f"plane {plane}, level {level} does not match the writer specification"
+                        )
+                checked += 1
+    return {
+        "ome_physical_sizes_match_specs": True,
+        "tiff_calibration_matches_specs": True,
+        "pyramid_calibration_matches_specs": True,
+        "calibration_ifds_checked": checked,
+        "calibration_relative_tolerance": CALIBRATION_REL_TOL,
+    }

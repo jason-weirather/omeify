@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import re
 import textwrap
 from collections.abc import Collection
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from sheetbend import Registry
 
 _INSPECTION_SCHEMA_RESOURCE = "omeify.schemas/tiff_inspection.schema.json"
-_INSPECTION_SCHEMA_VERSION = "1.3"
+_INSPECTION_SCHEMA_VERSION = "1.4"
 _DEFAULT_DETAIL = 1
 _DEFAULT_MAX_TEXT_LENGTH = 240
 _MAX_XML_CHILDREN = 100
@@ -72,9 +73,10 @@ def _safe_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
     try:
-        return float(value)
+        numeric = float(value)
     except (TypeError, ValueError, OverflowError):
         return None
+    return numeric if math.isfinite(numeric) else None
 
 
 def _safe_bool(value: Any) -> bool | None:
@@ -629,7 +631,12 @@ def _inspection_validator() -> Draft202012Validator:
         files("omeify.schemas").joinpath("metadata_intelligence.schema.json")
         .read_text(encoding="utf-8")
     )
-    registry = Registry().with_resource(intelligence["$id"], Resource.from_contents(intelligence))
+    calibration = json.loads(
+        files("omeify.schemas").joinpath("calibration.schema.json").read_text(encoding="utf-8")
+    )
+    registry = Registry().with_resources(
+        (item["$id"], Resource.from_contents(item)) for item in (intelligence, calibration)
+    )
     return Draft202012Validator(schema, registry=registry)
 
 
@@ -688,6 +695,82 @@ def _render_tree(root: _TreeNode) -> str:
     return "\n".join(lines)
 
 
+def _calibration_tree(check: dict[str, Any], *, detail: int) -> _TreeNode:
+    status = check["status"].upper().replace("_", " ")
+    root = _TreeNode(f"TIFF/OME calibration (full-resolution X/Y): {status}")
+    reasons = {
+        "no_ome": "No OME calibration to compare; this does not mean the TIFF is uncalibrated.",
+        "local_tiff_data": "Local full-resolution planes matched through OME TiffData.",
+        "ambiguous_tiff_data": "Multiple OME Images reference the same IFD; no pairing guessed.",
+        "unmapped_ifd": "Base IFDs could not be mapped to one local OME Image.",
+        "incomplete_local_pages": "Not all local base-plane entries could be checked.",
+        "incomplete_tiff_data": "OME mapping is incomplete, external, or spans multiple Images.",
+        "not_full_resolution_geometry": "Mapped pages do not match full-resolution OME geometry.",
+        "unreadable_ome": "OME calibration metadata could not be parsed.",
+        "unsafe_ome": "OME XML with a DTD was not used for calibration comparison.",
+        "ome_scan_limit": "OME metadata exceeded the calibration parser limit.",
+    }
+    reason = reasons[check["mapping_reason"]]
+    if detail == 0:
+        if check["status"] != "consistent":
+            root.children.append(_TreeNode(reason))
+        return root
+    root.children.append(_TreeNode(
+        f"{check['pages_checked']}/{check['pages_total']} local base-plane entries checked; "
+        f"{reason}"
+    ))
+    declared = check["ome"]
+    if declared is not None:
+        sizes = []
+        for axis in ("x", "y"):
+            value = declared[axis]["pixel_size_um"]
+            text = "N/A" if value is None else f"{value:.9g} µm/pixel"
+            if declared[axis]["unit_defaulted"]:
+                text += " (OME unit default)"
+            if declared[axis]["issue"]:
+                text += f" ({declared[axis]['issue'].replace('_', ' ')})"
+            sizes.append(f"{axis.upper()}={text}")
+        root.children.append(_TreeNode(
+            f"OME Image {check['ome_image_index']}: " + ", ".join(sizes)
+        ))
+    # Show distinct encodings, with problematic planes before matching examples.
+    priority = {"mismatch": 0, "partial": 1, "not_comparable": 2, "consistent": 3}
+    seen = set()
+    for page in sorted(check["checks"], key=lambda item: priority[item["status"]]):
+        actual = page["tiff"]
+        key = json.dumps(actual, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(seen) > 3:
+            continue
+        unit = {2: "inch", 3: "cm"}.get(actual["effective_resolution_unit"], "unit")
+        parts = []
+        for axis in ("x", "y"):
+            value = actual[axis]["pixel_size_um"]
+            density = actual[axis]["pixels_per_unit"]
+            text = "N/A" if value is None else f"{density:.9g} pixels/{unit} = {value:.9g} µm/pixel"
+            if page["axes"][axis]["status"] == "mismatch":
+                difference = page["axes"][axis]["relative_difference"]
+                text += f" (MISMATCH, relative difference {difference:.6g})"
+            elif actual[axis]["issue"]:
+                text += f" ({actual[axis]['issue'].replace('_', ' ')})"
+            parts.append(f"{axis.upper()}={text}")
+        node = _TreeNode(f"TIFF IFD {page['ifd']}: " + ", ".join(parts))
+        if actual["unit_defaulted"]:
+            node.children.append(_TreeNode("ResolutionUnit absent: using the TIFF inch default."))
+        root.children.append(node)
+    if len(seen) > 3:
+        root.children.append(_TreeNode(
+            f"{len(seen) - 3} additional encodings are retained in JSON."
+        ))
+    root.children.append(_TreeNode(
+        "Compared after unit conversion; SubIFDs excluded. "
+        "Agreement is not proof of acquisition calibration accuracy."
+    ))
+    return root
+
+
 def _intelligence_tree(report: dict[str, Any], max_text_length: int | None) -> _TreeNode:
     """Render the validated JSON view, never parse model-authored display text."""
 
@@ -714,7 +797,8 @@ def _intelligence_tree(report: dict[str, Any], max_text_length: int | None) -> _
             record = catalog[record_id]
             origin = record["locations"][0]
             repeats = f" ({record['occurrences']} occurrences)" if record["occurrences"] > 1 else ""
-            parent.children.append(node(f"Evidence {record_id}: {origin}{repeats}"))
+            kind = "Computed evidence" if record.get("origin") == "computed" else "Evidence"
+            parent.children.append(node(f"{kind} {record_id}: {origin}{repeats}"))
 
     summary = report["summary"]
     overview = node("Overview: " + summary["overview"]["text"])
@@ -759,6 +843,11 @@ def _intelligence_tree(report: dict[str, Any], max_text_length: int | None) -> _
         f"{coverage['records_included']}/{coverage['records_available']} collected records supplied, "
         f"{coverage['ifds_scanned']} TIFF directories, {coverage['metadata_chars']:,} metadata characters"
     )
+    if coverage.get("computed_records_available"):
+        coverage_node.children.append(node(
+            f"Computed calibration context: {coverage['computed_records_included']}/"
+            f"{coverage['computed_records_available']} series checks supplied."
+        ))
     if coverage["records_truncated"]:
         coverage_node.children.append(node(
             f"{coverage['records_truncated']} supplied records contain value excerpts."
@@ -872,14 +961,22 @@ class TiffInspector:
             for item in getattr(tiff, "flags", set())
             if str(item) != "uniform"
         )
+        from omeify._calibration import inspect_calibration
+
+        calibration = inspect_calibration(tiff, series_collection)
         ome_images = ome["images"] if ome is not None else []
+        matched_images = [item["ome_image_index"] for item in calibration["series"]]
         series = [
             _series_summary(
                 item,
                 series_index=index,
                 detail=self.detail,
                 max_text_length=self.max_text_length,
-                ome_image=ome_images[index] if index < len(ome_images) else None,
+                ome_image=(
+                    ome_images[matched_images[index]]
+                    if matched_images[index] is not None
+                    and matched_images[index] < len(ome_images) else None
+                ),
                 warnings=warnings,
             )
             for index, item in enumerate(series_collection)
@@ -908,6 +1005,7 @@ class TiffInspector:
             },
             "ome": ome,
             "series": series,
+            "calibration": calibration,
             "warnings": warnings,
         }
 
@@ -937,15 +1035,18 @@ class TiffInspector:
         from omeify.intelligence import collect_metadata, summarize_metadata
 
         if self._tiff is not None:
-            if self._report is None:
-                self._report = self._build_report(self._tiff)
-            packet = collect_metadata(self._tiff, max_chars=max_metadata_chars)
+            self._report = self._build_report(self._tiff)
+            packet = collect_metadata(
+                self._tiff, max_chars=max_metadata_chars, calibration=self._report["calibration"],
+            )
         else:
             with tifffile.TiffFile(self.file_path, _multifile=False) as tiff:
                 # Refresh local diagnostics with the same handle used to gather
                 # evidence, rather than attaching a summary to stale file data.
                 self._report = self._build_report(tiff)
-                packet = collect_metadata(tiff, max_chars=max_metadata_chars)
+                packet = collect_metadata(
+                    tiff, max_chars=max_metadata_chars, calibration=self._report["calibration"],
+                )
         summary = summarize_metadata(
             packet, registry=registry, source_name=source_name, model_name=model_name,
             allowed_scopes=allowed_scopes, max_output_tokens=max_output_tokens,
@@ -1077,6 +1178,9 @@ class TiffInspector:
                     + (tiff_resolution if tiff_resolution else "N/A")
                 )
             )
+
+            calibration = report["calibration"]["series"][series["index"]]
+            series_node.children.append(_calibration_tree(calibration, detail=self.detail))
 
             if self.detail >= 1:
                 for level in series["levels"]:
