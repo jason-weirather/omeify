@@ -22,7 +22,8 @@ if TYPE_CHECKING:
     from sheetbend import Registry
 
 DEFAULT_ALLOWED_SCOPES = ("institutional", "local")
-DEFAULT_MAX_METADATA_CHARS = 16_000
+DEFAULT_MAX_METADATA_CHARS = 32_000
+DEFAULT_MAX_OUTPUT_TOKENS = 8_192
 _SCHEMA_NAME = "metadata_intelligence.schema.json"
 _MAX_RESPONSE_CHARS = 131_072
 _PROMPT_VERSION = "2.1"
@@ -93,7 +94,8 @@ interpretation.
 """
 
 __all__ = [
-    "DEFAULT_ALLOWED_SCOPES", "DEFAULT_MAX_METADATA_CHARS", "IntelligenceError",
+    "DEFAULT_ALLOWED_SCOPES", "DEFAULT_MAX_METADATA_CHARS", "DEFAULT_MAX_OUTPUT_TOKENS",
+    "IntelligenceError",
     "collect_metadata", "metadata_summary_schema", "summarize_metadata",
 ]
 
@@ -295,7 +297,7 @@ def summarize_metadata(
     source_name: str | None = None,
     model_name: str | None = None,
     allowed_scopes: Collection[str] = DEFAULT_ALLOWED_SCOPES,
-    max_output_tokens: int = 4096,
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
 ) -> dict[str, Any]:
     """Interpret a packet from ``collect_metadata`` in one Sheetbend request.
 

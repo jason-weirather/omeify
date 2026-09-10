@@ -17,7 +17,11 @@ from omeify.dtype_mutation import (
     TARGET_DTYPES,
 )
 from omeify.inspection import TiffInspector
-from omeify.intelligence import DEFAULT_ALLOWED_SCOPES, DEFAULT_MAX_METADATA_CHARS
+from omeify.intelligence import (
+    DEFAULT_ALLOWED_SCOPES,
+    DEFAULT_MAX_METADATA_CHARS,
+    DEFAULT_MAX_OUTPUT_TOKENS,
+)
 from omeify.io.pixel_size import PixelSize
 from omeify.io.source_reader import INPUT_TYPES, PLANAR_INPUT_TYPES
 from omeify.mutation import mutate
@@ -634,6 +638,11 @@ def mutate_command(
     default=DEFAULT_MAX_METADATA_CHARS, show_default=True,
     help="Serialized metadata-record character budget, not tokens; requires -i.",
 )
+@click.option(
+    "--intelligence-max-output-tokens", type=click.IntRange(min=1),
+    default=DEFAULT_MAX_OUTPUT_TOKENS, show_default=True,
+    help="Maximum generated tokens requested from the selected model; requires -i.",
+)
 def inspect_command(
     input_path: Path,
     detail: int,
@@ -644,6 +653,7 @@ def inspect_command(
     intelligence_source: str | None,
     intelligence_scopes: tuple[str, ...],
     intelligence_max_chars: int,
+    intelligence_max_output_tokens: int,
 ) -> None:
     """Inspect any TIFF at INPUT_PATH without reading its image pixels.
 
@@ -654,7 +664,10 @@ def inspect_command(
     ctx = click.get_current_context()
     if not intelligence and any(
         ctx.get_parameter_source(name) != click.core.ParameterSource.DEFAULT
-        for name in ("intelligence_source", "intelligence_scopes", "intelligence_max_chars")
+        for name in (
+            "intelligence_source", "intelligence_scopes",
+            "intelligence_max_chars", "intelligence_max_output_tokens",
+        )
     ):
         raise click.UsageError("--intelligence-* options require --intelligence / -i")
     if output is not None and (
@@ -673,6 +686,7 @@ def inspect_command(
             inspector.summarize_metadata(
                 source_name=intelligence_source, allowed_scopes=intelligence_scopes,
                 max_metadata_chars=intelligence_max_chars,
+                max_output_tokens=intelligence_max_output_tokens,
             )
         rendered = inspector.to_json() if as_json else inspector.render_text()
     except Exception as exc:

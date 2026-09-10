@@ -642,7 +642,7 @@ permission to open embedded paths/URLs. XML DTDs and known binary/pixel blocks a
 omitted; external XML entities are never expanded. No prompt or response log is
 written by omeify.
 
-The default **16,000-character serialized-record budget** includes record locations
+The default **32,000-character serialized-record budget** includes record locations
 and JSON escaping, including computed calibration evidence, but excludes the small coverage
 object, instructions, response schema, and output. Computed records receive at most one quarter
 of that budget, prioritizing mismatch results before partial/non-comparable/consistent results.
@@ -650,8 +650,20 @@ of that budget, prioritizing mismatch results before partial/non-comparable/cons
 deterministic results remain in the local inspection report. It is not a token/context-window guarantee. To change it:
 
 ```bash
-omeify inspect image.tif -i --intelligence-max-chars 32000
+omeify inspect image.tif -i --intelligence-max-chars 64000
 ```
+
+The generated-response allowance defaults to **8,192 tokens** and is passed to the selected
+model through Sheetbend. It is independent of the metadata character budget and can be raised
+per request when the endpoint has sufficient context capacity:
+
+```bash
+omeify inspect image.tif -i --intelligence-max-output-tokens 16384
+```
+
+Increasing either limit cannot exceed the selected endpoint's total context window. A larger
+output allowance can help avoid truncating schema-constrained JSON, while a larger metadata
+packet consumes more of that same context.
 
 Collection prioritizes likely identifiers, dates, paths and scientific fields,
 with round-robin selection across directory/OME Image groups. This is a bounded
@@ -821,13 +833,13 @@ result = inspector.summarize_metadata(
     registry=Registry.from_file(),
     source_name="laboratory",
     allowed_scopes=["institutional", "local"],
-    max_metadata_chars=16000,
-    max_output_tokens=4096,
+    max_metadata_chars=32000,
+    max_output_tokens=8192,
 )
 ```
 
 `model_name=` optionally selects another configured model on the selected source.
-The output-token setting defaults to 4,096 and is passed through LLM; actual token
+The output-token setting defaults to 8,192 and is passed through LLM; actual token
 accounting, context limits and reasoning behavior depend on the configured model.
 No temperature, seed or model-specific reasoning policy is imposed by omeify.
 Calling `summarize_metadata()` again deliberately makes a new request. Path-backed
@@ -843,7 +855,7 @@ import tifffile
 from omeify.intelligence import collect_metadata
 
 with tifffile.TiffFile("image.ome.tif", _multifile=False) as tiff:
-    packet = collect_metadata(tiff, max_chars=16000)
+    packet = collect_metadata(tiff, max_chars=32000)
 
 print(packet["coverage"])
 # Inspect packet["records"] locally before any transmission.

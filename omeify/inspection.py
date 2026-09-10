@@ -18,7 +18,11 @@ import tifffile
 from jsonschema import Draft202012Validator
 from lxml import etree
 
-from omeify.intelligence import DEFAULT_ALLOWED_SCOPES, DEFAULT_MAX_METADATA_CHARS
+from omeify.intelligence import (
+    DEFAULT_ALLOWED_SCOPES,
+    DEFAULT_MAX_METADATA_CHARS,
+    DEFAULT_MAX_OUTPUT_TOKENS,
+)
 from omeify.utils.miti_header_validator import validate_miti_ome_tiff_header
 
 if TYPE_CHECKING:
@@ -1017,7 +1021,7 @@ class TiffInspector:
         model_name: str | None = None,
         allowed_scopes: Collection[str] = DEFAULT_ALLOWED_SCOPES,
         max_metadata_chars: int = DEFAULT_MAX_METADATA_CHARS,
-        max_output_tokens: int = 4096,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> dict[str, Any]:
         """Explicitly infer and attach one validated metadata summary.
 

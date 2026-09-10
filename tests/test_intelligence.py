@@ -135,7 +135,7 @@ def test_summary_checks_evidence_and_request_contract(packet, model_double):
     assert options["schema"] == ai.metadata_summary_schema(
         record_ids=[record["id"] for record in packet["records"]],
     )
-    assert options["options"] == {"max_tokens": 4096}
+    assert options["options"] == {"max_tokens": 8192}
     assert "UNTRUSTED DATA" in options["system"]
     assert "tools" not in options and "attachments" not in options
     assert not model_double["active"]
@@ -321,12 +321,28 @@ def test_cli_json_and_text_output(image_path, tmp_path, model_double):
 @pytest.mark.parametrize("options", [
     ["--intelligence-source", "work"], ["--intelligence-scope", "local"],
     ["--intelligence-max-chars", "4096"],
+    ["--intelligence-max-output-tokens", "16384"],
 ])
 def test_cli_intelligence_options_require_opt_in(image_path, options, model_double):
     result = CliRunner().invoke(main, ["inspect", str(image_path), *options])
     assert result.exit_code == 2
     assert "require --intelligence" in result.output
     assert model_double["calls"] == []
+
+
+def test_cli_intelligence_output_token_override(image_path, model_double):
+    result = CliRunner().invoke(
+        main,
+        [
+            "inspect", str(image_path), "-i",
+            "--intelligence-max-chars", "40000",
+            "--intelligence-max-output-tokens", "16384",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    sent, options = model_double["calls"][0]
+    assert json.loads(sent)["coverage"]["max_metadata_chars"] == 40000
+    assert options["options"] == {"max_tokens": 16384}
 
 
 def test_cli_failure_does_not_clobber_output(image_path, tmp_path, model_double):
@@ -461,7 +477,7 @@ def test_empty_duplicate_and_overbudget_packets_fail_before_request(packet, mode
     with pytest.raises(ai.IntelligenceError, match="not unique"):
         ai.summarize_metadata(bad)
     bad = deepcopy(packet)
-    bad["records"][0]["value"] = "X" * 20_000
+    bad["records"][0]["value"] = "X" * 40_000
     with pytest.raises(ai.IntelligenceError, match="budget"):
         ai.summarize_metadata(bad)
     assert not model_double["calls"]

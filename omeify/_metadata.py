@@ -218,7 +218,7 @@ def _priority(record: dict[str, Any]) -> int:
 
 
 def collect_metadata(
-    tiff: tifffile.TiffFile, *, max_chars: int = 16_000,
+    tiff: tifffile.TiffFile, *, max_chars: int = 32_000,
     calibration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect an inspectable inference packet without reading raster pixels.
