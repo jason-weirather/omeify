@@ -306,7 +306,7 @@ def test_cli_inspect_text_json_and_output_file(tmp_path: Path) -> None:
     )
     assert output_result.exit_code == 0, output_result.output
     assert output_result.output == ""
-    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "1.2"
+    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "1.3"
 
 
 def test_ome_tiff_reader_reads_interleaved_rgb_regions(tmp_path: Path) -> None:

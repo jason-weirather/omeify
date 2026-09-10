@@ -17,6 +17,7 @@ from omeify.dtype_mutation import (
     TARGET_DTYPES,
 )
 from omeify.inspection import TiffInspector
+from omeify.intelligence import DEFAULT_ALLOWED_SCOPES, DEFAULT_MAX_METADATA_CHARS
 from omeify.io.pixel_size import PixelSize
 from omeify.io.source_reader import INPUT_TYPES, PLANAR_INPUT_TYPES
 from omeify.mutation import mutate
@@ -614,12 +615,35 @@ def mutate_command(
     type=click.Path(dir_okay=False, path_type=Path),
     help="Write the report to a file instead of stdout.",
 )
+@click.option(
+    "-i", "--intelligence", is_flag=True,
+    help="Summarize embedded metadata using Sheetbend; requires omeify[intelligence].",
+)
+@click.option(
+    "--intelligence-source", type=str, default=None,
+    help="Select a configured source explicitly, within the allowed scopes; requires -i.",
+)
+@click.option(
+    "--intelligence-scope", "intelligence_scopes", multiple=True,
+    type=click.Choice(["institutional", "local", "external"]),
+    default=DEFAULT_ALLOWED_SCOPES, show_default=True,
+    help="Ordered scope preference; repeat to allow multiple scopes. Requires -i.",
+)
+@click.option(
+    "--intelligence-max-chars", type=click.IntRange(min=4096),
+    default=DEFAULT_MAX_METADATA_CHARS, show_default=True,
+    help="Serialized metadata-record character budget, not tokens; requires -i.",
+)
 def inspect_command(
     input_path: Path,
     detail: int,
     as_json: bool,
     max_text_length: int,
     output: Path | None,
+    intelligence: bool,
+    intelligence_source: str | None,
+    intelligence_scopes: tuple[str, ...],
+    intelligence_max_chars: int,
 ) -> None:
     """Inspect any TIFF at INPUT_PATH without reading its image pixels.
 
@@ -627,7 +651,16 @@ def inspect_command(
     may contain paths, filenames, vendor fields, or other identifying values.
     """
 
-    if output is not None and output.resolve() == input_path.resolve():
+    ctx = click.get_current_context()
+    if not intelligence and any(
+        ctx.get_parameter_source(name) != click.core.ParameterSource.DEFAULT
+        for name in ("intelligence_source", "intelligence_scopes", "intelligence_max_chars")
+    ):
+        raise click.UsageError("--intelligence-* options require --intelligence / -i")
+    if output is not None and (
+        output.resolve() == input_path.resolve()
+        or (output.exists() and output.samefile(input_path))
+    ):
         raise click.UsageError("--output must differ from INPUT_PATH")
     try:
         inspector = TiffInspector(
@@ -635,6 +668,12 @@ def inspect_command(
             detail=detail,
             max_text_length=None if max_text_length == 0 else max_text_length,
         )
+        if intelligence:
+            click.echo("Summarizing embedded metadata through Sheetbend...", err=True)
+            inspector.summarize_metadata(
+                source_name=intelligence_source, allowed_scopes=intelligence_scopes,
+                max_metadata_chars=intelligence_max_chars,
+            )
         rendered = inspector.to_json() if as_json else inspector.render_text()
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omeify"
-version = "0.14.0"
+version = "0.15.0"
 description = "Convert tissue images into metadata-minimized, pyramidal OME-TIFF"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -65,6 +65,10 @@ Issues = "https://github.com/jason-weirather/omeify/issues"
 omeify = "omeify.cli:main"
 
 [project.optional-dependencies]
+# Sheetbend 0.5 owns source selection; its llm extra owns inference dependencies.
+# No Python marker: requesting intelligence on Python <3.13 must fail, not install
+# an apparently successful but empty extra. Base omeify remains Python >=3.10.
+intelligence = ["sheetbend[llm]>=0.5.0,<0.6"]
 dev = [
   "build>=1.2",
   "pytest>=8,<10",

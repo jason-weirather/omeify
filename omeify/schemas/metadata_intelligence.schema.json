@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/metadata_intelligence.schema.json",
+  "title": "omeify metadata intelligence report",
+  "description": "Optional advisory inspection result with locally collected metadata evidence. TIFF directory locations identify storage; OME Image indices in XML paths are not asserted to be TIFF series indices. Not a deidentification or pixel quality assessment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "prompt_version",
+    "source",
+    "allowed_scopes",
+    "coverage",
+    "records",
+    "summary"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.schemas/metadata_intelligence.schema.json"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "prompt_version": {
+      "const": "1.0"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "model",
+        "scope",
+        "organization"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "enum": [
+            "institutional",
+            "local",
+            "external"
+          ]
+        },
+        "organization": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "allowed_scopes": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "institutional",
+          "local",
+          "external"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/record"
+      },
+      "minItems": 1
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_id",
+        "quote"
+      ],
+      "properties": {
+        "record_id": {
+          "type": "string",
+          "pattern": "^m[1-9][0-9]*$"
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      }
+    },
+    "statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "evidence"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 800
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          },
+          "minItems": 1,
+          "maxItems": 8
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "label",
+        "value",
+        "interpretation",
+        "evidence"
+      ],
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "date",
+            "identifier",
+            "path",
+            "acquisition",
+            "channel",
+            "calibration",
+            "processing",
+            "other"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "interpretation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          },
+          "minItems": 1,
+          "maxItems": 8
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overview",
+        "findings",
+        "cautions"
+      ],
+      "properties": {
+        "overview": {
+          "$ref": "#/$defs/statement"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          },
+          "maxItems": 80
+        },
+        "cautions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/statement"
+          },
+          "maxItems": 16
+        }
+      },
+      "description": "Model-authored interpretation. Quotes and extracted values are checked against the supplied evidence records; prose remains advisory, not scientifically verified."
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "locations",
+        "value",
+        "truncated",
+        "occurrences"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^m[1-9][0-9]*$"
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 8
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "occurrences": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ifds_scanned",
+        "tags_scanned",
+        "records_available",
+        "records_included",
+        "records_truncated",
+        "metadata_chars",
+        "max_metadata_chars",
+        "scan_limited",
+        "omitted",
+        "warnings"
+      ],
+      "properties": {
+        "ifds_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tags_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "records_available": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "records_included": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "records_truncated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metadata_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_metadata_chars": {
+          "type": "integer",
+          "minimum": 4096
+        },
+        "scan_limited": {
+          "type": "boolean"
+        },
+        "omitted": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "binary_or_large_arrays",
+            "oversized_tags",
+            "unreadable_tags",
+            "embedded_binary_or_unsafe_xml"
+          ],
+          "properties": {
+            "binary_or_large_arrays": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "oversized_tags": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unreadable_tags": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "embedded_binary_or_unsafe_xml": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "packet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "records",
+        "coverage"
+      ],
+      "properties": {
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/record"
+          }
+        },
+        "coverage": {
+          "$ref": "#/$defs/coverage"
+        }
+      }
+    }
+  }
+}

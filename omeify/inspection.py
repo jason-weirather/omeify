@@ -3,22 +3,28 @@ from __future__ import annotations
 import html
 import json
 import re
+import textwrap
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import tifffile
 from jsonschema import Draft202012Validator
 from lxml import etree
 
+from omeify.intelligence import DEFAULT_ALLOWED_SCOPES, DEFAULT_MAX_METADATA_CHARS
 from omeify.utils.miti_header_validator import validate_miti_ome_tiff_header
 
+if TYPE_CHECKING:
+    from sheetbend import Registry
+
 _INSPECTION_SCHEMA_RESOURCE = "omeify.schemas/tiff_inspection.schema.json"
-_INSPECTION_SCHEMA_VERSION = "1.2"
+_INSPECTION_SCHEMA_VERSION = "1.3"
 _DEFAULT_DETAIL = 1
 _DEFAULT_MAX_TEXT_LENGTH = 240
 _MAX_XML_CHILDREN = 100
@@ -616,7 +622,15 @@ def _inspection_validator() -> Draft202012Validator:
     resource = files("omeify.schemas").joinpath("tiff_inspection.schema.json")
     schema = json.loads(resource.read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema)
+    # Resolve the optional report schema from package resources, never the web.
+    from referencing import Registry, Resource
+
+    intelligence = json.loads(
+        files("omeify.schemas").joinpath("metadata_intelligence.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    registry = Registry().with_resource(intelligence["$id"], Resource.from_contents(intelligence))
+    return Draft202012Validator(schema, registry=registry)
 
 
 @dataclass
@@ -662,14 +676,105 @@ def _render_tree(root: _TreeNode) -> str:
     lines = [root.label]
 
     def visit(node: _TreeNode, prefix: str, is_last: bool) -> None:
-        lines.append(prefix + ("└── " if is_last else "├── ") + node.label)
+        label_lines = node.label.splitlines() or [""]
+        lines.append(prefix + ("└── " if is_last else "├── ") + label_lines[0])
         child_prefix = prefix + ("    " if is_last else "│   ")
+        lines.extend(child_prefix + line for line in label_lines[1:])
         for index, child in enumerate(node.children):
             visit(child, child_prefix, index == len(node.children) - 1)
 
     for index, child in enumerate(root.children):
         visit(child, "", index == len(root.children) - 1)
     return "\n".join(lines)
+
+
+def _intelligence_tree(report: dict[str, Any], max_text_length: int | None) -> _TreeNode:
+    """Render the validated JSON view, never parse model-authored display text."""
+
+    def display(value: str) -> str:
+        # Make terminal escapes, control codes and bidi controls visible. Leave
+        # scientific Unicode (including µm) intact. JSON retains original values.
+        return "".join(
+            char if char.isprintable() else char.encode("unicode_escape").decode("ascii")
+            for char in value
+        )
+
+    def node(text: str) -> _TreeNode:
+        return _TreeNode(textwrap.fill(display(text), width=96, break_long_words=False))
+
+    source = report["source"]
+    root = node(
+        f"Metadata intelligence (advisory): {source['name']} [{source['scope']}] / {source['model']}"
+    )
+    catalog = {record["id"]: record for record in report["records"]}
+
+    def add_evidence(parent: _TreeNode, statement: dict[str, Any]) -> None:
+        ids = dict.fromkeys(evidence["record_id"] for evidence in statement["evidence"])
+        for record_id in ids:
+            record = catalog[record_id]
+            origin = record["locations"][0]
+            repeats = f" ({record['occurrences']} occurrences)" if record["occurrences"] > 1 else ""
+            parent.children.append(node(f"Evidence {record_id}: {origin}{repeats}"))
+
+    summary = report["summary"]
+    overview = node("Overview: " + summary["overview"]["text"])
+    add_evidence(overview, summary["overview"])
+    root.children.append(overview)
+    categories = {
+        "date": "Dates", "identifier": "Identifiers", "path": "Embedded paths / filenames",
+        "acquisition": "Acquisition / instrument", "channel": "Channels / markers",
+        "calibration": "Spatial calibration", "processing": "Software / processing",
+        "other": "Other useful metadata",
+    }
+    for category, label in categories.items():
+        findings = [item for item in summary["findings"] if item["category"] == category]
+        if not findings:
+            if category in {"date", "identifier", "path"}:
+                root.children.append(node(label + ": not reported in the supplied metadata"))
+            continue
+        group = node(f"{label} ({len(findings)})")
+        for finding in findings:
+            value = _truncate_text(finding["value"], max_text_length)[0]
+            item = node(f"{finding['label']}: {value}")
+            item.children.append(node(finding["interpretation"]))
+            add_evidence(item, finding)
+            group.children.append(item)
+        root.children.append(group)
+    if summary["cautions"]:
+        cautions = node("Points to review")
+        for statement in summary["cautions"]:
+            item = node(statement["text"])
+            add_evidence(item, statement)
+            cautions.children.append(item)
+        root.children.append(cautions)
+    coverage = report["coverage"]
+    omitted = coverage["omitted"]
+    incomplete = (
+        coverage["scan_limited"] or coverage["records_truncated"]
+        or coverage["records_included"] < coverage["records_available"]
+        or any(value for key, value in omitted.items() if key != "binary_or_large_arrays")
+    )
+    coverage_node = node(
+        f"Coverage{' (LIMITED)' if incomplete else ''}: "
+        f"{coverage['records_included']}/{coverage['records_available']} collected records supplied, "
+        f"{coverage['ifds_scanned']} TIFF directories, {coverage['metadata_chars']:,} metadata characters"
+    )
+    if coverage["records_truncated"]:
+        coverage_node.children.append(node(
+            f"{coverage['records_truncated']} supplied records contain value excerpts."
+        ))
+    if coverage["scan_limited"]:
+        coverage_node.children.append(node("Directory or metadata scan was incomplete."))
+    for key, value in omitted.items():
+        if value:
+            coverage_node.children.append(node(f"Omitted {key.replace('_', ' ')}: {value}"))
+    coverage_node.children.extend(node(warning) for warning in coverage["warnings"])
+    root.children.append(coverage_node)
+    root.children.append(node(
+        "Quoted evidence was checked; interpretation may still be wrong or incomplete. "
+        "No raster pixels inspected. This is not a deidentification or sharing clearance."
+    ))
+    return root
 
 
 class TiffInspector:
@@ -725,7 +830,7 @@ class TiffInspector:
             if self._tiff is not None:
                 self._report = self._build_report(self._tiff)
             else:
-                with tifffile.TiffFile(self.file_path) as tiff:
+                with tifffile.TiffFile(self.file_path, _multifile=False) as tiff:
                     self._report = self._build_report(tiff)
         return self._report
 
@@ -805,6 +910,48 @@ class TiffInspector:
             "series": series,
             "warnings": warnings,
         }
+
+    def summarize_metadata(
+        self,
+        *,
+        registry: Registry | None = None,
+        source_name: str | None = None,
+        model_name: str | None = None,
+        allowed_scopes: Collection[str] = DEFAULT_ALLOWED_SCOPES,
+        max_metadata_chars: int = DEFAULT_MAX_METADATA_CHARS,
+        max_output_tokens: int = 4096,
+    ) -> dict[str, Any]:
+        """Explicitly infer and attach one validated metadata summary.
+
+        Collection ignores display detail/preview limits and never decodes raster
+        pixels. Configuration, credentials, capabilities, and request lifetime
+        belong to Sheetbend. A call makes one inference request; later rendering
+        or serialization reuses the attached result without further inference.
+        Failures raise and leave the deterministic report intact.
+
+        A supplied open TIFF remains caller-owned. For a path-backed inspector,
+        both inspection and metadata collection happen on one open file before
+        inference; external OME companion files are not opened.
+        """
+
+        from omeify.intelligence import collect_metadata, summarize_metadata
+
+        if self._tiff is not None:
+            if self._report is None:
+                self._report = self._build_report(self._tiff)
+            packet = collect_metadata(self._tiff, max_chars=max_metadata_chars)
+        else:
+            with tifffile.TiffFile(self.file_path, _multifile=False) as tiff:
+                # Refresh local diagnostics with the same handle used to gather
+                # evidence, rather than attaching a summary to stale file data.
+                self._report = self._build_report(tiff)
+                packet = collect_metadata(tiff, max_chars=max_metadata_chars)
+        summary = summarize_metadata(
+            packet, registry=registry, source_name=source_name, model_name=model_name,
+            allowed_scopes=allowed_scopes, max_output_tokens=max_output_tokens,
+        )
+        self._report["intelligence"] = summary
+        return summary
 
     def validation_errors(self) -> tuple[str, ...]:
         """Return JSON Schema validation errors for the generated report."""
@@ -988,6 +1135,8 @@ class TiffInspector:
             warning_node = _TreeNode(f"Warnings ({len(report['warnings'])})")
             warning_node.children.extend(_TreeNode(item) for item in report["warnings"])
             root.children.append(warning_node)
+        if "intelligence" in report:
+            root.children.append(_intelligence_tree(report["intelligence"], self.max_text_length))
         return _render_tree(root)
 
     def __str__(self) -> str:

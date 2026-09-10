@@ -124,6 +124,19 @@ From a repository checkout:
 python -m pip install .
 ```
 
+For optional metadata intelligence, use Python 3.13+ on Linux or macOS and install:
+
+```bash
+python -m pip install -e '.[intelligence]'
+```
+
+The `intelligence` extra adds `sheetbend[llm]>=0.5.0,<0.6`; it does not change the
+Python 3.10+ baseline or dependencies of an ordinary installation. Requesting the
+extra on an older Python is an installation error, not an empty-extra fallback.
+When installing from a package index, the corresponding form is
+`python -m pip install 'omeify[intelligence]'`. Sheetbend must be available from
+your configured package index or already installed from its repository.
+
 For development:
 
 ```bash
@@ -510,6 +523,108 @@ additional OME metadata outside omeify's minimized vocabulary.
 > filenames, TIFF tags, vendor XML, scanner fields, or other identifying values. Review them before
 > sharing.
 
+#### Optional metadata intelligence
+
+```bash
+omeify inspect image.tif -i
+omeify inspect image.tif --intelligence --json --output inspection.json
+```
+
+`-i` / `--intelligence` adds one consolidated, advisory metadata summary at the end
+of the tree, or an `intelligence` member in JSON. It does not replace the ordinary
+TIFF/OME diagnostics or their deterministic validation results. Installing the
+extra alone never enables inference. `convert` and `mutate` do not accept this
+flag or use model output to alter images.
+
+The summary looks for dates, identifiers, embedded paths and filenames, acquisition
+and scanner details, channel/marker labels, physical calibration and units, and
+software/processing provenance. Findings retain their source spelling and include
+quoted evidence. Internal OME object IDs are distinguished from specimen or
+person identifiers in the requested interpretation. Dates are not normalized into
+an invented timezone or an assumed acquisition date.
+
+Omeify uses the existing Sheetbend configuration, not a second endpoint/key store:
+`${XDG_CONFIG_HOME:-$HOME/.config}/sheetbend/config.toml`, with Sheetbend's
+`SHEETBEND_CONFIG` override. The default ordered scopes are **institutional, then
+local**. Sheetbend selects the source and its configured default model; the
+connection requires declared `json_schema` and `system_prompt` capabilities and
+uses `application="omeify", tool="inspect"` for `sheetbend top`. Its configured
+reasoning default is honored. There are no automatic probes, retries, source/model
+fallbacks, or config changes.
+
+Narrow to local processing, or resolve an ambiguous registry explicitly:
+
+```bash
+omeify inspect image.tif -i --intelligence-scope local
+omeify inspect image.tif -i --intelligence-source laboratory
+```
+
+Repeat `--intelligence-scope` to supply an ordered preference; supplied values
+replace the default pair. An explicit source name must still satisfy the scopes.
+The `external` scope is available only by explicitly including it. Scope labels
+are configuration declarations, not proof of institutional approval or privacy.
+All `--intelligence-*` options require `-i`.
+
+**Evidence collection is independent of `--detail` and `--max-text-length`.** It
+walks physical TIFF directories, including SubIFDs and IFDs behind lightweight
+frames, without decoding raster pixels. XML attributes/text and JSON metadata are
+flattened into records; XML comments are treated as data too. Duplicate field/value
+pairs share a record with occurrence counts and up to eight source locations.
+Sources are cited by TIFF directory and metadata field. OME Image indices in XML
+paths are not assumed to equal TIFF series indices, and file-wide OME metadata is
+not incorrectly attributed only to the first stored plane.
+
+The model receives those records, not the file's current path/name, filesystem
+timestamps, ordinary inspection warnings, pixels, or attachments. Paths already
+embedded in metadata are intentionally included. It gets no callable tools or
+permission to open embedded paths/URLs. XML DTDs and known binary/pixel blocks are
+omitted; external XML entities are never expanded. No prompt or response log is
+written by omeify.
+
+The default **16,000-character serialized-record budget** includes record locations
+and JSON escaping, but excludes the small coverage object, instructions, response
+schema, and output. It is not a token/context-window guarantee. To change it:
+
+```bash
+omeify inspect image.tif -i --intelligence-max-chars 32000
+```
+
+Collection prioritizes likely identifiers, dates, paths and scientific fields,
+with round-robin selection across directory/OME Image groups. This is a bounded
+summary, not an exhaustive metadata scanner: long values are split into
+contiguous 2,048-character excerpts with 128-character overlap, with their character
+ranges recorded in the source locations. Excerpt records are flagged as truncated
+even when all excerpts fit the packet. Collection stops at 4,096 directories, 20,000
+unique records or an 8 MiB tag-value scan budget, and skips individual tags larger
+than 1 MiB. Binary/large numeric arrays and encoded XML payloads are omitted.
+Coverage reports record selection, truncation, unreadable/oversized tags and scan
+limits. These limits bound this collector, not memory already used by tifffile
+when opening/parsing a file. A larger endpoint context can justify increasing the
+record budget, but does not remove the independent scan limits.
+
+The authoritative contracts are packaged JSON Schemas:
+
+```text
+omeify/schemas/tiff_inspection.schema.json          inspection schema 1.3
+omeify/schemas/metadata_intelligence.schema.json    intelligence schema 1.0
+```
+
+The requested response schema is derived from the latter's summary definition.
+Source identity, allowed scopes, coverage and the supplied evidence catalog are
+filled by omeify, not by the model. After response-schema validation, each quote
+must occur verbatim in its referenced record and each extracted value must occur
+inside a cited quote. XML entity spellings are decoded during collection; evidence
+is checked against that extracted text. A failed request, invalid JSON, invented
+quote or invented extracted value is an error, not an empty “all clear” summary.
+The CLI exits nonzero and leaves an existing output report untouched. Run without
+`-i` for ordinary inspection. JSON validation and quote checking do not establish
+that the model's interpretation, classifications or coverage are correct.
+
+> **Not deidentification or scientific validation.** A summary can miss information
+> or misinterpret genuine evidence. “Not reported” applies only to the supplied
+> metadata and the model's response. Reports themselves may expose identifying
+> data; no burned-in labels, raster content or tissue quality were examined.
+
 ### `omeify version`
 
 ```bash
@@ -587,6 +702,65 @@ report = mutate(
 
 print(report["float_precision_mutation"])
 ```
+
+### Metadata intelligence
+
+Inference is an explicit library operation, never a side effect of constructing,
+printing or serializing an ordinary inspector:
+
+```python
+from omeify import TiffInspector
+
+inspector = TiffInspector("image.ome.tif")
+result = inspector.summarize_metadata()  # One request, institutional then local.
+print(result["summary"]["findings"])
+print(inspector.render_text())          # Reuses the attached result; no new request.
+inspection_json = inspector.to_json()   # Includes evidence records and coverage.
+assert inspector.validation_errors() == ()
+```
+
+An application can supply its own registry while retaining the same restrictions:
+
+```python
+from sheetbend import Registry
+
+result = inspector.summarize_metadata(
+    registry=Registry.from_file(),
+    source_name="laboratory",
+    allowed_scopes=["institutional", "local"],
+    max_metadata_chars=16000,
+    max_output_tokens=4096,
+)
+```
+
+`model_name=` optionally selects another configured model on the selected source.
+The output-token setting defaults to 4,096 and is passed through LLM; actual token
+accounting, context limits and reasoning behavior depend on the configured model.
+No temperature, seed or model-specific reasoning policy is imposed by omeify.
+Calling `summarize_metadata()` again deliberately makes a new request. Path-backed
+inspectors refresh local diagnostics and metadata together before summarization;
+`from_tiff()` reuses the caller-owned handle without closing it. Inspector-owned
+opens disable external OME companion-file loading.
+
+To inspect exactly which metadata records would be supplied, without inference or
+optional dependencies:
+
+```python
+import tifffile
+from omeify.intelligence import collect_metadata
+
+with tifffile.TiffFile("image.ome.tif", _multifile=False) as tiff:
+    packet = collect_metadata(tiff, max_chars=16000)
+
+print(packet["coverage"])
+# Inspect packet["records"] locally before any transmission.
+```
+
+`omeify.intelligence.summarize_metadata(packet)` is the explicit inference step;
+it returns the same schema-defined result that the inspector attaches. `metadata_summary_schema()` exposes the model-response schema for tests
+and integrations. Base tests use a model double; optional tests exercise real
+Sheetbend selection/capability checks and the actual LLM/SDK adapter against a
+synthetic loopback server. These tests do not measure a model's scientific accuracy.
 
 ### Pixel size
 
