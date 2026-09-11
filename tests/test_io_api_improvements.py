@@ -781,28 +781,81 @@ def test_label_reader_exposes_pixel_size(tmp_path: Path) -> None:
         assert reader.pixel_size == PixelSize(0.7, 0.8, "µm")
 
 
-def test_writer_serializes_pixel_size_unit_without_forcing_micrometers(
+@pytest.mark.parametrize(
+    ("pixel_size", "expected"),
+    [
+        (PixelSize(0.5, 0.6, "µm"), PixelSize(0.5, 0.6, "µm")),
+        (PixelSize(0.5, 0.6, "um"), PixelSize(0.5, 0.6, "µm")),
+        (PixelSize(0.5, 0.6, "μm"), PixelSize(0.5, 0.6, "µm")),
+        (PixelSize(500.0, 600.0, "nm"), PixelSize(0.5, 0.6, "µm")),
+        (PixelSize(0.0005, 0.0006, "mm"), PixelSize(0.5, 0.6, "µm")),
+        (PixelSize(0.00005, 0.00006, "cm"), PixelSize(0.5, 0.6, "µm")),
+        (PixelSize(5e-7, 6e-7, "m"), PixelSize(0.5, 0.6, "µm")),
+    ],
+)
+def test_writer_normalizes_ome_physical_size_to_micrometers(
     tmp_path: Path,
+    pixel_size: PixelSize,
+    expected: PixelSize,
 ) -> None:
-    output = tmp_path / "nanometers.ome.tif"
-    write_ometiff(
+    output = tmp_path / "normalized-units.ome.tif"
+    report = write_ometiff(
         output,
         channels=np.zeros((1, 16, 16), dtype=np.uint8),
         channel_names=["DAPI"],
-        pixel_size=PixelSize(500.0, 600.0, "nm"),
+        pixel_size=pixel_size,
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
     )
 
+    assert report["image"]["pixel_size"] == list(expected.to_tuple())
     with OMETiffReader(output) as reader:
-        assert reader.pixel_size == PixelSize(500.0, 600.0, "nm")
+        assert reader.pixel_size is not None
+        assert reader.pixel_size.x == pytest.approx(expected.x)
+        assert reader.pixel_size.y == pytest.approx(expected.y)
+        assert reader.pixel_size.unit == "µm"
     with tifffile.TiffFile(output) as tiff:
         assert tiff.ome_metadata is not None
-        assert 'PhysicalSizeX="500.0"' in tiff.ome_metadata
-        assert 'PhysicalSizeXUnit="nm"' in tiff.ome_metadata
-        assert 'PhysicalSizeY="600.0"' in tiff.ome_metadata
-        assert 'PhysicalSizeYUnit="nm"' in tiff.ome_metadata
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(tiff.ome_metadata)
+        pixels = next(
+            element for element in root.iter()
+            if element.tag.rsplit("}", 1)[-1] == "Pixels"
+        )
+        assert float(pixels.attrib["PhysicalSizeX"]) == pytest.approx(expected.x)
+        assert pixels.attrib["PhysicalSizeXUnit"] == "µm"
+        assert float(pixels.attrib["PhysicalSizeY"]) == pytest.approx(expected.y)
+        assert pixels.attrib["PhysicalSizeYUnit"] == "µm"
+
+
+def test_convert_normalizes_source_ome_physical_size_to_micrometers(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "millimeters.ome.tif"
+    output = tmp_path / "normalized.ome.tif"
+    data = np.zeros((1, 16, 16), dtype=np.uint16)
+    _write_planar_ome(
+        source,
+        data,
+        names=["DAPI"],
+        pixel_size=PixelSize(0.0005, 0.0006, "mm"),
+    )
+
+    report = convert(
+        source,
+        output,
+        input_type="ome_tiff",
+        compression="Uncompressed",
+        tile_size=16,
+        pyramid_levels=0,
+    )
+
+    assert report["input_file"]["pixel_size"] == [0.0005, 0.0006, "mm"]
+    assert report["image"]["pixel_size"] == [0.5, 0.6, "µm"]
+    with OMETiffReader(output) as reader:
+        assert reader.pixel_size == PixelSize(0.5, 0.6, "µm")
 
 
 def test_ome_tiff_input_is_rewritten_to_minimized_miti_contract(tmp_path: Path) -> None:

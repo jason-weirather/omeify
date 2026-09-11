@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Sequence
 
 import numpy as np
@@ -176,9 +177,12 @@ class PixelSize:
         except KeyError as exc:
             unsupported = self.unit if source_key not in _LENGTH_TO_METERS else unit
             raise ValueError(f"Unsupported physical-size unit {unsupported!r}") from exc
+        # Use decimal arithmetic for the scale so simple metadata conversions
+        # such as 500 nm -> 0.5 µm do not acquire avoidable binary tails.
+        scale = Decimal(str(source_factor)) / Decimal(str(target_factor))
         return PixelSize(
-            self.x * source_factor / target_factor,
-            self.y * source_factor / target_factor,
+            float(Decimal(str(self.x)) * scale),
+            float(Decimal(str(self.y)) * scale),
             canonical_length_unit(unit),
         )
 
@@ -265,14 +269,16 @@ def consistent_tiff_resolution_pixel_size(
 
 
 def normalize_ome_pixel_size(pixel_size: PixelSize) -> PixelSize:
-    """Validate and canonicalize a PixelSize at the OME serialization boundary."""
+    """Return an equivalent PixelSize using omeify's canonical OME unit, µm."""
 
     if not isinstance(pixel_size, PixelSize):
         raise TypeError("pixel_size must be a PixelSize instance")
     canonical = canonical_length_unit(pixel_size.unit)
-    if canonical == pixel_size.unit:
-        return pixel_size
-    return pixel_size.converted_to(canonical)
+    if canonical == "µm":
+        # Canonicalize aliases such as ``um`` and Greek-mu ``μm`` without
+        # performing unnecessary floating-point arithmetic.
+        return PixelSize(pixel_size.x, pixel_size.y, "µm")
+    return pixel_size.converted_to("µm")
 
 
 def pixel_size_from_xy_units(

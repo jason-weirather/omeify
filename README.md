@@ -214,6 +214,13 @@ inch or centimeter source units, and rounded to six significant digits to avoid 
 encoding noise into OME metadata. This reader normalization is separate from the
 inspection consistency check, which uses the original rational tags without that rounding.
 
+At the OME serialization boundary, omeify expresses every supported physical pixel size in
+**µm** while preserving the physical quantity. For example, `500 nm`, `0.0005 mm`, and `0.5 µm`
+all serialize as `PhysicalSizeX="0.5" PhysicalSizeXUnit="µm"`. Unit aliases such as `um` and
+Greek-mu `μm` are normalized to the micro sign spelling `µm`. This is a metadata representation
+policy, not a resampling or calibration change. TIFF `XResolution`/`YResolution` remain encoded
+independently using the writer's existing centimeter density convention.
+
 When no usable calibration remains, provide an explicit override:
 
 ```bash
@@ -531,9 +538,10 @@ IFDs. The result is stored in `report["calibration"]`, defined by the packaged
 
 TIFF `XResolution` and `YResolution` are **pixels per length**; OME `PhysicalSizeX` and
 `PhysicalSizeY` are **length per pixel**. TIFF's centimeter encoding and OME's µm encoding are
-compatible: 20,000 pixels/cm equals 0.5 µm/pixel. Omeify continues to write TIFF
-`ResolutionUnit=CENTIMETER` and explicit OME physical-size units, normally µm, with no new
-writer option or unit-policy change.
+compatible: 20,000 pixels/cm equals 0.5 µm/pixel. Omeify writes TIFF
+`ResolutionUnit=CENTIMETER` while canonicalizing OME `PhysicalSizeX`/`PhysicalSizeY` to explicit
+`µm`. The different unit spellings describe the same physical calibration and are checked after
+conversion to a common unit.
 
 The check converts both axes independently to µm/pixel using original TIFF rational values.
 Its documented tolerance is **1e-5 relative (10 parts per million), with zero absolute tolerance**:
@@ -898,9 +906,10 @@ level_one_size = pixel_size.scaled(2)
 nanometers = pixel_size.converted_to("nm")
 ```
 
-The value object does not impose a micrometer-only policy. OME serialization validates that its
-unit is a supported physical-length unit. Readers return `None` only when no usable calibration is
-available.
+The value object does not impose a micrometer-only policy: callers may construct and convert
+`PixelSize` values in any supported physical-length unit. OME serialization is the policy boundary
+and converts that quantity to canonical `µm`; readers return `None` only when no usable calibration
+is available.
 
 ### Readers and lazy channels
 

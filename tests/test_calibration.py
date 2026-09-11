@@ -438,7 +438,7 @@ def test_multi_series_writer_uses_the_same_calibration_verification(tmp_path):
     assert all(s["status"] == "consistent" for s in inspector.report["calibration"]["series"])
     assert inspector.validation_errors() == ()
     with OMETiffReader(path, series=1) as reader:
-        assert reader.pixel_size == PixelSize(250, 400, "nm")
+        assert reader.pixel_size == PixelSize(0.25, 0.4, "µm")
 
 
 def test_calibration_failure_preserves_destination_atomically(tmp_path, monkeypatch):
