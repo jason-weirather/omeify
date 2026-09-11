@@ -217,9 +217,68 @@ def _priority(record: dict[str, Any]) -> int:
     return 2
 
 
+def _question_terms(question: str | None) -> frozenset[str]:
+    if question is None:
+        return frozenset()
+    if not isinstance(question, str):
+        raise TypeError("question must be a string or None")
+    stopwords = {
+        "a", "an", "and", "are", "be", "can", "could", "do", "for", "from", "give", "gib",
+        "how", "i", "in", "is", "it", "me", "my", "of", "on", "please", "the", "this", "to",
+        "u", "what", "which", "with", "you",
+    }
+    return frozenset(_words(question) - stopwords)
+
+
+def _words(text: str) -> set[str]:
+    # Split XML-style CamelCase fields, accepting plurals without a search dependency.
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+    return {word[:-1] if len(word) > 3 and word.endswith("s") else word
+            for word in re.findall(r"[^\W_]+", text.casefold()) if len(word) > 1}
+
+
+def _inspection_context(report: dict[str, Any]) -> Iterator[tuple[str, str]]:
+    """Allowlist metadata-only statistics, never paths, names or diagnostic exceptions.
+
+    Use only fields present at every inspection detail level. Raw channel names
+    and per-IFD/pyramid metadata still come from the ordinary evidence collector.
+    This function neither opens a file nor enumerates TIFF series.
+    """
+
+    info = report["file"]
+    values = {key: info[key] for key in (
+        "format", "size_bytes", "byte_order", "is_bigtiff", "is_ome",
+        "series_count", "top_level_ifd_count",
+    )}
+    values["raster_pixels_examined"] = False
+    ome = report.get("ome")
+    if ome is not None:
+        values["ome_image_count"] = ome["image_count"]
+        values["miti_header_status"] = ome["miti"]["status"]
+        values["miti_header_missing_field_count"] = len(ome["miti"]["missing_fields"])
+    yield "omeify/inspection/file", "Computed file statistics: " + _json(values)
+    for item in report["series"][:_MAX_IFDS]:
+        values = {key: item[key] for key in (
+            "index", "axes", "shape", "dtype", "is_pyramidal", "level_count", "ome_image_index",
+        )}
+        try:
+            values["array_bytes"] = (
+                math.prod(item["shape"]) * np.dtype(item["dtype"]).itemsize
+                if item["shape"] else None
+            )
+        except (TypeError, ValueError):
+            values["array_bytes"] = None
+        yield (
+            f"omeify/inspection/series[{item['index']}]",
+            "Computed base-series layout (array_bytes excludes pyramids): " + _json(values),
+        )
+
+
 def collect_metadata(
     tiff: tifffile.TiffFile, *, max_chars: int = 32_000,
     calibration: dict[str, Any] | None = None,
+    inspection: dict[str, Any] | None = None,
+    question: str | None = None,
 ) -> dict[str, Any]:
     """Collect an inspectable inference packet without reading raster pixels.
 
@@ -237,12 +296,21 @@ def collect_metadata(
     Without this argument the packet contains raw metadata only; this function
     never enumerates series or opens OME companion files to obtain context.
 
+    ``inspection=`` may add allowlisted file and base-series layout statistics
+    from an existing inspection report. It never sends the report wholesale:
+    current paths/names, arbitrary diagnostic prose, and raster statistics are
+    excluded. Computed statistics share the same quarter-budget as calibration
+    records. At most 4,096 series statistics are considered; omissions are flagged.
+    ``question=`` gives matching field/value words priority within each source
+    group without an inference request or expanding any collection budget.
+
     This function is offline and requires no intelligence dependencies. The
     packet includes identifying source metadata and must be handled accordingly.
     """
 
     if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 4096:
         raise ValueError("max_chars must be an integer of at least 4096")
+    question_terms = _question_terms(question)
     coverage: dict[str, Any] = {
         "ifds_scanned": 0, "tags_scanned": 0, "records_available": 0,
         "records_included": 0, "records_truncated": 0, "metadata_chars": 0,
@@ -308,7 +376,14 @@ def collect_metadata(
         image = re.search(r"/OME/Image\[\d+\]", origin)
         group = origin[:image.end()] if image else origin.split("/", 1)[0]
         groups[group].append(record)
-    queues = deque(deque(sorted(group, key=_priority)) for group in groups.values())
+
+    def priority(record: dict[str, Any]) -> tuple[int, int]:
+        matches = bool(question_terms) and bool(
+            question_terms & _words(record["locations"][0] + " " + record["value"])
+        )
+        return (0 if matches else 1, _priority(record))
+
+    queues = deque(deque(sorted(group, key=priority)) for group in groups.values())
     selected: list[dict[str, Any]] = []
     used = 2  # JSON array brackets
     computed = []
@@ -316,21 +391,32 @@ def collect_metadata(
         from ._calibration import calibration_context
 
         summaries = calibration_context(calibration)
-        priority = {"mismatch": 0, "partial": 1, "not_comparable": 2, "consistent": 3}
+        calibration_priority = {"mismatch": 0, "partial": 1, "not_comparable": 2, "consistent": 3}
         for index in sorted(
             range(len(summaries)),
-            key=lambda i: priority[calibration["series"][i]["status"]],
+            key=lambda i: calibration_priority[calibration["series"][i]["status"]],
         ):
             computed.append({
                 "id": f"m{len(records) + index + 1}", "origin": "computed",
                 "locations": [f"omeify/calibration/series[{index}]"],
                 "value": summaries[index], "truncated": False, "occurrences": 1,
             })
-        for record in computed:
-            size = len(_json(record)) + (1 if selected else 0)
-            if len(record["value"]) <= _MAX_VALUE_CHARS and used + size <= max_chars // 4:
-                selected.append(record)
-                used += size
+    if inspection is not None:
+        if len(inspection["series"]) > _MAX_IFDS:
+            coverage["scan_limited"] = True
+        statistics = []
+        for index, (location, value) in enumerate(_inspection_context(inspection)):
+            statistics.append({
+                "id": f"m{len(records) + len(computed) + index + 1}", "origin": "computed",
+                "locations": [location], "value": value, "truncated": False, "occurrences": 1,
+            })
+        # File/layout facts are inexpensive and useful even for uncalibrated TIFFs.
+        computed = [*statistics, *computed]
+    for record in computed:
+        size = len(_json(record)) + (1 if selected else 0)
+        if len(record["value"]) <= _MAX_VALUE_CHARS and used + size <= max_chars // 4:
+            selected.append(record)
+            used += size
     computed_included = len(selected)
     while queues:
         queue = queues.popleft()
@@ -346,7 +432,7 @@ def collect_metadata(
         records_truncated=sum(record["truncated"] for record in selected),
         metadata_chars=used,
     )
-    if calibration is not None:
+    if calibration is not None or inspection is not None:
         coverage["computed_records_available"] = len(computed)
         coverage["computed_records_included"] = computed_included
     if len(coverage["warnings"]) > 20:

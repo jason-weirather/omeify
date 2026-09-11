@@ -101,10 +101,13 @@ def test_local_only_is_enforced(packet, connections):
     assert len(connections) == 1
 
 
+@pytest.mark.parametrize("question", [None, "What timestamp is stored?"])
 @pytest.mark.parametrize("name", [None, "external"])
-def test_external_is_never_implicitly_allowed(packet, connections, name):
+def test_external_is_never_implicitly_allowed(packet, connections, name, question):
     with pytest.raises(ai.IntelligenceError, match="allowed_scopes"):
-        ai.summarize_metadata(packet, registry=registry_with("external"), source_name=name)
+        ai.summarize_metadata(
+            packet, registry=registry_with("external"), source_name=name, question=question,
+        )
     assert not connections
 
 
@@ -116,13 +119,18 @@ def test_explicit_external_scope_is_deliberate(packet, connections):
     assert result["allowed_scopes"] == ["external"]
 
 
+@pytest.mark.parametrize("question", [None, "What timestamp is stored?"])
 @pytest.mark.parametrize("capability", ["json_schema", "system_prompt"])
-def test_capabilities_checked_before_credentials_and_connection(packet, connections, capability):
+def test_capabilities_checked_before_credentials_and_connection(
+    packet, connections, capability, question,
+):
     data = registry_with("local").to_dict()
     data["sources"]["local"]["auth"] = {"type": "bearer", "env": "NEVER_LOOK_THIS_UP"}
     data["sources"]["local"]["models"]["example"]["capabilities"][capability] = False
     with pytest.raises(ai.IntelligenceError, match=capability):
-        ai.summarize_metadata(packet, registry=sheetbend.Registry.from_dict(data))
+        ai.summarize_metadata(
+            packet, registry=sheetbend.Registry.from_dict(data), question=question,
+        )
     assert not connections
 
 

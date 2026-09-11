@@ -621,7 +621,11 @@ def mutate_command(
 )
 @click.option(
     "-i", "--intelligence", is_flag=True,
-    help="Summarize embedded metadata using Sheetbend; requires omeify[intelligence].",
+    help="Summarize metadata or answer --question using Sheetbend; requires omeify[intelligence].",
+)
+@click.option(
+    "-q", "--question", type=str, default=None, metavar="TEXT",
+    help="Answer a question about metadata and file/layout statistics; requires -i.",
 )
 @click.option(
     "--intelligence-source", type=str, default=None,
@@ -650,6 +654,7 @@ def inspect_command(
     max_text_length: int,
     output: Path | None,
     intelligence: bool,
+    question: str | None,
     intelligence_source: str | None,
     intelligence_scopes: tuple[str, ...],
     intelligence_max_chars: int,
@@ -662,6 +667,15 @@ def inspect_command(
     """
 
     ctx = click.get_current_context()
+    if question is not None:
+        if not intelligence:
+            raise click.UsageError("--question / -q requires --intelligence / -i")
+        from omeify.intelligence import IntelligenceError, _validate_question
+
+        try:
+            _validate_question(question)
+        except IntelligenceError as exc:
+            raise click.UsageError(str(exc)) from exc
     if not intelligence and any(
         ctx.get_parameter_source(name) != click.core.ParameterSource.DEFAULT
         for name in (
@@ -682,8 +696,13 @@ def inspect_command(
             max_text_length=None if max_text_length == 0 else max_text_length,
         )
         if intelligence:
-            click.echo("Summarizing embedded metadata through Sheetbend...", err=True)
+            click.echo(
+                "Answering image question through Sheetbend..." if question is not None
+                else "Summarizing embedded metadata through Sheetbend...",
+                err=True,
+            )
             inspector.summarize_metadata(
+                question=question,
                 source_name=intelligence_source, allowed_scopes=intelligence_scopes,
                 max_metadata_chars=intelligence_max_chars,
                 max_output_tokens=intelligence_max_output_tokens,

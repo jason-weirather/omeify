@@ -4,6 +4,7 @@ import html
 import json
 import math
 import re
+import shutil
 import textwrap
 from collections.abc import Collection
 from dataclasses import dataclass, field
@@ -870,6 +871,77 @@ def _intelligence_tree(report: dict[str, Any], max_text_length: int | None) -> _
     return root
 
 
+def _question_block(report: dict[str, Any]) -> str:
+    """Render one plain terminal answer, keeping exact unwrapped evidence in JSON."""
+
+    width = max(24, min(100, shutil.get_terminal_size(fallback=(88, 24)).columns))
+
+    def wrap(value: str, *, prefix: str = "", continuation: str | None = None) -> str:
+        # Escape ANSI, CR, backspace, bidi and other controls. Allow intentional
+        # line breaks, but never let a question or model response control the terminal.
+        safe = "".join(
+            char if char.isprintable() or char == "\n"
+            else char.encode("unicode_escape").decode("ascii")
+            for char in value
+        )
+        return "\n".join(
+            textwrap.fill(
+                line, width=width, initial_indent=prefix,
+                subsequent_indent=prefix if continuation is None else continuation,
+                break_long_words=True, break_on_hyphens=False,
+            ) if line.strip() else ""
+            for line in safe.split("\n")
+        )
+
+    answer = report["answer"]
+    lines = ["Image question (advisory)", "-" * min(width, 32)]
+    lines.append(wrap("Question: " + report["question"]))
+    status = {"answered": "Answer:", "partial": "Answer (partial):",
+              "unavailable": "Answer (unavailable):"}[answer["status"]]
+    lines.extend(["", status])
+    for index, paragraph in enumerate(answer["paragraphs"]):
+        if index:
+            lines.append("")
+        lines.append(wrap(paragraph["text"], prefix="  "))
+    if answer["items"]:
+        lines.append("")
+        for item in answer["items"]:
+            lines.append(wrap(
+                item["label"] + ": " + item["value"], prefix="  - ", continuation="    ",
+            ))
+    for caution in answer["cautions"]:
+        lines.extend(["", wrap("Note: " + caution["text"], prefix="  ")])
+    source = report["source"]
+    lines.extend(["", wrap(
+        f"Source: {source['name']} [{source['scope']}] / {source['model']}"
+    )])
+    ids = list(dict.fromkeys(
+        evidence["record_id"]
+        for statement in [*answer["paragraphs"], *answer["items"], *answer["cautions"]]
+        for evidence in statement["evidence"]
+    ))
+    if ids:
+        suffix = f" (+{len(ids) - 8} more)" if len(ids) > 8 else ""
+        lines.append(wrap(
+            "Evidence: " + ", ".join(ids[:8]) + suffix + "; full citations in --json."
+        ))
+    coverage = report["coverage"]
+    if (
+        coverage["scan_limited"] or coverage["records_truncated"]
+        or coverage["records_included"] < coverage["records_available"]
+        or any(value for key, value in coverage["omitted"].items()
+               if key != "binary_or_large_arrays")
+    ):
+        lines.append(wrap(
+            f"Coverage limited: {coverage['records_included']}/{coverage['records_available']} "
+            "collected records supplied; omissions or excerpts are detailed in --json."
+        ))
+    lines.append(wrap(
+        "Metadata only; no raster pixels examined. Interpretation may be incomplete."
+    ))
+    return "\n".join(lines)
+
+
 class TiffInspector:
     """Build a schema-backed, tree-like summary of any TIFF readable by tifffile.
 
@@ -1016,6 +1088,7 @@ class TiffInspector:
     def summarize_metadata(
         self,
         *,
+        question: str | None = None,
         registry: Registry | None = None,
         source_name: str | None = None,
         model_name: str | None = None,
@@ -1023,7 +1096,12 @@ class TiffInspector:
         max_metadata_chars: int = DEFAULT_MAX_METADATA_CHARS,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> dict[str, Any]:
-        """Explicitly infer and attach one validated metadata summary.
+        """Explicitly summarize metadata or answer a question through Sheetbend.
+
+        A supplied ``question`` replaces the broad intelligence summary with a
+        focused answer and adds allowlisted file/layout statistics to the same
+        bounded evidence packet. The ordinary inspection detail is unchanged.
+        Question text is sent to the endpoint and retained in the result.
 
         Collection ignores display detail/preview limits and never decodes raster
         pixels. Configuration, credentials, capabilities, and request lifetime
@@ -1036,12 +1114,16 @@ class TiffInspector:
         inference; external OME companion files are not opened.
         """
 
-        from omeify.intelligence import collect_metadata, summarize_metadata
+        from omeify.intelligence import _validate_question, collect_metadata, summarize_metadata
+
+        if question is not None:
+            _validate_question(question)
 
         if self._tiff is not None:
             self._report = self._build_report(self._tiff)
             packet = collect_metadata(
                 self._tiff, max_chars=max_metadata_chars, calibration=self._report["calibration"],
+                inspection=self._report if question is not None else None, question=question,
             )
         else:
             with tifffile.TiffFile(self.file_path, _multifile=False) as tiff:
@@ -1050,9 +1132,11 @@ class TiffInspector:
                 self._report = self._build_report(tiff)
                 packet = collect_metadata(
                     tiff, max_chars=max_metadata_chars, calibration=self._report["calibration"],
+                    inspection=self._report if question is not None else None, question=question,
                 )
         summary = summarize_metadata(
-            packet, registry=registry, source_name=source_name, model_name=model_name,
+            packet, question=question, registry=registry,
+            source_name=source_name, model_name=model_name,
             allowed_scopes=allowed_scopes, max_output_tokens=max_output_tokens,
         )
         self._report["intelligence"] = summary
@@ -1244,6 +1328,8 @@ class TiffInspector:
             warning_node.children.extend(_TreeNode(item) for item in report["warnings"])
             root.children.append(warning_node)
         if "intelligence" in report:
+            if "answer" in report["intelligence"]:
+                return _render_tree(root) + "\n\n" + _question_block(report["intelligence"])
             root.children.append(_intelligence_tree(report["intelligence"], self.max_text_length))
         return _render_tree(root)
 

@@ -15,7 +15,11 @@ import pytest
 import tifffile
 
 from omeify import TiffInspector
-from omeify.intelligence import IntelligenceError, metadata_summary_schema
+from omeify.intelligence import (
+    IntelligenceError,
+    metadata_question_schema,
+    metadata_summary_schema,
+)
 
 sheetbend = pytest.importorskip("sheetbend", reason="Optional Sheetbend is not installed")
 pytest.importorskip("llm", minversion="0.35", reason="Optional LLM integration is not installed")
@@ -35,7 +39,9 @@ def endpoint(tmp_path, monkeypatch):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             state["requests"].append({"path": self.path, "body": body})
-            packet = json.loads(body["messages"][-1]["content"])
+            payload = json.loads(body["messages"][-1]["content"])
+            question = payload.get("question")
+            packet = payload if question is None else payload["metadata"]
             record = next(r for r in packet["records"] if r["value"] == "SYNTHETIC-SLIDE")
             summary = {
                 "overview": {"text": "The metadata includes a slide label.",
@@ -46,8 +52,20 @@ def endpoint(tmp_path, monkeypatch):
                 }],
                 "cautions": [],
             }
+            if question is not None:
+                summary = {
+                    "status": "answered",
+                    "paragraphs": [{
+                        "text": "The slide identifier is listed below.", "record_ids": [],
+                    }],
+                    "items": [{"label": "Slide identifier", "record_id": record["id"]}],
+                    "cautions": [],
+                }
             if state["mode"] == "bad-evidence":
-                summary["overview"]["record_ids"][0] = "m999999"
+                if question is None:
+                    summary["overview"]["record_ids"][0] = "m999999"
+                else:
+                    summary["items"][0]["record_id"] = "m999999"
             content = "not JSON" if state["mode"] == "bad-json" else json.dumps(summary)
             response = {
                 "id": "fixture-completion", "object": "chat.completion", "created": 1,
@@ -79,8 +97,11 @@ def endpoint(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+@pytest.mark.parametrize("question", [None, "What is the slide identifier?"])
 @pytest.mark.parametrize("mode", ["valid", "bad-json", "bad-evidence", "http-error"])
-def test_actual_request_schema_identity_lifetime_and_failure_modes(endpoint, tmp_path, mode):
+def test_actual_request_schema_identity_lifetime_and_failure_modes(
+    endpoint, tmp_path, mode, question,
+):
     endpoint["mode"] = mode
     path = tmp_path / "DO_NOT_SEND_CURRENT_FILENAME.tif"
     tifffile.imwrite(
@@ -97,14 +118,18 @@ def test_actual_request_schema_identity_lifetime_and_failure_modes(endpoint, tmp
     })
     inspector = TiffInspector(path)
     if mode == "valid":
-        result = inspector.summarize_metadata(registry=registry)
-        assert result["summary"]["findings"][0]["value"] == "SYNTHETIC-SLIDE"
+        result = inspector.summarize_metadata(registry=registry, question=question)
+        if question is None:
+            assert result["summary"]["findings"][0]["value"] == "SYNTHETIC-SLIDE"
+        else:
+            assert result["answer"]["items"][0]["value"] == "SYNTHETIC-SLIDE"
+            assert result["question"] == question and "summary" not in result
         assert inspector.validation_errors() == ()
         inspector.to_json()
         inspector.render_text()
     else:
         with pytest.raises(IntelligenceError) as error:
-            inspector.summarize_metadata(registry=registry)
+            inspector.summarize_metadata(registry=registry, question=question)
         assert "DO_NOT_ECHO_PROVIDER_BODY" not in str(error.value)
         assert "intelligence" not in inspector.report
     assert len(endpoint["requests"]) == 1  # No catalog probes, retries, or render-time calls.
@@ -112,8 +137,10 @@ def test_actual_request_schema_identity_lifetime_and_failure_modes(endpoint, tmp
     assert request["path"] == "/v1/chat/completions"
     wire = request["body"]
     assert wire["response_format"]["type"] == "json_schema"
-    sent_packet = json.loads(wire["messages"][-1]["content"])
-    assert wire["response_format"]["json_schema"]["schema"] == metadata_summary_schema(
+    sent_payload = json.loads(wire["messages"][-1]["content"])
+    sent_packet = sent_payload if question is None else sent_payload["metadata"]
+    schema = metadata_summary_schema if question is None else metadata_question_schema
+    assert wire["response_format"]["json_schema"]["schema"] == schema(
         record_ids=[record["id"] for record in sent_packet["records"]],
     )
     assert "tools" not in wire

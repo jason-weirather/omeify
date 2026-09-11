@@ -690,7 +690,7 @@ The authoritative contracts are packaged JSON Schemas:
 
 ```text
 omeify/schemas/tiff_inspection.schema.json          inspection schema 1.4
-omeify/schemas/metadata_intelligence.schema.json    intelligence schema 1.1
+omeify/schemas/metadata_intelligence.schema.json    summaries 1.1; questions 1.2
 ```
 
 The packaged schema defines both the final `summary` and the model's smaller
@@ -720,7 +720,7 @@ its interesting content. XML entity spellings are decoded by the collector, and
 that extracted text is preserved exactly. JSON contains the complete supplied
 value; `--max-text-length` still bounds its pretty-print preview.
 
-New reports use intelligence schema **1.1**, with `prompt_version` **2.1** identifying
+Broad summary reports use intelligence schema **1.1**, with `prompt_version` **2.1** identifying
 record selection plus calibration guidance. Schema 1.0 reports with prompt 1.0/2.0 still validate;
 records without an `origin` field retain their original meaning as source metadata.
 A failed request, invalid JSON, unknown reference, or violated local constraint
@@ -737,6 +737,56 @@ Prose, classifications, and cautions remain advisory.
 > or misinterpret genuine evidence. “Not reported” applies only to the supplied
 > metadata and the model's response. Reports themselves may expose identifying
 > data; no burned-in labels, raster content or tissue quality were examined.
+
+#### Ask a focused image question
+
+```bash
+omeify inspect image.ome.tif -i --question "Can you give me a channel list?"
+omeify inspect image.ome.tif -i -q "What pixel size and dtype does this image use?"
+omeify inspect image.ome.tif -i -q "Do the TIFF and OME calibrations agree?" --json
+```
+
+`--question TEXT` / `-q TEXT` requires `-i` / `--intelligence`. Without `-i`, it is a usage
+error, not an implicit opt-in to inference. Empty/whitespace-only questions and questions over
+4,096 characters are rejected before collection or source selection. The image path is still
+required. The question is sent to the configured endpoint and retained in the report, so do not
+put information in it that the selected source is not authorized to receive.
+
+Question mode makes **one** Sheetbend request instead of the broad summary request. The normal
+inspection tree, including the selected `--detail`, is followed by a focused **Question / Answer**
+block; the extended metadata-intelligence overview/findings/categories are not generated or
+printed. Ordinary `-i` without a question is unchanged. Answers use plain text and application-
+formatted lists, wrap to terminal width (up to 100 columns, 88-column fallback), and escape
+terminal controls. `--max-text-length` does not truncate the answer or its selected values.
+Progress goes to stderr; the report goes to stdout or `--output`. `--json` remains one JSON
+object, with exact unwrapped question, answer, selected values, evidence, and coverage.
+
+The initial question interface knows only **metadata and file/layout statistics**: channel
+labels, dimensions, dtype, compression tags, calibration and its deterministic checks, file
+size, series/IFD/level counts, and estimated base-array bytes from shape and dtype. It does not
+scan raster pixels, measure intensities or histograms, count cells, or assess tissue/staining
+quality. Statistics already embedded in metadata are declarations, not measurements verified
+by this command. Missing information should produce a qualified or unavailable answer.
+
+For requested lists and exact values, the model selects evidence records and omeify copies
+their values locally. This preserves channel names and Unicode without trusting model
+transcription. The model still chooses records, labels them, and writes the interpretation;
+valid references do not prove that its choices or explanation are correct. A brief evidence-ID
+line is printed with the answer; full locations and exact quotations are retained in JSON.
+
+Question mode uses the same source, scopes, capability checks, character/token settings, error
+handling, and no-retry/no-fallback policy as ordinary intelligence. Within each source group,
+records matching words in the question are prioritized. File/layout statistics are generated
+from an allowlist of existing inspection fields, independent of display detail; current file
+paths/names and general diagnostic messages are not added to the packet. These computed records
+share the existing quarter-budget allowance with calibration evidence. Up to 4,096 series
+statistics are considered; scan and budget omissions remain visible in coverage. The question
+has its own 4,096-character limit and is outside the serialized-record character budget, but
+still consumes endpoint context. No images, tools, shell commands, or new dependencies are added.
+
+Question results use intelligence schema **1.2**, prompt **3.0**, and the mutually exclusive
+`question` / `answer` alternative to `summary`. Broad summaries still emit schema 1.1 / prompt
+2.1; older summary reports continue to validate. The enclosing inspection schema remains 1.4.
 
 ### `omeify version`
 
@@ -832,6 +882,18 @@ inspection_json = inspector.to_json()   # Includes evidence records and coverage
 assert inspector.validation_errors() == ()
 ```
 
+Use the same method for one focused question:
+
+```python
+result = inspector.summarize_metadata(question="List the channels in metadata order.")
+print(result["answer"]["status"])  # answered, partial, or unavailable
+print(inspector.render_text())    # Ordinary inspection plus Question / Answer block
+```
+
+Each call refreshes the metadata and replaces the previous intelligence result; rendering
+never makes a second request. With a question, the low-level inference payload separates
+`question` from the untrusted `metadata` packet instead of interpolating it into the system prompt.
+
 An application can supply its own registry while retaining the same restrictions:
 
 ```python
@@ -878,6 +940,22 @@ with tifffile.TiffFile("image.ome.tif", _multifile=False) as tiff:
     inspector = TiffInspector.from_tiff(tiff, file_path="image.ome.tif")
     packet = collect_metadata(tiff, calibration=inspector.report["calibration"])
 ```
+
+For question-mode evidence without making an inference request:
+
+```python
+with tifffile.TiffFile("image.ome.tif", _multifile=False) as tiff:
+    inspector = TiffInspector.from_tiff(tiff, file_path="image.ome.tif")
+    packet = collect_metadata(
+        tiff, calibration=inspector.report["calibration"], inspection=inspector.report,
+        question="List the channels.",
+    )
+```
+
+`omeify.intelligence.summarize_metadata(packet, question="List the channels.")` answers that
+question using the supplied packet. `metadata_question_schema(record_ids=...)` exposes its
+model-facing answer contract, with the same bound references and compact grammar projection
+as the summary schema.
 
 `omeify.intelligence.summarize_metadata(packet)` is the explicit inference step;
 it returns the same schema-defined result that the inspector attaches.
