@@ -29,6 +29,9 @@ def round_float32_mantissa(values: np.ndarray, mantissa_bits: int) -> np.ndarray
     Rounding is nearest with ties to even. NaN and infinity bit patterns are
     retained unchanged. The returned array remains float32 and therefore keeps
     the float32 exponent range even when its fractional precision is reduced.
+    If rounding a finite value would produce infinity, raise OverflowError
+    rather than silently introducing nonfinite pixels or clipping the value.
+    Non-native float32 input is byte-swapped without changing NaN payloads.
     """
 
     if isinstance(mantissa_bits, bool) or not isinstance(mantissa_bits, int):
@@ -38,10 +41,12 @@ def round_float32_mantissa(values: np.ndarray, mantissa_bits: int) -> np.ndarray
         raise ValueError("mantissa_bits must be between 0 and 23")
 
     source = np.asarray(values)
-    if source.dtype != np.dtype("float32"):
+    if source.dtype.newbyteorder("=") != np.dtype("float32"):
         raise TypeError(
             f"float mantissa trimming requires float32 pixels, found {source.dtype}"
         )
+    if not source.dtype.isnative:
+        source = source.byteswap().view(np.dtype("float32"))
     if bits_to_keep == _FLOAT32_FRACTION_BITS:
         return np.ascontiguousarray(source)
 
@@ -63,6 +68,11 @@ def round_float32_mantissa(values: np.ndarray, mantissa_bits: int) -> np.ndarray
     rounded = (magnitude & ~mask) + (
         increment.astype(np.uint32, copy=False) << np.uint32(discarded)
     )
+    if np.any(finite & (rounded >= np.uint32(0x7F800000))):
+        raise OverflowError(
+            f"Rounding float32 to {bits_to_keep} fraction bits would turn a finite "
+            "pixel into infinity; retain more bits or explicitly rescale upstream"
+        )
     magnitude[finite] = rounded[finite]
     raw[...] = sign | magnitude
     return output

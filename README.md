@@ -526,8 +526,11 @@ Inspection reports TIFF-tag-derived and OME-declared calibration separately. For
 channel names, dimensions, dimension order, and OME physical sizes are parsed from OME-XML rather
 than guessed from TIFF pages. Series metadata is associated through local `TiffData` ranges and
 full-resolution geometry, not an assumption that TIFF series and OME Image indices coincide.
-Ambiguous or incomplete associations remain unassigned. Inspection also reports the bundled
-MITI-header assessment and additional OME metadata outside omeify's minimized vocabulary.
+Ambiguous or incomplete associations remain unassigned. Readers use this same association and
+refuse an unassigned selected series rather than guessing channel identities or calibration.
+Metadata-only OME Images do not occupy TIFF-series positions; `series_names` follows TIFF-series
+order. Reader-owned opens do not follow external OME companion-file references. Inspection also
+reports the bundled MITI-header assessment and additional OME metadata outside omeify's minimized vocabulary.
 
 #### Deterministic calibration agreement
 
@@ -581,6 +584,11 @@ mismatch before installing the output.
 > **Inspection is not deidentification.** Text and JSON reports may contain source paths,
 > filenames, TIFF tags, vendor XML, scanner fields, or other identifying values. Review them before
 > sharing.
+
+XML comments and processing instructions are retained as diagnostic nodes without being mistaken
+for OME model elements. Ordinary text rendering escapes terminal/control and bidirectional
+formatting characters while preserving scientific Unicode such as µm. JSON retains the original
+source strings; display escaping is not deidentification.
 
 #### Optional metadata intelligence
 
@@ -991,6 +999,12 @@ is available.
 
 ### Readers and lazy channels
 
+`pixel_size_at_level(0)` uses the ordinary OME/fallback calibration policy. Reduced levels use
+consistent physical TIFF resolution tags on their own pages, normalized to µm. When those tags
+are unavailable it returns `None` with a warning, rather than deriving scale from rounded image
+dimensions or assuming a third-party pyramid is 2x. Omeify-written levels have explicit tags for
+the writer's `2**level` sampling scale, including odd-sized and one-pixel-wide images.
+
 The supported conversion profiles have corresponding readers:
 
 ```text
@@ -1086,6 +1100,11 @@ The option keeps float32 storage and exponent range while rounding every base an
 `N` stored fraction bits using nearest, ties-to-even rounding. `N=23` preserves full float32
 precision. For user-facing file mutation, prefer `omeify mutate --float32-mantissa-bits N` so the
 operation is explicit in the workflow and structured report.
+
+Float32 precision trimming accepts either input byte order, preserves NaN/infinity bit patterns
+and signed zeros, and does not mutate the caller's array. If rounding a finite extreme would
+produce infinity, it raises `OverflowError` before output installation. It does not silently
+saturate, rescale, or replace the pixel; retaining all 23 fraction bits remains a no-trimming path.
 
 Use `image_type="rgb"` for `YXS uint8` RGB and `image_type="label"` for one integer `YX` label
 raster. `image_type` is writer policy, not a private TIFF tag. OME-TIFF itself does not intrinsically
@@ -1283,14 +1302,31 @@ Before a temporary output replaces the destination, omeify checks:
 - re-read TIFF resolution/unit tags on every base and SubIFD plane against the intended calibration
   and the writer's known `2**level` sampling scale, including odd-sized pyramids
 - ICC profile preservation when supplied
-- representative-pixel decoding for lossy output
-- exact representative full-resolution values for lossless output
+- representative-pixel decoding at the base and every pyramid level, including lossy output
+- bitwise representative full-resolution values for lossless output, after byte-order normalization
+- representative lossless pyramid values against downsampling of the preceding decoded level
 - caller-supplied multi-series provenance and annotation links
 
 Successful single- and multi-series writer reports add `ome_physical_sizes_match_specs`,
 `tiff_calibration_matches_specs`, `pyramid_calibration_matches_specs`,
 `calibration_ifds_checked`, and `calibration_relative_tolerance` to their verification section.
 The calibration readback checks do not require any additional raster scan.
+
+Both writer reports also include `verification.pixel_verification` (version 1.0), which records
+`mode="sampled"`, decoded and compared point counts, checked plane/level counts, and comparison
+policies. The deterministic sample is top-left, center, and bottom-right, deduplicated for tiny
+planes. These checks are not exhaustive and do not certify unsampled pixels. Base comparisons
+include NaN payloads and signed zeros; nearest-neighbor pyramid comparisons are also bitwise.
+Mean-pyramid comparisons use numerical equality with NaNs equal at matching positions because
+arithmetic does not promise preservation of NaN payloads. JPEG levels are decoded but not value-
+compared against the preceding JPEG level, which is not their original uncompressed reference.
+The source reader is not an independent oracle; regression tests additionally compare complete
+small rasters against independently constructed arrays. No file checksums or full-slide
+verification scans are added.
+
+Float64 mean downsampling retries only overflowing groups of finite contributors using binary
+scaling before summation. Ordinary means retain their existing arithmetic; NaNs and infinities
+in source groups retain IEEE arithmetic behavior rather than being silently repaired.
 
 The conversion report keeps OME schema validity, MITI-header validity, and binary-output
 verification as distinct structured sections.
@@ -1308,9 +1344,21 @@ must account for their combined uncompressed pyramid footprint. Use `cache_direc
 `--cache-directory` to place that work on an appropriate local disk.
 
 Final output is written to a temporary file beside the destination. The writer validates OME
-metadata before construction, verifies the complete temporary TIFF after encoding, and replaces the
-destination atomically only after those checks pass. A failed write or verification does not
-destroy an existing valid output.
+metadata before construction, checks the temporary TIFF's structure and bounded raster samples
+after encoding, and installs the output atomically only after those checks pass. A failed write
+or verification does not destroy an existing valid output.
+
+With `overwrite=True`, installation atomically replaces the destination. With `overwrite=False`
+(or CLI `--no-overwrite`), installation uses an atomic same-filesystem hard link and refuses any
+existing destination entry, including a dangling symlink or a file created by another writer
+during processing. On a filesystem without hard-link support this mode fails rather than falling
+back to a race-prone replacement or non-atomic copy. Temporary output and pyramid scratch are
+cleaned up on these failures.
+
+Grayscale TIFF segment decoding preserves singleton spatial axes, including one-row strips and
+one-row terminal strips. A decoded segment must cover its entire promised in-bounds rectangle;
+a short or misplaced segment is an error, not implicitly padded missing data. Explicit sparse
+TIFF segments continue to read as zeros.
 
 ## Current limitations
 

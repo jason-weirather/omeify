@@ -91,12 +91,19 @@ class WriterEngine:
                     "Installing verified output atomically at %s",
                     self.settings.output_path,
                 )
-                os.replace(temporary_output, self.settings.output_path)
+                output_size = temporary_output.stat().st_size
+                if self.settings.overwrite:
+                    os.replace(temporary_output, self.settings.output_path)
+                else:
+                    # Both paths are on the destination filesystem. Creating a
+                    # hard link atomically fails if ANY entry already exists,
+                    # including a dangling symlink or a competing writer's file.
+                    # Do not fall back to check-then-replace or non-atomic copy.
+                    os.link(temporary_output, self.settings.output_path)
                 LOGGER.info("Verified output installed")
             finally:
                 temporary_output.unlink(missing_ok=True)
         LOGGER.info("Temporary pyramid cache removed")
-        output_size = self.settings.output_path.stat().st_size
         LOGGER.info(
             "Writer complete in %.2f seconds; output size=%s bytes",
             time.monotonic() - started,
@@ -108,7 +115,7 @@ class WriterEngine:
         )
 
     def _prepare_destination(self) -> None:
-        if self.settings.output_path.exists() and not self.settings.overwrite:
+        if os.path.lexists(self.settings.output_path) and not self.settings.overwrite:
             raise FileExistsError(
                 f"Output already exists: {self.settings.output_path}"
             )

@@ -48,8 +48,8 @@ def _xml_bytes(value: str) -> bytes:
     return normalized.encode("utf-8")
 
 
-def _local_name(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
+def _local_name(tag: Any) -> str:
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
 
 
 def _optional_text(value: Any) -> str | None:
@@ -213,8 +213,16 @@ def _xml_node_summary(
         ]
         omitted_children = max(0, len(children) - len(summarized_children))
 
+    name = _local_name(element.tag)
+    if not name:
+        if isinstance(element, etree._Comment):
+            name = "#comment"
+        elif isinstance(element, etree._ProcessingInstruction):
+            name = "#processing-instruction"
+        else:
+            name = "#entity"
     return {
-        "tag": _local_name(element.tag),
+        "tag": name,
         "attributes": attributes,
         "text": text,
         "text_truncated": text_truncated,
@@ -267,11 +275,15 @@ def _ome_summary(xml: str, max_text_length: int | None) -> dict[str, Any]:
     root = etree.fromstring(_xml_bytes(xml), parser=parser)
     namespace = etree.QName(root).namespace
 
-    image_elements = [child for child in root if _local_name(child.tag) == "Image"]
+    def tag(name: str) -> str:
+        return f"{{{namespace}}}{name}" if namespace else name
+
+    # Keep the same namespace-aware Image indexing as the TiffData mapper.
+    image_elements = [child for child in root if child.tag == tag("Image")]
     images: list[dict[str, Any]] = []
     for image_index, image in enumerate(image_elements):
         pixels = next(
-            (child for child in image if _local_name(child.tag) == "Pixels"),
+            (child for child in image if child.tag == tag("Pixels")),
             None,
         )
         if pixels is None:
@@ -296,8 +308,7 @@ def _ome_summary(xml: str, max_text_length: int | None) -> dict[str, Any]:
         channels: list[dict[str, Any]] = []
         tiff_data: list[dict[str, Any]] = []
         for child in pixels:
-            local = _local_name(child.tag)
-            if local == "Channel":
+            if child.tag == tag("Channel"):
                 channels.append(
                     {
                         "index": len(channels),
@@ -307,7 +318,7 @@ def _ome_summary(xml: str, max_text_length: int | None) -> dict[str, Any]:
                         "color": _safe_int(child.get("Color")),
                     }
                 )
-            elif local == "TiffData":
+            elif child.tag == tag("TiffData"):
                 tiff_data.append(
                     {
                         "ifd": _safe_int(child.get("IFD")),
@@ -684,11 +695,21 @@ def _format_physical_size(physical: dict[str, Any] | None) -> str | None:
     return ", ".join(values)
 
 
+def _terminal_text(value: str) -> str:
+    """Keep scientific Unicode and line breaks, but render terminal controls visibly."""
+
+    return "".join(
+        char if char.isprintable() or char == "\n"
+        else char.encode("unicode_escape").decode("ascii")
+        for char in value
+    )
+
+
 def _render_tree(root: _TreeNode) -> str:
-    lines = [root.label]
+    lines = [_terminal_text(root.label)]
 
     def visit(node: _TreeNode, prefix: str, is_last: bool) -> None:
-        label_lines = node.label.splitlines() or [""]
+        label_lines = _terminal_text(node.label).split("\n")
         lines.append(prefix + ("└── " if is_last else "├── ") + label_lines[0])
         child_prefix = prefix + ("    " if is_last else "│   ")
         lines.extend(child_prefix + line for line in label_lines[1:])

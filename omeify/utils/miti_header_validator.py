@@ -75,8 +75,8 @@ def _validator() -> Draft202012Validator:
     return Draft202012Validator(schema)
 
 
-def _local_name(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
+def _local_name(tag: Any) -> str:
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
 
 
 def _parse_bool(raw: str | None, field: str, errors: list[str]) -> bool | None:
@@ -467,6 +467,8 @@ def _find_extra_metadata(root: etree._Element) -> tuple[str, ...]:
 
         allowed_children = _ALLOWED_CHILDREN.get(tag, set())
         for child in element:
+            if not isinstance(child.tag, str):
+                continue  # Comments/PIs are not OME model elements.
             child_path = _indexed_child_path(path, child)
             child_tag = _local_name(child.tag)
             if child_tag not in allowed_children:

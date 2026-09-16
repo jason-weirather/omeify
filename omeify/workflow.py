@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Mapping, Sequence
 from numbers import Integral
@@ -30,7 +31,7 @@ def validate_image_paths(
         raise FileNotFoundError(f"Input image does not exist: {input_file}")
     if input_file.resolve() == output_file.resolve():
         raise ValueError("Input and output paths must be different")
-    if output_file.exists() and not overwrite:
+    if os.path.lexists(output_file) and not overwrite:
         raise FileExistsError(f"Output already exists: {output_file}")
     return input_file, output_file
 

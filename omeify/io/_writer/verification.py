@@ -13,7 +13,7 @@ from omeify.io.tiff import TiffPlaneReader
 
 from .configuration import OUTPUT_BYTEORDER, OUTPUT_COMPRESSION_CODES
 from .model import PreparedImage
-from .pyramid import series_layout_matches
+from .pyramid import downsample_region, series_layout_matches
 
 OME_NAMESPACE = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
 PYRAMID_NAMESPACE = "openmicroscopy.org/PyramidResolution"
@@ -39,6 +39,30 @@ class RasterVerification:
     series_checked: int
     planes_checked: int
     points_per_plane: int
+    base_points_checked: int
+    base_points_compared: int
+    pyramid_points_checked: int
+    pyramid_points_compared: int
+    plane_levels_checked: int
+
+    def pixel_coverage(self) -> dict[str, object]:
+        """Describe the bounds of successful raster checks, not a full-image certificate."""
+
+        return {
+            "schema_version": "1.0",
+            "mode": "sampled",
+            "sampling": "top_left_center_bottom_right_per_plane_per_level",
+            "all_pixels_checked": False,
+            "plane_levels_checked": self.plane_levels_checked,
+            "base_points_decoded": self.base_points_checked,
+            "lossless_base_points_compared": self.base_points_compared,
+            "pyramid_points_decoded": self.pyramid_points_checked,
+            "lossless_pyramid_points_compared": self.pyramid_points_compared,
+            "base_comparison": "bitwise_after_byte_order_normalization",
+            "pyramid_comparison": "nearest_bitwise_or_mean_numeric_equal_nan",
+            "pyramid_reference": "preceding_decoded_output_level_for_lossless_series",
+            "source_reader_independent": False,
+        }
 
 
 def verify_container(
@@ -86,7 +110,7 @@ def verify_prepared_images(
     output: tifffile.TiffFile,
     prepared: Sequence[PreparedImage],
 ) -> RasterVerification:
-    """Verify common series layouts, TIFF storage, decoding, and exact lossless pixels."""
+    """Verify layouts/storage and sampled base/pyramid values, without a full raster scan."""
 
     images = tuple(prepared)
     if len(output.series) != len(images):
@@ -103,6 +127,11 @@ def verify_prepared_images(
     page_offset = 0
     total_planes = 0
     points_per_plane = 0
+    base_points_checked = 0
+    base_points_compared = 0
+    pyramid_points_checked = 0
+    pyramid_points_compared = 0
+    plane_levels_checked = 0
     all_lossless = all(item.compression.lossless for item in images)
     any_subsampling = any(
         item.compression.subsampling is not None for item in images
@@ -179,6 +208,7 @@ def verify_prepared_images(
                         x,
                         x + 1,
                     )[0, 0, ...]
+                    base_points_checked += 1
                     if input_readers is None:
                         continue
                     source_value = input_readers[plane_index].read_region(
@@ -187,7 +217,8 @@ def verify_prepared_images(
                         x,
                         x + 1,
                     )[0, 0, ...]
-                    if not np.array_equal(source_value, output_value):
+                    base_points_compared += 1
+                    if not same_sample_bits(source_value, output_value):
                         raise ValueError(
                             "Lossless base-image verification failed at "
                             f"series {series_index}, plane {plane_index}, "
@@ -200,6 +231,10 @@ def verify_prepared_images(
             if input_readers is not None:
                 for reader in input_readers:
                     reader.clear_cache()
+        checked, compared, plane_levels = _verify_pyramid_pixels(series, item)
+        pyramid_points_checked += checked
+        pyramid_points_compared += compared
+        plane_levels_checked += spec.plane_count + plane_levels
         total_planes += spec.plane_count
 
     return RasterVerification(
@@ -209,7 +244,79 @@ def verify_prepared_images(
         series_checked=len(images),
         planes_checked=total_planes,
         points_per_plane=points_per_plane,
+        base_points_checked=base_points_checked,
+        base_points_compared=base_points_compared,
+        pyramid_points_checked=pyramid_points_checked,
+        pyramid_points_compared=pyramid_points_compared,
+        plane_levels_checked=plane_levels_checked,
     )
+
+
+def same_sample_bits(source: np.ndarray, output: np.ndarray) -> bool:
+    """Compare storage values including NaN payloads and signed zeros, not endianness."""
+
+    left, right = np.asarray(source), np.asarray(output)
+    if left.shape != right.shape or left.dtype.newbyteorder("=") != right.dtype.newbyteorder("="):
+        return False
+
+    def raw(value: np.ndarray) -> np.ndarray:
+        if not value.dtype.isnative:
+            value = value.byteswap().view(value.dtype.newbyteorder("="))
+        return np.ascontiguousarray(value).view(np.uint8)
+
+    return bool(np.array_equal(raw(left), raw(right)))
+
+
+def _verify_pyramid_pixels(
+    series: tifffile.TiffPageSeries, item: PreparedImage,
+) -> tuple[int, int, int]:
+    """Decode bounded samples at every level; compare lossless downsampling.
+
+    JPEG samples are only decoded: a previously JPEG-encoded level is not the
+    uncompressed source from which the staged pyramid was constructed.
+    """
+
+    checked = compared = plane_levels = 0
+    for level_index in range(1, len(series.levels)):
+        previous = series.levels[level_index - 1]
+        current = series.levels[level_index]
+        if len(current.pages) != item.spec.plane_count:
+            raise ValueError("Pyramid level does not contain the expected physical planes")
+        for plane_index in range(item.spec.plane_count):
+            output_reader = TiffPlaneReader(current.pages[plane_index].aspage(), cache_mib=16)
+            reference = (
+                TiffPlaneReader(previous.pages[plane_index].aspage(), cache_mib=16)
+                if item.compression.lossless else None
+            )
+            try:
+                for y, x in representative_coordinates(output_reader.height, output_reader.width):
+                    actual = output_reader.read_region(y, y + 1, x, x + 1)
+                    checked += 1
+                    if reference is None:
+                        continue
+                    expected = downsample_region(
+                        reference, out_y0=y, out_y1=y + 1, out_x0=x, out_x1=x + 1,
+                        method=item.downsample,
+                        float32_mantissa_bits=item.float32_mantissa_bits,
+                    )
+                    compared += 1
+                    matches = (
+                        np.array_equal(actual, expected, equal_nan=True)
+                        if item.downsample == "mean" and item.spec.dtype.kind == "f"
+                        else same_sample_bits(expected, actual)
+                    )
+                    if not matches:
+                        raise ValueError(
+                            "Lossless pyramid verification failed at "
+                            f"{item.display_name}, plane {plane_index}, "
+                            f"level {level_index}, y={y}, x={x}"
+                        )
+            finally:
+                output_reader.clear_cache()
+                if reference is not None:
+                    reference.clear_cache()
+            plane_levels += 1
+    return checked, compared, plane_levels
 
 
 def representative_coordinates(

@@ -315,7 +315,7 @@ def convert_command(
     overwrite: bool,
     verbose: int,
 ) -> None:
-    """Convert INPUT_PATH into a deidentified pyramidal OME-TIFF at OUTPUT_PATH."""
+    """Convert INPUT_PATH into a metadata-minimized pyramidal OME-TIFF at OUTPUT_PATH."""
 
     _configure_logging(verbose)
     rename_channels, rename_mode = _load_channel_renames(

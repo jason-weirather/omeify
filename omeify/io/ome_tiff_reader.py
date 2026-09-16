@@ -46,7 +46,7 @@ class _OMETiffReaderCore:
     def open(self):
         if self._tiff is not None:
             return self
-        tiff = tifffile.TiffFile(self.path)
+        tiff = tifffile.TiffFile(self.path, _multifile=False)
         try:
             if not tiff.is_ome:
                 raise ValueError(f"TIFF does not contain recognized OME metadata: {self.path}")
@@ -60,6 +60,11 @@ class _OMETiffReaderCore:
             raise
         self._tiff = tiff
         self._inspection = None
+        try:
+            self._ome_image_summary()
+        except Exception:
+            self.close()
+            raise
         return self
 
     def close(self) -> None:
@@ -108,15 +113,9 @@ class _OMETiffReaderCore:
 
     @property
     def series_names(self) -> tuple[str | None, ...]:
-        """Return ordered OME ``Image/@Name`` values without synthesizing names."""
+        """Return OME names in TIFF-series order, excluding metadata-only Images."""
 
-        ome = self.inspection_report.get("ome")
-        images = [] if ome is None else list(ome.get("images", []))
-        if len(images) != self.series_count:
-            raise ValueError(
-                f"OME metadata describes {len(images)} Images, but TIFF exposes "
-                f"{self.series_count} series"
-            )
+        images = (self._mapped_ome_image(index) for index in range(self.series_count))
         return tuple(
             None if image.get("name") in {None, ""} else str(image["name"])
             for image in images
@@ -170,14 +169,29 @@ class _OMETiffReaderCore:
     def inspection_report(self) -> dict[str, Any]:
         return self.inspection.report
 
-    def _ome_image_summary(self) -> dict[str, Any] | None:
-        ome = self.inspection_report.get("ome")
-        if ome is None:
-            return None
-        images = ome.get("images", [])
-        if self.series_index >= len(images):
-            return None
-        return images[self.series_index]
+    def _mapped_ome_image(self, series_index: int) -> dict[str, Any]:
+        """Resolve metadata through inspection's authoritative local TiffData map.
+
+        Ordinals, names and equal dimensions are not evidence of identity.
+        Incomplete/ambiguous/scan-limited mappings must not become generated
+        channel names or TIFF-calibration fallbacks during conversion.
+        """
+
+        report = self.inspection_report
+        ome = report.get("ome")
+        mappings = report["calibration"]["series"]
+        mapping = mappings[series_index]
+        image_index = mapping["ome_image_index"]
+        images = [] if ome is None else ome.get("images", [])
+        if image_index is None or not 0 <= image_index < len(images):
+            raise ValueError(
+                f"Cannot associate TIFF series {series_index} with an OME Image: "
+                f"{mapping['mapping_reason']}. Refusing to guess channel identity or calibration."
+            )
+        return images[image_index]
+
+    def _ome_image_summary(self) -> dict[str, Any]:
+        return self._mapped_ome_image(self.series_index)
 
     @property
     def pixel_size(self) -> PixelSize | None:
@@ -214,18 +228,23 @@ class _OMETiffReaderCore:
         return fallback
 
     def pixel_size_at_level(self, level: int) -> PixelSize | None:
-        selected = self._selected_level(level)
-        base_size = self.pixel_size
-        if base_size is None:
-            return None
-        base_shape = dict(zip(self.axes, self.shape))
-        level_shape = dict(zip(str(selected.axes), tuple(int(item) for item in selected.shape)))
-        if not {"X", "Y"}.issubset(base_shape) or not {"X", "Y"}.issubset(level_shape):
-            raise ValueError("Cannot calculate level pixel size without X and Y axes")
-        return base_size.scaled(
-            base_shape["X"] / level_shape["X"],
-            base_shape["Y"] / level_shape["Y"],
-        )
+        """Return declared level calibration, never a rounded-dimension ratio.
+
+        Level zero uses the ordinary OME/fallback policy. Reduced levels use
+        their own TIFF resolution tags (normalized to µm). Missing tags mean
+        unknown calibration, not an assumed 2x pyramid for a third-party file.
+        """
+
+        self._selected_level(level)  # Validate even when no calibration is present.
+        if int(level) == 0:
+            return self.pixel_size
+        size = consistent_tiff_resolution_pixel_size(self._level_pages(level))
+        if size is None:
+            LOGGER.warning(
+                "OME-TIFF pyramid level %s has no usable TIFF calibration; "
+                "pixel size will not be inferred from rounded dimensions.", level,
+            )
+        return size
 
     def _selected_level(self, level: int) -> tifffile.TiffPageSeries:
         level_index = int(level)

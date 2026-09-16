@@ -148,18 +148,51 @@ def mean_downsample_2x(
         else np.float64
     )
     accumulator = np.zeros(accumulator_shape, dtype=accumulator_dtype)
-    for delta_y in (0, 1):
-        for delta_x in (0, 1):
-            sample = block[delta_y::2, delta_x::2, ...]
-            height, width = sample.shape[:2]
-            accumulator[:height, :width, ...] += sample.astype(
-                accumulator_dtype,
-                copy=False,
-            )
-            counts[:height, :width] += 1
-    return (
-        accumulator / _broadcast_counts(counts, block.ndim)
-    ).astype(dtype, copy=False)
+    with np.errstate(over="ignore", invalid="ignore"):
+        for delta_y in (0, 1):
+            for delta_x in (0, 1):
+                sample = block[delta_y::2, delta_x::2, ...]
+                height, width = sample.shape[:2]
+                accumulator[:height, :width, ...] += sample.astype(
+                    accumulator_dtype,
+                    copy=False,
+                )
+                counts[:height, :width] += 1
+        result = accumulator / _broadcast_counts(counts, block.ndim)
+    if dtype.kind == "f" and dtype.itemsize == 8 and np.any(~np.isfinite(result)):
+        _recover_finite_means(block, result, counts)
+    return result.astype(dtype, copy=False)
+
+
+def _recover_finite_means(
+    block: np.ndarray, result: np.ndarray, counts: np.ndarray,
+) -> None:
+    """Repair only accumulator overflow with exclusively finite contributors.
+
+    Ordinary means keep their original arithmetic/rounding. A nonfinite input
+    still propagates through IEEE arithmetic. Divide before summation only in
+    overflowing groups. Counts are 1, 2 or 4, so this is binary scaling rather
+    than a data-dependent normalization that could magnify cancellation errors.
+    """
+
+    finite = np.ones(result.shape, dtype=bool)
+    for dy in (0, 1):
+        for dx in (0, 1):
+            sample = block[dy::2, dx::2, ...]
+            region = (slice(0, sample.shape[0]), slice(0, sample.shape[1]))
+            finite[region] &= np.isfinite(sample)
+    recover = finite & ~np.isfinite(result)
+    if not np.any(recover):
+        return
+    normalized = np.zeros(result.shape, dtype=np.float64)
+    divisors = np.broadcast_to(_broadcast_counts(counts, block.ndim), result.shape)
+    for dy in (0, 1):
+        for dx in (0, 1):
+            sample = block[dy::2, dx::2, ...]
+            region = (slice(0, sample.shape[0]), slice(0, sample.shape[1]))
+            selected = recover[region]
+            normalized[region][selected] += sample[selected] / divisors[region][selected]
+    result[recover] = normalized[recover]
 
 
 def tile_count(

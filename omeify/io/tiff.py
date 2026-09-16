@@ -81,6 +81,8 @@ class TiffPlaneReader:
                 "omeify supports one grayscale sample or three interleaved RGB samples "
                 f"per TIFF page; found SamplesPerPixel={self.samples_per_pixel}."
             )
+        if int(getattr(page, "imagedepth", 1)) != 1:
+            raise ValueError("TiffPlaneReader requires a two-dimensional TIFF plane")
         if self.samples_per_pixel > 1 and int(page.planarconfig) != 1:
             raise ValueError(
                 "RGB input must use contiguous samples (PlanarConfiguration=1); "
@@ -134,11 +136,11 @@ class TiffPlaneReader:
             array = array[0]
 
         if self.samples_per_pixel == 1:
-            if array.ndim == 3:
-                if array.shape[0] == 1:
-                    array = array[0]
-                elif array.shape[-1] == 1:
-                    array = array[..., 0]
+            # tifffile decodes segments as (depth, Y, X, samples). After
+            # removing depth above, a grayscale sample axis is ALWAYS last.
+            # A singleton Y is real image geometry, notably one-row strips.
+            if array.ndim == 3 and array.shape[-1] == 1:
+                array = array[..., 0]
             if array.ndim != 2:
                 raise ValueError(f"Unsupported decoded grayscale TIFF segment shape {array.shape}")
             return array
@@ -195,16 +197,29 @@ class TiffPlaneReader:
             origin_y = segment_y * self.segment_height
             origin_x = segment_x * self.segment_width
 
+        segment_y, segment_x = divmod(index, self.segments_across)
+        expected_origin = (segment_y * self.segment_height, segment_x * self.segment_width)
+        if (origin_y, origin_x) != expected_origin:
+            raise ValueError(f"TIFF segment {index} has an unexpected spatial origin")
         valid_h = min(self.segment_height, self.height - origin_y)
         valid_w = min(self.segment_width, self.width - origin_x)
+        if valid_h <= 0 or valid_w <= 0:
+            raise ValueError(f"TIFF segment {index} lies outside the plane")
         if decoded is None:
-            array = self._empty_segment(max(0, valid_h), max(0, valid_w))
+            if encoded is not None:
+                raise ValueError(f"TIFF segment {index} has data but decoded to no pixels")
+            array = self._empty_segment(valid_h, valid_w)
         else:
             array = self._normalize_decoded(decoded)
+            # Never silently leave zeros where a truncated/misinterpreted
+            # segment failed to cover its promised in-bounds rectangle.
+            if array.shape[0] < valid_h or array.shape[1] < valid_w:
+                raise ValueError(
+                    f"TIFF segment {index} decoded shape {array.shape} does not cover "
+                    f"its in-bounds rectangle {(valid_h, valid_w)}"
+                )
             if array.dtype != self.dtype:
                 array = array.astype(self.dtype, copy=False)
-            valid_h = min(array.shape[0], self.height - origin_y)
-            valid_w = min(array.shape[1], self.width - origin_x)
             array = np.ascontiguousarray(array[:valid_h, :valid_w, ...])
 
         value = (array, origin_y, origin_x)

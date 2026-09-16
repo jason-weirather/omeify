@@ -173,6 +173,7 @@ def verify_single_output(
         verification["base_pixel_values_match"] = (
             True if prepared.compression.lossless else None
         )
+        verification["pixel_verification"] = raster.pixel_coverage()
         verification["planes_checked"] = raster.planes_checked
         verification["channels_checked"] = spec.size_c
         verification["points_per_plane"] = raster.points_per_plane

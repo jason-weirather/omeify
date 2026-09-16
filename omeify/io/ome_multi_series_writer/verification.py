@@ -136,6 +136,7 @@ def verify_output(
             True if raster.all_lossless else None
         )
         verification["series_checked"] = raster.series_checked
+        verification["pixel_verification"] = raster.pixel_coverage()
         verification["planes_checked"] = raster.planes_checked
         verification["points_per_plane"] = raster.points_per_plane
     return verification
