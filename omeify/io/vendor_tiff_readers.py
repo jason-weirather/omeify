@@ -22,6 +22,8 @@ from .akoya_qptiff import (
 )
 from .base import ChannelSelection, MultichannelImage
 from .channel import Channel, normalize_channel_indices
+from .image_metadata import ImageMetadata
+from .image_source import ImageSource
 from .indica_mif import (
     IndicaMIFMetadata,
     build_indica_mif_series,
@@ -127,6 +129,8 @@ class _VendorTiffReader(MultichannelImage):
         if channel_name_field not in {"name", "biomarker", "auto"}:
             raise ValueError("channel_name_field must be 'name', 'biomarker', or 'auto'")
         self._path = Path(path)
+        self._image_generation = 0
+        self._semantic_source = None
         self.series_index = int(series)
         if self.series_index < 0:
             raise ValueError("series must be zero or greater")
@@ -148,6 +152,30 @@ class _VendorTiffReader(MultichannelImage):
         return self._path
 
     @property
+    def source(self) -> ImageSource:
+        """A session-bound adapter borrowing this reader's open handle."""
+        from .reader_source import ReaderImageSource
+        self._require_open()
+        if self._semantic_source is None:
+            self._semantic_source = ReaderImageSource(self)
+        return self._semantic_source.open()
+
+    @property
+    def metadata(self) -> ImageMetadata:
+        """Immutable, canonical image metadata; no raster materialization."""
+        from .reader_source import metadata_from_reader
+        return metadata_from_reader(self)
+
+    @property
+    def backing_paths(self) -> tuple[Path, ...]:
+        return (self.path,)
+
+    def _ensure_image_generation(self, generation: int) -> None:
+        self._require_open()
+        if generation != self._image_generation:
+            raise RuntimeError("Channel belongs to an earlier reader session; acquire it again")
+
+    @property
     def is_open(self) -> bool:
         return self._tiff is not None
 
@@ -160,6 +188,7 @@ class _VendorTiffReader(MultichannelImage):
             series, level0, pages = self._select_series(tiff)
 
             self._tiff = tiff
+            self._image_generation += 1
             self._series = series
             self._level0 = level0
             self._pages = pages
@@ -175,7 +204,23 @@ class _VendorTiffReader(MultichannelImage):
             self._reset()
             raise
 
+    def clear_cache(self) -> None:
+        self._require_open()
+        for channel in self._channels or ():
+            channel.clear_cache()
+
+    def pixel_size_at_level(self, level: int = 0) -> PixelSize | None:
+        self._selected_level(level)
+        if int(level) == 0:
+            return self.pixel_size
+        return consistent_tiff_resolution_pixel_size(self._level_pages(level))
+
     def close(self) -> None:
+        if self._semantic_source is not None:
+            self._semantic_source.close()
+            self._semantic_source = None
+        if self.is_open:
+            self._image_generation += 1
         if self._channels is not None:
             for channel in self._channels:
                 channel.clear_cache()
@@ -593,7 +638,10 @@ class _VendorTiffReader(MultichannelImage):
                                 level,
                             )
                         ),
-                        ensure_available=lambda: self._require_open(),
+                        ensure_available=(
+                            lambda generation=self._image_generation:
+                            self._ensure_image_generation(generation)
+                        ),
                         source_id=source_id,
                         id_is_generated=True,
                         source_metadata=source_metadata,

@@ -12,6 +12,8 @@ from omeify.inspection import TiffInspector
 
 from .base import ChannelSelection, LabelImage, MultichannelImage
 from .channel import Channel, normalize_channel_indices
+from .image_metadata import ImageMetadata
+from .image_source import ImageSource
 from .pixel_size import (
     PixelSize,
     consistent_tiff_resolution_pixel_size,
@@ -27,6 +29,8 @@ class _OMETiffReaderCore:
 
     def __init__(self, path: str | Path, *, series: int = 0) -> None:
         self._path = Path(path)
+        self._image_generation = 0
+        self._semantic_source = None
         self.series_index = int(series)
         if self.series_index < 0:
             raise ValueError("series must be zero or greater")
@@ -38,6 +42,30 @@ class _OMETiffReaderCore:
     @property
     def path(self) -> Path:
         return self._path
+
+    @property
+    def source(self) -> ImageSource:
+        """A session-bound adapter borrowing this reader's open handle."""
+        from .reader_source import ReaderImageSource
+        self._require_open()
+        if self._semantic_source is None:
+            self._semantic_source = ReaderImageSource(self)
+        return self._semantic_source.open()
+
+    @property
+    def metadata(self) -> ImageMetadata:
+        """Immutable, canonical image metadata; no raster materialization."""
+        from .reader_source import metadata_from_reader
+        return metadata_from_reader(self)
+
+    @property
+    def backing_paths(self) -> tuple[Path, ...]:
+        return (self.path,)
+
+    def _ensure_image_generation(self, generation: int) -> None:
+        self._require_open()
+        if generation != self._image_generation:
+            raise RuntimeError("Channel belongs to an earlier reader session; acquire it again")
 
     @property
     def is_open(self) -> bool:
@@ -59,6 +87,7 @@ class _OMETiffReaderCore:
             tiff.close()
             raise
         self._tiff = tiff
+        self._image_generation += 1
         self._inspection = None
         try:
             self._ome_image_summary()
@@ -67,7 +96,18 @@ class _OMETiffReaderCore:
             raise
         return self
 
+    def clear_cache(self) -> None:
+        """Release decoded segments without closing the file."""
+        self._require_open()
+        for reader in self._region_readers.values():
+            reader.clear_cache()
+
     def close(self) -> None:
+        if self._semantic_source is not None:
+            self._semantic_source.close()
+            self._semantic_source = None
+        if self.is_open:
+            self._image_generation += 1
         for reader in self._region_readers.values():
             reader.clear_cache()
         self._region_readers.clear()
@@ -520,7 +560,10 @@ class OMETiffReader(_OMETiffReaderCore, MultichannelImage):
                                 level,
                             )
                         ),
-                        ensure_available=lambda: self._require_open(),
+                        ensure_available=(
+                            lambda generation=self._image_generation:
+                            self._ensure_image_generation(generation)
+                        ),
                         source_id=None if source_id is None else str(source_id),
                         id_is_generated=source_id is None,
                         source_metadata=summary,

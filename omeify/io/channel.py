@@ -9,6 +9,7 @@ import numpy as np
 
 from .tiff import PlaneReader
 
+
 def normalize_channel_indices(
     selection: int | Sequence[int] | None,
     size: int,
@@ -17,13 +18,15 @@ def normalize_channel_indices(
 ) -> list[int]:
     if selection is None:
         return list(range(size))
-    if isinstance(selection, bool):
-        raise TypeError(f"{field} must be an integer index or a sequence of indices")
-    selected = (
-        [int(selection)]
-        if isinstance(selection, Integral) and not isinstance(selection, bool)
-        else [int(item) for item in selection]
-    )
+    if isinstance(selection, (bool, np.bool_, str, bytes)):
+        raise TypeError(f"{field} must be an integer index or a sequence of integer indices")
+    if isinstance(selection, Integral):
+        selected = [int(selection)]
+    else:
+        values = tuple(selection)
+        if any(isinstance(v, (bool, np.bool_)) or not isinstance(v, Integral) for v in values):
+            raise TypeError(f"{field} must contain integer indices, not booleans or floats")
+        selected = [int(v) for v in values]
     if not selected:
         raise ValueError(f"{field} must contain at least one index")
     for index in selected:
@@ -100,6 +103,8 @@ class Channel:
 
     def _reader(self, level: int = 0) -> PlaneReader:
         self._ensure()
+        if isinstance(level, (bool, np.bool_)) or not isinstance(level, Integral):
+            raise TypeError("level must be an integer")
         level_index = int(level)
         if level_index < 0:
             raise IndexError("Pyramid level must be zero or greater")
@@ -122,6 +127,10 @@ class Channel:
 
     def asarray(self, *, level: int = 0) -> np.ndarray:
         self._ensure()
+        if isinstance(level, (bool, np.bool_)) or not isinstance(level, Integral):
+            raise TypeError("level must be an integer")
+        if level < 0:
+            raise IndexError("Pyramid level must be zero or greater")
         if self._array_reader is not None:
             value = np.asarray(self._array_reader(int(level)))
         else:

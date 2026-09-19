@@ -1,13 +1,14 @@
 # omeify
 
-`omeify` is a Python toolkit for the OME-TIFF file boundary. Its main goal is to make reading,
-writing, and normalizing microscopy images into OME-TIFF predictable while keeping tight control
-over which metadata enters the resulting file.
+`omeify` is a Python toolkit for storage-independent microscopy image access and the OME-TIFF
+file boundary. Its main goal is to make reading, writing, and normalizing microscopy images
+predictable while keeping tight control over which metadata enters the resulting file.
 
 In practice, omeify focuses on three jobs:
 
-1. **Read and write OME-TIFF deliberately.** It provides bounded regional readers plus
-   single-image and heterogeneous multi-series writers for tiled, pyramidal OME-TIFF.
+1. **Access images and write OME-TIFF deliberately.** A shared image/source contract supports
+   real files, NumPy arrays, and externally implemented procedural sources. Bounded readers and
+   single-image/heterogeneous multi-series writers provide tiled, pyramidal OME-TIFF output.
 2. **Convert supported microscopy formats into OME-TIFF.** Conversion uses explicit source
    profiles rather than guessing from file extensions, normalizes layout, rebuilds pyramids, and
    verifies the written result before installation.
@@ -151,6 +152,9 @@ source-tree imports fall back to the neighboring `pyproject.toml`.
 
 ## Scope and capabilities
 
+- Storage-independent `ImageSource` backends and semantic multichannel, RGB, and label images
+- NumPy and OME-TIFF backends, context-managed borrowing/ownership, and immutable level descriptors
+- Image-aware streaming single-image, temporary, and multi-series writers
 - Explicit readers for supported vendor TIFFs and OME-TIFF
 - Bounded regional access without materializing a whole slide
 - Canonical planar multichannel, interleaved RGB, and label-image representations
@@ -162,7 +166,8 @@ source-tree imports fall back to the neighboring `pyproject.toml`.
 - TIFF and OME metadata inspection without decoding the complete raster
 - OME 2016-06 schema validation and a bundled MITI-aligned header profile
 
-Omeify owns the image-file boundary. It does not own segmentation, overlapping inference tiles,
+Omeify owns generic image access and the image-file boundary. It does not own segmentation,
+overlapping inference tiles,
 object reconciliation, patch scheduling, region measurements, or image-analysis policy.
 
 ## Supported inputs
@@ -997,6 +1002,83 @@ The value object does not impose a micrometer-only policy: callers may construct
 and converts that quantity to canonical `µm`; readers return `None` only when no usable calibration
 is available.
 
+### Storage-independent images and sources (0.17)
+
+`ImageSource` describes and serves pixel regions. `Image`, `MultichannelImage`, `RGBImage`, and
+`LabelImage` provide the semantic interface. The backend can be `ArraySource`, `OMETiffSource`,
+or an external provider. No source is required to invent a filesystem path. Mocktome-specific
+simulation and biological truth stay in Mocktome, not in Omeify.
+
+```python
+import numpy as np
+from omeify import MultichannelImage, OMETiffWriter, PixelSize
+
+array = np.zeros((3, 1024, 1536), dtype=np.float32)
+with MultichannelImage.from_array(
+    array, axes="CYX", channel_names=("DAPI", "CD3", "CD20"),
+    pixel_size=PixelSize(0.5, 0.5, "µm"), copy=False,
+) as image:
+    patch = image.read_region(100, 356, 200, 456, channels=[0, 2])
+    dapi = image.get_by_name("DAPI").read_region(100, 356, 200, 456)
+    report = OMETiffWriter(
+        "signals.ome.tif", compression="Deflate", tile_size=256, overwrite=False,
+    ).write(image)
+```
+
+Use `RGBImage.from_array(rgb, ...)` for interleaved `YXS` and
+`LabelImage.from_array(labels, ...)` for categorical integer `YX`. The three semantic image
+kinds can also wrap procedural sources; none is tied to NumPy or TIFF. Array wrapping is
+file-free, **not** an assertion that the underlying array was generated lazily.
+
+A procedural provider subclasses `ImageSource`, supplies immutable `ImageMetadata`, and implements
+`_read_region(y0, y1, x0, x1, *, level, channels)`. Omeify handles bounds/channel normalization,
+returned shape/dtype checks, byte-order normalization, owned regional results, and resource
+lifetime. Provider metadata discovery must not render pixels. Repeated/overlapping reads and
+channel subsets must agree: a source is one fixed observation, not a new random exposure per read.
+
+```python
+from omeify import MultichannelImage, OMETiffSource
+
+with MultichannelImage(OMETiffSource("signals.ome.tif")) as image:
+    print(image.channel_names, image.level_descriptors)
+    patch = image.read_region(100, 356, 200, 456)
+```
+
+`OMETiffReader(path)` remains supported directly, including its inspection and lazy-channel APIs.
+It now also exposes `.metadata`, `.level_descriptors`, `.as_image()` and a borrowing `.source`
+adapter. Native TIFF `.levels` objects remain available for compatibility. New generic consumers
+should use `.level_descriptors`, `.level_shape(level)`, `.pixel_size_at_level(level)`, and
+`.level_downsample(level)`. Sampling scales are explicit or unknown, never guessed from rounded
+pyramid dimensions.
+
+Images own their backend by default. Use `owns_source=False` to borrow an already-open source.
+Writers always borrow images; keep the image's `with` block active until the write finishes.
+Closing/reopening invalidates old Channel and writer adapters instead of silently rebinding them.
+Nested contexts on one composed image/source are rejected. `from_array()` returns an opened
+image and also works with `with`. Borrowed input arrays must not be mutated during observation;
+`copy=True` explicitly takes a complete snapshot.
+
+`OMETiffWriter(path, ...).write(image)` and `.write_image(image, level=0)` infer metadata from an
+open Image. `OMEImageSeries.from_image(name, image)` supplies the same source to heterogeneous
+output. `TemporaryOMETiffWriter.write(image)` and `write_ometiff(path, image=image, ...)` use the
+same engine. Existing array and `PlaneReaderSource` writer paths remain available. Output
+pyramids are still rebuilt, calibration is still mandatory for writing, label output stays
+lossless/nearest, and RGB writing stays uint8. No intensity scaling is hidden in source adaptation.
+Local source-file dependencies are protected from accidental overwrite, including link aliases.
+
+The provider contract, runnable procedural example, and notebook recipes are in
+[Images without files](docs/image_sources.md). From the repository root:
+
+```python
+from examples.image_sources import run_example
+result = run_example("Scratch/omeify_sources", overwrite=False)
+```
+
+This release adds the Omeify contract, not Mocktome's regional renderer or a GUI. Zarr/PNG
+backends and spatial view wrappers remain future adapters. Source-level thread safety is not
+assumed. Downstream packages with an `omeify<0.17` pin need that constraint reviewed for this
+upgrade; path-only application entry points do not automatically become Image-aware.
+
 ### Readers and lazy channels
 
 `pixel_size_at_level(0)` uses the ordinary OME/fallback calibration policy. Reduced levels use
@@ -1110,7 +1192,9 @@ Use `image_type="rgb"` for `YXS uint8` RGB and `image_type="label"` for one inte
 raster. `image_type` is writer policy, not a private TIFF tag. OME-TIFF itself does not intrinsically
 distinguish label values from intensity values.
 
-Advanced sources implement the small `PlaneReaderSource` protocol and call `write_source()`.
+An open `Image` can be passed to `.write(image)` without repeating its metadata; the writer
+requests bounded regions and never calls `image.asarray()`. Existing advanced sources implement
+the small `PlaneReaderSource` protocol and call `write_source()`.
 Conversion readers use this path directly, so the CLI and Python conversion helper do not maintain
 a separate writer implementation.
 
@@ -1163,7 +1247,9 @@ report = OMEMultiSeriesWriter(
 )
 ```
 
-Series names must be unique. Array-backed series may use NumPy memory maps. Advanced callers use
+Series names must be unique. `OMEImageSeries.from_image(name, image)` borrows any open semantic
+Image and infers its specification without reading pixels. Array-backed series may use NumPy
+memory maps. Advanced callers use
 `OMEImageSeries.from_source()` with the same `PlaneReaderSource` boundary as the ordinary writer.
 
 The multi-series writer accepts the same `float32_mantissa_bits=` precision control. A float32
@@ -1176,7 +1262,8 @@ Omeify does not interpret application-specific provenance fields.
 
 ### Convenience and temporary writers
 
-`write_ometiff()` accepts one `CYX` array, a list of `YX` arrays, or lazy `Channel` objects:
+`write_ometiff()` accepts one `CYX` array, a list of `YX` arrays, or lazy `Channel` objects through
+`channels=`. Alternatively, use `image=` with an open semantic Image and inferred metadata:
 
 ```python
 from omeify import PixelSize, write_ometiff

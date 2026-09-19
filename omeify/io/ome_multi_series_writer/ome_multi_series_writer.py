@@ -13,6 +13,7 @@ from omeify.io._writer import (
     validate_ome_xml,
 )
 from omeify.io._writer.configuration import OUTPUT_BYTEORDER
+from omeify.io.image_planes import protect_source_paths
 from omeify.utils.generate_ome_xml import (
     OMEIFY_PROVENANCE_NAMESPACE,
     generate_multi_series_ome_xml,
@@ -90,6 +91,8 @@ class OMEMultiSeriesWriter:
         """Write all series and return one structured construction report."""
 
         images = self._normalize_series(series)
+        for image in images:
+            protect_source_paths(image.source, self.output_path)
         provenance_json, normalized_provenance = _canonical_provenance(provenance)
         prepared = tuple(
             prepare_image(

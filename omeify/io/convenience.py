@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from .base import Image
 from .channel import Channel
 from .ome_tiff_writer import OMETiffWriter
 from .pixel_size import PixelSize
@@ -64,10 +65,11 @@ def _validate_reader_sequence(
 def write_ometiff(
     output_path: str | Path,
     *,
-    channels: np.ndarray | Sequence[np.ndarray] | Sequence[Channel],
+    channels: np.ndarray | Sequence[np.ndarray] | Sequence[Channel] | None = None,
+    image: Image | None = None,
     channel_names: Sequence[str] | None = None,
-    pixel_size: PixelSize,
-    image_type: ImageType = "multichannel",
+    pixel_size: PixelSize | None = None,
+    image_type: ImageType | None = None,
     **writer_options: Any,
 ) -> dict[str, object]:
     """Write a standardized OME-TIFF from arrays or lazy omeify Channels.
@@ -75,6 +77,19 @@ def write_ometiff(
     Lazy :class:`Channel` inputs are passed directly to the streaming writer;
     their ``array`` properties are not accessed.
     """
+
+    if image is not None:
+        if channels is not None:
+            raise TypeError("Pass image= or channels=, not both")
+        if not isinstance(image, Image):
+            raise TypeError("image must be an omeify Image")
+        return OMETiffWriter(
+            output_path, image_type=image_type, channel_names=channel_names,
+            pixel_size=pixel_size, **writer_options,
+        ).write(image)
+    if channels is None:
+        raise TypeError("Supply image= or channels=")
+    image_type = image_type or "multichannel"
 
     if "channel_names" in writer_options or "pixel_size" in writer_options:
         raise TypeError("channel_names and pixel_size must be passed through named arguments")

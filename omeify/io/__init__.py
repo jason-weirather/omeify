@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from .array_source import ArraySource
 from .base import Image, LabelImage, MultichannelImage, RGBImage
 from .channel import Channel
+from .image_metadata import ImageLevel, ImageMetadata
+from .image_source import ImageSource
 from .pixel_size import PixelSize
+from .reader_source import OMETiffSource, ReaderImageSource
 from .spec import ImageType, OMEImageSpec
 from .tiff import ArrayPlaneReader, PlaneReader, TiffPlaneReader
 from .vendor_tiff_readers import (
@@ -23,8 +27,12 @@ __all__ = [
     "AkoyaMIFQPTiffReader",
     "AperioSVSReader",
     "ArrayPlaneReader",
+    "ArraySource",
     "Channel",
     "Image",
+    "ImageLevel",
+    "ImageMetadata",
+    "ImageSource",
     "ImageType",
     "IndicaMIFTiffReader",
     "LabelImage",
@@ -34,11 +42,13 @@ __all__ = [
     "OMEMultiSeriesWriter",
     "OMETiffLabelReader",
     "OMETiffReader",
+    "OMETiffSource",
     "OMETiffWriter",
     "PixelSize",
     "PlaneReader",
     "PlaneReaderSource",
     "RGBImage",
+    "ReaderImageSource",
     "TemporaryOMETiffWriter",
     "TiffPlaneReader",
     "write_ometiff",

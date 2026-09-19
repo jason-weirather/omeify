@@ -21,6 +21,9 @@ from omeify.io._writer import (
 )
 from omeify.io._writer.configuration import OUTPUT_BYTEORDER
 from omeify.io._writer.single_verification import verify_single_output
+from omeify.io.base import Image
+from omeify.io.image_metadata import integer
+from omeify.io.image_planes import ImagePlaneSource, protect_source_paths
 from omeify.io.pixel_size import PixelSize
 from omeify.io.spec import ImageType, OMEImageSpec
 from omeify.utils.generate_ome_xml import generate_ome_xml
@@ -45,9 +48,9 @@ class OMETiffWriter:
         self,
         output_path: str | Path,
         *,
-        image_type: ImageType = "multichannel",
+        image_type: ImageType | None = None,
         channel_names: Sequence[str] | None = None,
-        pixel_size: PixelSize,
+        pixel_size: PixelSize | None = None,
         compression: str | None = None,
         jpeg_quality: int = 90,
         jpeg_subsampling: JPEGSubsampling = "444",
@@ -62,9 +65,9 @@ class OMETiffWriter:
         cache_directory: str | Path | None = None,
         icc_profile: bytes | None = None,
     ) -> None:
-        if image_type not in {"multichannel", "rgb", "label"}:
+        if image_type not in {None, "multichannel", "rgb", "label"}:
             raise ValueError("image_type must be 'multichannel', 'rgb', or 'label'")
-        if not isinstance(pixel_size, PixelSize):
+        if pixel_size is not None and not isinstance(pixel_size, PixelSize):
             raise TypeError("pixel_size must be a PixelSize instance")
 
         settings = WriterSettings.from_values(
@@ -83,7 +86,9 @@ class OMETiffWriter:
         )
         self._settings = settings
         self.output_path = settings.output_path
-        self.image_type: ImageType = image_type
+        self._image_type_explicit = image_type
+        self._downsample_requested = downsample
+        self.image_type: ImageType = image_type or "multichannel"
         self.channel_names = (
             None
             if channel_names is None
@@ -95,7 +100,7 @@ class OMETiffWriter:
         self.jpeg_subsampling = settings.jpeg_subsampling
         self.tile_size = settings.tile_size
         self.pyramid_levels = settings.pyramid_levels
-        self.downsample = resolve_downsample(image_type, downsample)
+        self.downsample = resolve_downsample(self.image_type, downsample)
         self.max_workers = settings.max_workers
         self.display_uuid = settings.display_uuid
         self.software = settings.software
@@ -110,16 +115,25 @@ class OMETiffWriter:
 
     def write(
         self,
-        image: np.ndarray,
+        image: np.ndarray | Image,
         *,
         axes: str | None = None,
+        level: int = 0,
     ) -> dict[str, object]:
-        """Write an in-memory array.
+        """Write an array or stream an open semantic Image without materializing it.
 
-        Accepted layouts are ``CYX`` or ``YX`` for multichannel images, ``YXS``
-        for RGB, and ``YX`` for labels. Reader-backed streaming sources use
-        the explicit :meth:`write_source` contract.
+        Image metadata supplies type, channel names, calibration, and ICC profile
+        unless explicitly overridden. A conflicting image_type/axes is an error.
+        Sources are borrowed and never closed here. Input pyramids are not copied;
+        output pyramids are rebuilt from the selected input level as before.
+        Arrays retain the historical behavior and require explicit pixel_size.
         """
+        if isinstance(image, Image):
+            if axes is not None and axes != image.metadata.axes:
+                raise ValueError("axes conflicts with the image's declared layout")
+            return self.write_image(image, level=level)
+        if integer(level, "level") != 0:
+            raise ValueError("level selection requires an Image, not an array")
 
         array = np.asarray(image)
         inferred_axes = axes
@@ -144,6 +158,17 @@ class OMETiffWriter:
             icc_profile=self.icc_profile,
         )
         return self._write_source(ArraySource(array, spec), spec)
+
+    def write_image(self, image: Image, *, level: int = 0) -> dict[str, object]:
+        """Materialize an open image through the existing bounded plane writer."""
+        source = ImagePlaneSource(image, level=level)
+        spec = source.output_spec(
+            image_type=self._image_type_explicit,
+            channel_names=self.channel_names,
+            pixel_size=self.pixel_size,
+            icc_profile=self.icc_profile,
+        )
+        return self._write_source(source, spec)
 
     def write_source(
         self,
@@ -174,6 +199,8 @@ class OMETiffWriter:
         dtype: np.dtype | str | type,
         icc_profile: bytes | None,
     ) -> OMEImageSpec:
+        if self.pixel_size is None:
+            raise ValueError("Array/plane-source writes require an explicit pixel_size=PixelSize(...)")
         return OMEImageSpec.from_shape(
             image_type=self.image_type,
             axes=axes,
@@ -189,11 +216,12 @@ class OMETiffWriter:
         source: PlaneReaderSource,
         spec: OMEImageSpec,
     ) -> dict[str, object]:
+        protect_source_paths(source, self.output_path)
         prepared = prepare_image(
             source,
             spec,
             name=None,
-            downsample=self.downsample,
+            downsample=self._downsample_requested,
             compression_name=self.compression_name,
             settings=self._settings,
             lossy_policy="rgb-only",
@@ -264,7 +292,7 @@ class OMETiffWriter:
             "pyramid": {
                 "tile_size": self.tile_size,
                 "axes": spec.output_axes,
-                "downsample_method": self.downsample,
+                "downsample_method": prepared.downsample,
                 "level_shapes": [
                     list(shape) for shape in prepared.level_shapes
                 ],
@@ -354,11 +382,12 @@ class TemporaryOMETiffWriter:
 
     def write(
         self,
-        image: np.ndarray,
+        image: np.ndarray | Image,
         *,
         axes: str | None = None,
+        level: int = 0,
     ) -> dict[str, object]:
-        return self.writer.write(image, axes=axes)
+        return self.writer.write(image, axes=axes, level=level)
 
     def write_source(
         self,

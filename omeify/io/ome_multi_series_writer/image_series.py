@@ -11,6 +11,8 @@ from omeify.io._writer import (
     PlaneReaderSource,
     resolve_downsample,
 )
+from omeify.io.base import Image
+from omeify.io.image_planes import ImagePlaneSource
 from omeify.io.pixel_size import PixelSize
 from omeify.io.spec import ImageType, OMEImageSpec
 
@@ -94,6 +96,24 @@ class OMEImageSeries:
             downsample=resolve_downsample(image_type, downsample),
             compression=compression,
         )
+
+    @classmethod
+    def from_image(
+        cls, name: str, image: Image, *, level: int = 0,
+        channel_names: Sequence[str] | None = None, pixel_size: PixelSize | None = None,
+        downsample: DownsampleMethod | None = None, compression: str | None = None,
+        icc_profile: bytes | None = None,
+    ) -> OMEImageSeries:
+        """Borrow any open semantic image for one heterogeneous output series.
+
+        No pixel reads occur here. Keep the image open until write() completes.
+        All semantic and calibrated metadata comes from the selected image level.
+        """
+        source = ImagePlaneSource(image, level=level)
+        spec = source.output_spec(
+            channel_names=channel_names, pixel_size=pixel_size, icc_profile=icc_profile,
+        )
+        return cls(name, source, spec, resolve_downsample(spec.image_type, downsample), compression)
 
     @classmethod
     def from_source(
