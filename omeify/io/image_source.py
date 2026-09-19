@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .channel import normalize_channel_indices
+from ._selection import normalize_channel_indices
 from .image_metadata import ImageMetadata, integer
 
 ChannelSelection = int | Sequence[int] | None
@@ -45,10 +45,6 @@ class ImageSource(ABC):
     @property
     def is_open(self) -> bool:
         return self._is_open
-
-    @property
-    def closed(self) -> bool:
-        return not self.is_open
 
     @property
     def generation(self) -> int:
@@ -105,9 +101,8 @@ class ImageSource(ABC):
         """Read half-open integer bounds in the selected level's pixel coordinates.
 
         CYX channel selection preserves the C axis and requested order/duplicates.
-        YX permits only channel zero. For YXS, selection addresses RGB *samples*,
-        matching historical OMETiffReader behavior; an image's logical channel zero
-        returns all RGB samples. No implicit crop clipping, padding, or resampling.
+        YX and YXS permit only logical channel zero; RGB always returns all three
+        samples. No implicit crop clipping, padding, or resampling.
         """
         self._ensure_open()
         metadata = self.metadata
@@ -119,14 +114,14 @@ class ImageSource(ABC):
             raise ValueError(
                 f"Region {bounds} is outside level {descriptor.index} shape {descriptor.shape}"
             )
-        selected = tuple(normalize_channel_indices(channels, metadata.sample_count))
-        if metadata.axes == "YX" and selected != (0,):
-            raise ValueError("A YX image permits exactly channel zero")
+        selected = tuple(normalize_channel_indices(channels, metadata.logical_channel_count))
+        if metadata.axes != "CYX" and selected != (0,):
+            raise ValueError("A YX or RGB image permits exactly logical channel zero")
         shape = (y1 - y0, x1 - x0)
         if metadata.axes == "CYX":
             shape = (len(selected), *shape)
         elif metadata.axes == "YXS":
-            shape = (*shape, len(selected))
+            shape = (*shape, 3)
         if y0 == y1 or x0 == x1:
             return np.empty(shape, dtype=metadata.dtype)
         values = self._read_region(y0, y1, x0, x1, level=descriptor.index, channels=selected)
@@ -148,6 +143,15 @@ class ImageSource(ABC):
     ) -> np.ndarray:
         """Return precisely the requested samples in the descriptor's canonical axes."""
 
+    def __repr__(self) -> str:
+        if self._metadata is None:
+            return f"{type(self).__name__}(is_open={self.is_open})"
+        return (
+            f"{type(self).__name__}(is_open={self.is_open}, "
+            f"axes={self._metadata.axes!r}, shape={self._metadata.shape}, "
+            f"dtype={self._metadata.dtype})"
+        )
+
     def __enter__(self) -> ImageSource:
         if self._context_active:
             raise RuntimeError("Nested contexts on the same source are not supported")
@@ -155,6 +159,6 @@ class ImageSource(ABC):
         self._context_active = True
         return self
 
-    def __exit__(self, exc_type, exc, traceback) -> None:
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self._context_active = False
         self.close()

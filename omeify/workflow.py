@@ -127,15 +127,15 @@ def log_source_summary(
     logger.info("Source opened as %s", reader.input_type_description)
     logger.info(
         "Source raster: axes=%s, shape=%s, dtype=%s, byte-order=%s",
-        reader.source_axes,
-        tuple(int(item) for item in reader.shape),
+        reader.native_axes,
+        tuple(int(item) for item in reader.native_shape),
         reader.dtype,
         reader.source_byte_order,
     )
     logger.info(
         "Writer raster: axes=%s, shape=%s",
-        reader.output_axes,
-        tuple(int(item) for item in reader.output_shape),
+        reader.axes,
+        tuple(int(item) for item in reader.shape),
     )
     if source_pixel_size is None:
         logger.info("Source physical pixel size: unavailable")
@@ -197,7 +197,7 @@ def source_miti_header(reader: Any) -> dict[str, object] | None:
 
     if not isinstance(reader, OMETiffReader):
         return None
-    ome_summary = reader.inspection_report.get("ome")
+    ome_summary = reader.inspect().report.get("ome")
     if ome_summary is None:
         return None
     value = ome_summary.get("miti")
@@ -231,10 +231,10 @@ def build_input_report(
         "size_bytes": input_file.stat().st_size,
         "type_description": reader.input_type_description,
         "dtype": reader.dtype.name,
-        "shape": list(reader.shape),
-        "normalized_shape": list(reader.output_shape),
-        "source_axes": reader.source_axes,
-        "output_axes": reader.output_axes,
+        "shape": list(reader.native_shape),
+        "normalized_shape": list(reader.shape),
+        "source_axes": reader.native_axes,
+        "output_axes": reader.axes,
         "byte_order": reader.source_byte_order,
         "pixel_size": (
             None if source_pixel_size is None else list(source_pixel_size.to_tuple())

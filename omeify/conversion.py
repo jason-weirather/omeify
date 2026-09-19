@@ -126,7 +126,6 @@ def convert(
             output_channel_names,
             rename_mode=normalized_rename_mode,
         )
-        image_type = "rgb" if bool(getattr(reader, "is_rgb", False)) else "multichannel"
         effective_compression = compression or _default_compression(input_type)
         LOGGER.info(
             "Convert fidelity boundary: source samples enter the writer with dtype %s and "
@@ -149,9 +148,6 @@ def convert(
         )
         writer = OMETiffWriter(
             output_file,
-            image_type=image_type,
-            channel_names=output_channel_names,
-            pixel_size=effective_pixel_size,
             compression=effective_compression,
             jpeg_quality=jpeg_quality,
             jpeg_subsampling=jpeg_subsampling,
@@ -163,16 +159,12 @@ def convert(
             software=software,
             overwrite=overwrite,
             cache_directory=cache_directory,
-            icc_profile=getattr(reader, "icc_profile", None),
         )
         writer_started = time.monotonic()
-        write_report = writer.write_source(
-            reader,
-            axes=reader.output_axes,
-            shape=reader.output_shape,
-            dtype=reader.dtype,
-            icc_profile=getattr(reader, "icc_profile", None),
-        )
+        with reader.with_metadata(
+            channel_names=output_channel_names, pixel_size=effective_pixel_size,
+        ) as output_image:
+            write_report = writer.write(output_image)
         LOGGER.info(
             "Shared writer path completed in %s",
             readable_runtime(time.monotonic() - writer_started),

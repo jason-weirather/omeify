@@ -7,7 +7,10 @@ from typing import Literal, Sequence
 
 import numpy as np
 
-from .io.ome_tiff_writer import PlaneReaderSource
+from .io.base import Image
+from .io.image_planes import ImagePlaneSource
+from .io.image_views import BorrowedSource
+from dataclasses import replace
 from .io.tiff import PlaneReader
 from .progress import ProgressLogger
 
@@ -120,46 +123,33 @@ class DTypeChannelPlan:
         return np.ascontiguousarray(clipped.astype(self.target_dtype, copy=False))
 
 
-class _DTypePlaneReader:
-    def __init__(self, reader: PlaneReader, plan: DTypeChannelPlan) -> None:
-        if int(reader.samples_per_pixel) != 1:
-            raise ValueError("dtype mutation requires one grayscale sample per channel plane")
-        self._reader = reader
-        self._plan = plan
-        self.height = int(reader.height)
-        self.width = int(reader.width)
-        self.samples_per_pixel = 1
-        self.dtype = plan.target_dtype
+class DTypeMutationSource(BorrowedSource):
+    """One fixed, per-channel dtype mapping applied on demand to an Image."""
 
-    def clear_cache(self) -> None:
-        self._reader.clear_cache()
+    def __init__(self, image: Image, plans: Sequence[DTypeChannelPlan]) -> None:
+        plans = tuple(plans)
+        if not plans or len(plans) != image.channel_count:
+            raise ValueError("dtype plans must match the image channels")
+        if image.image_type != "multichannel":
+            raise ValueError("dtype mutation requires scalar intensity channels")
+        if any(p.channel_index != i or p.source_dtype != image.dtype for i, p in enumerate(plans)):
+            raise ValueError("dtype plans do not match source channel indices or dtype")
+        dtype = plans[0].target_dtype
+        if any(p.target_dtype != dtype for p in plans):
+            raise ValueError("All dtype plans must produce the same dtype")
+        # A mutation is evaluated at base resolution; its output pyramids are rebuilt.
+        metadata = replace(image._metadata, dtype=dtype, levels=(image.levels[0],))
+        super().__init__(metadata, (image,))
+        self._image = image
+        self._plans = plans
 
-    def read_region(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
-        return self._plan.quantize(self._reader.read_region(y0, y1, x0, x1))
-
-
-class DTypeMutationSource:
-    """Streaming source that applies fixed dtype mappings to another source."""
-
-    def __init__(
-        self,
-        source: PlaneReaderSource,
-        plans: Sequence[DTypeChannelPlan],
-    ) -> None:
-        self._source = source
-        self._plans = tuple(plans)
-
-    def plane_readers(self, *, cache_mib: int = 64) -> list[_DTypePlaneReader]:
-        readers = self._source.plane_readers(cache_mib=cache_mib)
-        if len(readers) != len(self._plans):
-            raise ValueError(
-                f"Source supplied {len(readers)} planes, but the dtype plan contains "
-                f"{len(self._plans)} channels"
-            )
-        return [
-            _DTypePlaneReader(reader, plan)
-            for reader, plan in zip(readers, self._plans)
-        ]
+    def _read_region(
+        self, y0: int, y1: int, x0: int, x1: int, *, level: int, channels: tuple[int, ...],
+    ) -> np.ndarray:
+        values = self._image.read_region(y0, y1, x0, x1, channels=channels)
+        if self.metadata.axes == "YX":
+            return self._plans[0].quantize(values)
+        return np.stack([self._plans[c].quantize(values[i]) for i, c in enumerate(channels)])
 
 
 def _scan_plane(
@@ -802,10 +792,8 @@ def _mapping_for_scan(
 
 
 def analyze_dtype_mutation(
-    source: PlaneReaderSource,
+    image: Image,
     *,
-    channel_names: Sequence[str],
-    source_dtype: np.dtype | str | type,
     dtype: TargetDType | np.dtype | type,
     range_mode: RangeMode = "auto",
     sample_pixels_per_channel: int = DEFAULT_SAMPLE_PIXELS_PER_CHANNEL,
@@ -826,6 +814,8 @@ def analyze_dtype_mutation(
     normalized_auto_loss = float(auto_max_normalized_rmse)
     if not math.isfinite(normalized_auto_loss) or normalized_auto_loss < 0:
         raise ValueError("auto_max_normalized_rmse must be a finite value of zero or greater")
+    source_dtype = image.dtype
+    channel_names = image.channel_names
     normalized_source_dtype = np.dtype(source_dtype).newbyteorder("=")
     if not np.issubdtype(normalized_source_dtype, np.floating):
         raise TypeError(
@@ -833,7 +823,7 @@ def analyze_dtype_mutation(
         )
     normalized_target_dtype = _target_dtype(dtype)
     names = tuple(str(item) for item in channel_names)
-    readers = source.plane_readers(cache_mib=64)
+    readers = ImagePlaneSource(image).plane_readers(cache_mib=64)
     if len(readers) != len(names):
         for reader in readers:
             reader.clear_cache()

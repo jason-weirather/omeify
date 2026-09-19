@@ -65,22 +65,13 @@ class OMEMultiSeriesWriter:
             cache_directory=cache_directory,
         )
         self._settings = settings
-        self.output_path = settings.output_path
-        self.compression_name = settings.compression_name
-        self.jpeg_quality = settings.jpeg_quality
-        self.jpeg_subsampling = settings.jpeg_subsampling
-        self.tile_size = settings.tile_size
-        self.pyramid_levels = settings.pyramid_levels
-        self.max_workers = settings.max_workers
-        self.display_uuid = settings.display_uuid
-        self.software = settings.software
-        self.float32_mantissa_bits = settings.float32_mantissa_bits
-        self.overwrite = settings.overwrite
-        self.cache_directory = settings.cache_directory
 
     @property
     def path(self) -> Path:
-        return self.output_path
+        return self._settings.output_path
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(path={str(self.path)!r})"
 
     def write(
         self,
@@ -92,15 +83,15 @@ class OMEMultiSeriesWriter:
 
         images = self._normalize_series(series)
         for image in images:
-            protect_source_paths(image.source, self.output_path)
+            protect_source_paths(image._source, self._settings.output_path)
         provenance_json, normalized_provenance = _canonical_provenance(provenance)
         prepared = tuple(
             prepare_image(
-                image.source,
-                image.spec,
+                image._source,
+                image._source.output_spec(),
                 name=image.name,
                 downsample=image.downsample,
-                compression_name=image.compression or self.compression_name,
+                compression_name=image.compression or self._settings.compression_name,
                 settings=self._settings,
                 lossy_policy="non-label",
             )
@@ -112,7 +103,7 @@ class OMEMultiSeriesWriter:
                 for item in prepared
             ),
             provenance_json=provenance_json,
-            display_uuid=self.display_uuid,
+            display_uuid=self._settings.display_uuid,
             output_byteorder=OUTPUT_BYTEORDER,
         )
         omexml = str(xml_info["xml_string"])
@@ -124,7 +115,7 @@ class OMEMultiSeriesWriter:
                 prepared,
                 path,
                 provenance_json=provenance_json,
-                software=self.software,
+                software=self._settings.software,
             ),
         )
 
@@ -137,7 +128,7 @@ class OMEMultiSeriesWriter:
             },
             "miti_header": metadata.miti_header.as_dict(),
             "output_file": {
-                "path": str(self.output_path),
+                "path": str(self._settings.output_path),
                 "size_bytes": result.output_size,
                 "type_description": "Multi-series pyramidal OME-TIFF",
                 "series_count": len(prepared),
@@ -163,15 +154,15 @@ class OMEMultiSeriesWriter:
             ),
             "verification": result.verification,
             "options": {
-                "compression": self.compression_name,
-                "jpeg_quality": self.jpeg_quality,
-                "jpeg_subsampling": self.jpeg_subsampling,
-                "tile_size": self.tile_size,
-                "pyramid_levels": self.pyramid_levels,
-                "display_uuid": self.display_uuid,
-                "software": self.software,
-                "float32_mantissa_bits": self.float32_mantissa_bits,
-                "max_workers": self.max_workers,
+                "compression": self._settings.compression_name,
+                "jpeg_quality": self._settings.jpeg_quality,
+                "jpeg_subsampling": self._settings.jpeg_subsampling,
+                "tile_size": self._settings.tile_size,
+                "pyramid_levels": self._settings.pyramid_levels,
+                "display_uuid": self._settings.display_uuid,
+                "software": self._settings.software,
+                "float32_mantissa_bits": self._settings.float32_mantissa_bits,
+                "max_workers": self._settings.max_workers,
             },
         }
 

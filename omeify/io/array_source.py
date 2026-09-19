@@ -70,7 +70,7 @@ class ArraySource(ImageSource):
         if self.metadata.axes == "CYX":
             return array[:, y0:y1, x0:x1][list(channels)]
         if self.metadata.axes == "YXS":
-            return array[y0:y1, x0:x1, :][..., list(channels)]
+            return array[y0:y1, x0:x1, :]
         return array[y0:y1, x0:x1]
 
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
+from contextlib import ExitStack
+from .io.base import MultichannelImage
 from pathlib import Path
 from typing import Literal
 
@@ -141,12 +143,12 @@ def mutate(
         series=int(series),
         channel_name_field=channel_name_field,
     )
-    with reader:
-        if reader.is_rgb:
+    with reader, ExitStack() as stack:
+        if reader.image_type == "rgb":
             raise ValueError("mutation currently supports planar grayscale channels only")
-        if reader.output_axes not in {"YX", "CYX"}:
+        if reader.axes not in {"YX", "CYX"}:
             raise ValueError(
-                f"mutation requires planar YX or CYX output, found {reader.output_axes!r}"
+                f"mutation requires planar YX or CYX output, found {reader.axes!r}"
             )
         if not np.issubdtype(reader.dtype, np.floating):
             raise TypeError(
@@ -207,8 +209,6 @@ def mutate(
             analysis_started = time.monotonic()
             plans = analyze_dtype_mutation(
                 reader,
-                channel_names=source_channel_names,
-                source_dtype=reader.dtype,
                 dtype=dtype,
                 range_mode=effective_range_mode,
                 sample_pixels_per_channel=sample_pixels_per_channel,
@@ -218,8 +218,7 @@ def mutate(
                 "Mutation planning completed in %s",
                 readable_runtime(time.monotonic() - analysis_started),
             )
-            transformed = DTypeMutationSource(reader, plans)
-            output_dtype = np.dtype(dtype)
+            transformed = stack.enter_context(MultichannelImage(DTypeMutationSource(reader, plans)))
             writer_mantissa_bits = None
             dtype_mutation_report = {
                 "protocol_version": DTYPE_MUTATION_PROTOCOL_VERSION,
@@ -250,7 +249,6 @@ def mutate(
         else:
             assert normalized_mantissa_bits is not None
             transformed = reader
-            output_dtype = np.dtype("float32")
             writer_mantissa_bits = normalized_mantissa_bits
             precision_bits = normalized_mantissa_bits + 1
             significant_bits = float32_significant_bits(normalized_mantissa_bits)
@@ -288,9 +286,6 @@ def mutate(
         )
         writer = OMETiffWriter(
             output_file,
-            image_type="multichannel",
-            channel_names=output_channel_names,
-            pixel_size=effective_pixel_size,
             compression=compression,
             tile_size=tile_size,
             pyramid_levels=pyramid_levels,
@@ -303,12 +298,10 @@ def mutate(
             cache_directory=cache_directory,
         )
         writer_started = time.monotonic()
-        write_report = writer.write_source(
-            transformed,
-            axes=reader.output_axes,
-            shape=reader.output_shape,
-            dtype=output_dtype,
-        )
+        with transformed.with_metadata(
+            channel_names=output_channel_names, pixel_size=effective_pixel_size,
+        ) as output_image:
+            write_report = writer.write(output_image)
         LOGGER.info(
             "Shared writer path completed in %s",
             readable_runtime(time.monotonic() - writer_started),

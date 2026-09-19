@@ -1,4 +1,4 @@
-"""Regression tests for the 0.16.0 review, with independent raster expectations.
+"""Current TIFF fidelity, mapping, and atomic-write invariants.
 
 Core-engine tests deliberately do not call the public writer's XSD preflight;
 no validator is replaced. Public convert/mutate tests below require the real
@@ -22,8 +22,9 @@ from omeify.io._writer.preparation import prepare_image
 from omeify.io._writer.precision import round_float32_mantissa
 from omeify.io._writer.pyramid import mean_downsample_2x
 from omeify.io._writer.single_verification import verify_single_output
-from omeify.io._writer.source import ArraySource
+from plane_fixture import ArrayPlanes
 from omeify.io.spec import OMEImageSpec
+from omeify.io.image_planes import ImagePlaneSource
 from omeify.io.tiff import TiffPlaneReader
 from omeify.utils.generate_ome_xml import generate_multi_series_ome_xml, generate_ome_xml
 from omeify.utils.miti_header_validator import validate_miti_ome_tiff_header
@@ -46,14 +47,14 @@ def _prepared(data, path, *, source=None, names=("DAPI",), size=SIZE, levels=1,
               overwrite=True, precision=None, image_type="multichannel",
               compression="Uncompressed"):
     writer = OMETiffWriter(
-        path, channel_names=names, pixel_size=size, image_type=image_type,
+        path,
         compression=compression, tile_size=16, pyramid_levels=levels,
         overwrite=overwrite, float32_mantissa_bits=precision,
         cache_directory=path.parent / "scratch",
     )
     spec = _spec(data, names=names, size=size, image_type=image_type)
     item = prepare_image(
-        ArraySource(data, spec) if source is None else source, spec, name=None,
+        ArrayPlanes(data, spec) if source is None else source, spec, name=None,
         downsample=None, compression_name=compression, settings=writer._settings,
         lossy_policy="rgb-only",
     )
@@ -65,7 +66,7 @@ def _write_core(data, path, **options):
     writer, item, xml = _prepared(data, path, **options)
     result = WriterEngine(writer._settings).write(
         (item,), xml,
-        verify=lambda path: verify_single_output(item, path, software=writer.software),
+        verify=lambda path: verify_single_output(item, path, software=writer._settings.software),
     )
     return result.verification
 
@@ -114,7 +115,7 @@ def test_grayscale_strips_keep_both_spatial_axes_and_round_trip(tmp_path, dtype,
                                           data[y0:y1, x0:x1])
         output = tmp_path / "output.ome.tif"
         levels = int(max(shape) > 1)
-        _write_core(data, output, source=reader, levels=levels)
+        _write_core(data, output, source=ImagePlaneSource(reader), levels=levels)
     with tifffile.TiffFile(output) as tiff:
         np.testing.assert_array_equal(tiff.asarray(), data)
         if levels:
@@ -226,16 +227,22 @@ def test_reader_uses_mapped_image_not_ome_ordinal(tmp_path, comments, foreign):
     path = tmp_path / "metadata-only.ome.tif"
     data = _metadata_only_source(path, comments=comments, foreign=foreign)
     with OMETiffReader(path) as reader:
-        assert reader.series_count == 1
+        assert len(reader.series_names) == 1
         assert reader.series_name == "Stored image"
         assert reader.series_names == ("Stored image",)
         assert reader.channel_names == ("REAL0", "REAL1")
         assert tuple(channel.id for channel in reader.channels) == ("Channel:1:0", "Channel:1:1")
         assert reader.pixel_size == SIZE
-        assert reader.inspection_report["series"][0]["ome_image_index"] == 1
+        assert reader.inspect().report["series"][0]["ome_image_index"] == 1
         np.testing.assert_array_equal(reader.read_region(0, 7, 0, 9), data)
         output = tmp_path / "copied.ome.tif"
-        _write_core(data, output, source=reader, names=reader.channel_names, size=reader.pixel_size)
+        _write_core(
+            data,
+            output,
+            source=ImagePlaneSource(reader),
+            names=reader.channel_names,
+            size=reader.pixel_size,
+        )
     with OMETiffReader(output) as reader:
         assert reader.channel_names == ("REAL0", "REAL1")
         assert reader.pixel_size == SIZE
@@ -282,9 +289,9 @@ def test_odd_pyramid_sizes_use_level_tags(tmp_path, shape):
     output = tmp_path / "odd.ome.tif"
     _write_core(np.zeros(shape, np.uint16), output, levels=3)
     with OMETiffReader(output) as reader:
-        assert reader.pixel_size_at_level(0) == SIZE
+        assert reader.levels[0].pixel_size == SIZE
         for level in range(1, 4):
-            assert reader.pixel_size_at_level(level) == SIZE.scaled(2**level)
+            assert reader.levels[level].pixel_size == SIZE.scaled(2**level)
 
 
 @pytest.mark.parametrize("calibrated", [True, False])
@@ -298,7 +305,7 @@ def test_third_party_levels_are_not_assumed_to_be_twofold(tmp_path, calibrated, 
                      resolution=(10000/1.5, 10000/1.8) if calibrated else (1, 1),
                      resolutionunit=3 if calibrated else 1)
     with OMETiffReader(path) as reader:
-        actual = reader.pixel_size_at_level(1)
+        actual = reader.levels[1].pixel_size
         assert actual == (PixelSize(1.5, 1.8, "µm") if calibrated else None)
     if not calibrated:
         assert "not be inferred" in caplog.text
@@ -421,7 +428,7 @@ def test_no_overwrite_survives_destination_created_during_verification(tmp_path,
     writer, item, xml = _prepared(np.ones((17, 19), np.uint16), destination, overwrite=False)
 
     def verify(path):
-        result = verify_single_output(item, path, software=writer.software)
+        result = verify_single_output(item, path, software=writer._settings.software)
         if kind == "file":
             destination.write_bytes(b"COMPETING")
         else:
@@ -587,7 +594,7 @@ def test_shared_multi_series_verification_and_reader_contract(tmp_path, lossy_pr
         ("RGB preview", rgb, "rgb", ("RGB",), "JPEG" if lossy_preview else "Uncompressed"),
     ]
     images = tuple(prepare_image(
-        ArraySource(data, _spec(data, image_type=kind, names=names)),
+        ArrayPlanes(data, _spec(data, image_type=kind, names=names)),
         _spec(data, image_type=kind, names=names),
         name=name, downsample=None, compression_name=compression,
         settings=writer._settings, lossy_policy="non-label",
@@ -613,7 +620,7 @@ def test_shared_multi_series_verification_and_reader_contract(tmp_path, lossy_pr
             assert reader.series_name == name
             assert reader.series_names == tuple(record[0] for record in records)
             assert reader.channel_names == names
-            assert reader.pixel_size_at_level(2) == SIZE.scaled(4)
+            assert reader.levels[2].pixel_size == SIZE.scaled(4)
 
 
 def test_extreme_float64_writer_pyramids_stay_finite(tmp_path):

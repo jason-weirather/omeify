@@ -16,10 +16,10 @@ from omeify import (
     Channel,
     OMETiffLabelReader,
     OMETiffReader,
+    OMETiffWriter,
     PixelSize,
     TemporaryOMETiffWriter,
     convert,
-    write_ometiff,
 )
 from omeify.cli import main
 
@@ -182,9 +182,9 @@ def test_fusion_reader_preserves_name_biomarker_and_selects_normalized_name(
         assert reader[0].source_id is None
         assert reader[0].id_is_generated is True
         np.testing.assert_array_equal(reader[1].read_region(2, 8, 3, 11), data[1, 2:8, 3:11])
-        assert reader[2].array.dtype == np.dtype("uint16")
-        assert reader[2].array.shape == (32, 48)
-        np.testing.assert_array_equal(reader[2].array, data[2])
+        assert reader[2].asarray().dtype == np.dtype("uint16")
+        assert reader[2].asarray().shape == (32, 48)
+        np.testing.assert_array_equal(reader[2].asarray(), data[2])
 
 
 def test_fusion_auto_falls_back_to_name_when_biomarker_is_missing(tmp_path: Path) -> None:
@@ -568,7 +568,7 @@ def test_channel_metadata_lookup_region_and_array_are_lazy(
 
     monkeypatch.setattr(tifffile.TiffPage, "asarray", original_asarray)
     with OMETiffReader(source) as reader:
-        channel_array = reader[1].array
+        channel_array = reader[1].asarray()
         assert channel_array.dtype == np.dtype("uint16")
         assert channel_array.shape == (32, 48)
         np.testing.assert_array_equal(channel_array, data[1])
@@ -603,35 +603,43 @@ def test_pixel_size_is_immutable_serializable_and_scalable() -> None:
         original.x = 1.0  # type: ignore[misc]
 
 
-def test_reader_reports_adjusted_pixel_size_for_pyramid_level(tmp_path: Path) -> None:
+def test_reader_reports_adjusted_pixel_size_for_pyramid_level(
+    image_factory,
+    tmp_path: Path,
+) -> None:
     output = tmp_path / "pyramid.ome.tif"
     data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
-    write_ometiff(
+    OMETiffWriter(
         output,
-        channels=data,
-        channel_names=["A", "B"],
-        pixel_size=PixelSize(0.5, 0.6, "µm"),
-        compression="Uncompressed",
+        compression='Uncompressed',
         tile_size=16,
         pyramid_levels=1,
-    )
+    ).write(image_factory(
+        data,
+        kind='multichannel',
+        channel_names=['A', 'B'],
+        pixel_size=PixelSize(0.5, 0.6, 'µm'),
+    ))
 
     with OMETiffReader(output) as reader:
         assert reader.pixel_size == PixelSize(0.5, 0.6, "µm")
-        assert reader.pixel_size_at_level(1) == PixelSize(1.0, 1.2, "µm")
+        assert reader.levels[1].pixel_size == PixelSize(1.0, 1.2, "µm")
 
 
-def test_temporary_ome_tiff_writer_creates_and_cleans_up(tmp_path: Path) -> None:
+def test_temporary_ome_tiff_writer_creates_and_cleans_up(image_factory, tmp_path: Path) -> None:
     data = np.zeros((1, 16, 16), dtype=np.uint8)
     with TemporaryOMETiffWriter(
         directory=tmp_path,
-        channel_names=["DAPI"],
-        pixel_size=PixelSize(0.5, 0.5, "µm"),
-        compression="Uncompressed",
+        compression='Uncompressed',
         tile_size=16,
         pyramid_levels=0,
     ) as writer:
-        writer.write(data)
+        writer.write(image_factory(
+            data,
+            kind='multichannel',
+            channel_names=['DAPI'],
+            pixel_size=PixelSize(0.5, 0.5, 'µm'),
+        ))
         temporary_path = writer.path
         assert temporary_path.exists()
         with OMETiffReader(temporary_path) as reader:
@@ -639,18 +647,21 @@ def test_temporary_ome_tiff_writer_creates_and_cleans_up(tmp_path: Path) -> None
     assert not temporary_path.exists()
 
 
-def test_temporary_ome_tiff_writer_cleans_up_after_exception(tmp_path: Path) -> None:
+def test_temporary_ome_tiff_writer_cleans_up_after_exception(image_factory, tmp_path: Path) -> None:
     temporary_path: Path | None = None
     with pytest.raises(RuntimeError, match="boom"):
         with TemporaryOMETiffWriter(
             directory=tmp_path,
-            channel_names=["DAPI"],
-            pixel_size=PixelSize(0.5, 0.5, "µm"),
-            compression="Uncompressed",
+            compression='Uncompressed',
             tile_size=16,
             pyramid_levels=0,
         ) as writer:
-            writer.write(np.zeros((1, 16, 16), dtype=np.uint8))
+            writer.write(image_factory(
+                np.zeros((1, 16, 16), dtype=np.uint8),
+                kind='multichannel',
+                channel_names=['DAPI'],
+                pixel_size=PixelSize(0.5, 0.5, 'µm'),
+            ))
             temporary_path = writer.path
             assert temporary_path.exists()
             raise RuntimeError("boom")
@@ -658,64 +669,8 @@ def test_temporary_ome_tiff_writer_cleans_up_after_exception(tmp_path: Path) -> 
     assert not temporary_path.exists()
 
 
-def test_write_ometiff_accepts_cyx_array_and_list_of_yx_arrays(tmp_path: Path) -> None:
-    data = np.arange(3 * 32 * 48, dtype=np.uint16).reshape(3, 32, 48)
-    pixel_size = PixelSize(0.5, 0.6, "µm")
-
-    array_output = tmp_path / "array.ome.tif"
-    write_ometiff(
-        array_output,
-        channels=data,
-        channel_names=["DAPI", "PanCK", "CD3"],
-        pixel_size=pixel_size,
-        compression="Uncompressed",
-        tile_size=16,
-        pyramid_levels=0,
-    )
-    with OMETiffReader(array_output) as reader:
-        np.testing.assert_array_equal(reader.asarray(), data)
-        assert reader.channel_names == ("DAPI", "PanCK", "CD3")
-
-    list_output = tmp_path / "list.ome.tif"
-    write_ometiff(
-        list_output,
-        channels=[data[0], data[1], data[2]],
-        channel_names=["DAPI", "PanCK", "CD3"],
-        pixel_size=pixel_size,
-        compression="Uncompressed",
-        tile_size=16,
-        pyramid_levels=0,
-    )
-    with OMETiffReader(list_output) as reader:
-        np.testing.assert_array_equal(reader.asarray(), data)
 
 
-def test_write_ometiff_streams_lazy_channel_objects_without_array_materialization(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    source = tmp_path / "source.ome.tif"
-    output = tmp_path / "selected.ome.tif"
-    data = np.arange(3 * 32 * 48, dtype=np.uint16).reshape(3, 32, 48)
-    _write_planar_ome(source, data, names=["DAPI", "PanCK", "CD3"])
-
-    def forbidden_asarray(self, *, level: int = 0):
-        raise AssertionError("write_ometiff must stream Channel objects instead of using .array")
-
-    monkeypatch.setattr(Channel, "asarray", forbidden_asarray)
-    with OMETiffReader(source) as reader:
-        assert reader.pixel_size is not None
-        report = write_ometiff(
-            output,
-            channels=[reader.get_by_name("DAPI"), reader.get_by_name("CD3")],
-            pixel_size=reader.pixel_size,
-            compression="Uncompressed",
-            tile_size=16,
-            pyramid_levels=0,
-        )
-    assert report["image"]["channel_names"] == ["DAPI", "CD3"]
-    with tifffile.TiffFile(output) as tiff:
-        np.testing.assert_array_equal(tiff.series[0].asarray(), data[[0, 2]])
 
 
 def test_fusion_cli_profile_and_subcommand_only_policy(tmp_path: Path) -> None:
@@ -764,19 +719,20 @@ def test_fusion_cli_profile_and_subcommand_only_policy(tmp_path: Path) -> None:
     assert "No such command" in old_form.output
 
 
-def test_label_reader_exposes_pixel_size(tmp_path: Path) -> None:
+def test_label_reader_exposes_pixel_size(image_factory, tmp_path: Path) -> None:
     output = tmp_path / "labels.ome.tif"
     labels = np.arange(32 * 48, dtype=np.uint16).reshape(32, 48)
-    write_ometiff(
+    OMETiffWriter(
         output,
-        channels=[labels],
-        channel_names=["Labels"],
-        pixel_size=PixelSize(0.7, 0.8, "µm"),
-        image_type="label",
-        compression="Uncompressed",
+        compression='Uncompressed',
         tile_size=16,
         pyramid_levels=0,
-    )
+    ).write(image_factory(
+        labels,
+        kind='label',
+        channel_names=['Labels'],
+        pixel_size=PixelSize(0.7, 0.8, 'µm'),
+    ))
     with OMETiffLabelReader(output) as reader:
         assert reader.pixel_size == PixelSize(0.7, 0.8, "µm")
 
@@ -794,20 +750,23 @@ def test_label_reader_exposes_pixel_size(tmp_path: Path) -> None:
     ],
 )
 def test_writer_normalizes_ome_physical_size_to_micrometers(
+    image_factory,
     tmp_path: Path,
     pixel_size: PixelSize,
     expected: PixelSize,
 ) -> None:
     output = tmp_path / "normalized-units.ome.tif"
-    report = write_ometiff(
+    report = OMETiffWriter(
         output,
-        channels=np.zeros((1, 16, 16), dtype=np.uint8),
-        channel_names=["DAPI"],
-        pixel_size=pixel_size,
-        compression="Uncompressed",
+        compression='Uncompressed',
         tile_size=16,
         pyramid_levels=0,
-    )
+    ).write(image_factory(
+        np.zeros((1, 16, 16), dtype=np.uint8),
+        kind='multichannel',
+        channel_names=['DAPI'],
+        pixel_size=pixel_size,
+    ))
 
     assert report["image"]["pixel_size"] == list(expected.to_tuple())
     with OMETiffReader(output) as reader:
@@ -1074,10 +1033,3 @@ def test_component_pixel_size_override_does_not_replace_source_provenance(
     assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
     assert report["image"]["pixel_size"] == [0.75, 0.8, "µm"]
     assert report["options"]["pixel_size_override"] == [0.75, 0.8, "µm"]
-
-
-def test_conversion_api_no_longer_has_parallel_inputs_or_converters_packages() -> None:
-    import importlib.util
-
-    assert importlib.util.find_spec("omeify.inputs") is None
-    assert importlib.util.find_spec("omeify.converters") is None

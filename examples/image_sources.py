@@ -70,15 +70,16 @@ def run_example(
     mixed_path = out / "mixed_products.ome.tif"
     size = PixelSize(0.5, 0.5, "µm")
 
-    with MultichannelImage(CoordinateSource()) as image:
+    source = CoordinateSource()
+    with MultichannelImage(source) as image:
         print(image)
-        print("Regions before reading:", image.source.regions_evaluated)
+        print("Regions before reading:", source.regions_evaluated)
         patch = image.read_region(100, 164, 200, 264, channels=[2, 0])
         # Image metadata supplies channel names and calibration to the writer.
         report = OMETiffWriter(
             signal_path, tile_size=256, compression="Deflate", overwrite=overwrite,
         ).write(image)
-        print("Regions after writing:", image.source.regions_evaluated)
+        print("Regions after writing:", source.regions_evaluated)
 
     with OMETiffReader(signal_path) as real:
         np.testing.assert_array_equal(
@@ -99,8 +100,8 @@ def run_example(
         multi_report = OMEMultiSeriesWriter(
             mixed_path, tile_size=64, compression="Deflate", overwrite=overwrite,
         ).write((
-            OMEImageSeries.from_image("RGB preview", preview),
-            OMEImageSeries.from_image("Object labels", objects),
+            OMEImageSeries("RGB preview", preview),
+            OMEImageSeries("Object labels", objects),
         ))
 
     print("Wrote:", signal_path.resolve())

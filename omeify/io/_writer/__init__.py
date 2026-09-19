@@ -13,10 +13,8 @@ from .configuration import (
 from .engine import WriterEngine
 from .model import PlaneReaderSource, PreparedImage, WriteResult
 from .preparation import MetadataValidation, prepare_image, validate_ome_xml
-from .source import ArraySource
 
 __all__ = (
-    "ArraySource",
     "CompressionSettings",
     "DownsampleMethod",
     "JPEGSubsampling",

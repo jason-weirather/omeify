@@ -6,8 +6,11 @@ They neither require physical calibration nor impose the narrower TIFF write pol
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from numbers import Integral
+from types import MappingProxyType
+from typing import Any
 
 import numpy as np
 
@@ -90,6 +93,8 @@ class ImageMetadata:
     channel_ids: tuple[str | None, ...] | None = None
     icc_profile: bytes | None = None
     background_label: int = 0
+    channel_source_ids: tuple[str | None, ...] | None = None
+    channel_metadata: tuple[Mapping[str, Any], ...] | None = None
 
     def __post_init__(self) -> None:
         shape = _shape(self.shape, self.axes)
@@ -127,6 +132,20 @@ class ImageMetadata:
             raise ValueError(
                 "channel_ids must align with channels and contain nonempty IDs or None"
             )
+        source_ids = ids if self.channel_source_ids is None else tuple(self.channel_source_ids)
+        if len(source_ids) != count or any(
+            (v is not None and not isinstance(v, str) for v in source_ids),
+        ):
+            raise ValueError("channel_source_ids must align with the logical channels")
+        records = self.channel_metadata
+        if records is None:
+            records = ({},) * count
+        if len(records) != count or any(not isinstance(v, Mapping) for v in records):
+            raise ValueError("channel_metadata must align with the logical channels")
+        object.__setattr__(self, "channel_source_ids", source_ids)
+        object.__setattr__(self, "channel_metadata", tuple(
+            (MappingProxyType(dict(v)) for v in records),
+        ))
         # Include generated IDs when checking collisions.
         resolved_ids = tuple(v if v is not None else f"Channel:0:{i}" for i, v in enumerate(ids))
         if len(set(resolved_ids)) != count:

@@ -37,6 +37,7 @@ def _mean2(values: np.ndarray) -> np.ndarray:
 
 
 def test_multi_series_writer_preserves_heterogeneous_series_and_provenance(
+    image_factory,
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "derived.ome.tif"
@@ -49,20 +50,18 @@ def test_multi_series_writer_preserves_heterogeneous_series_and_provenance(
         "parameters": {"threshold": 0.25, "seed": 42},
     }
     series = (
-        OMEImageSeries.from_array(
-            "Normalized signal",
+        OMEImageSeries('Normalized signal', image_factory(
             intensity,
-            image_type="multichannel",
-            channel_names=("A", "B"),
+            kind='multichannel',
+            channel_names=('A', 'B'),
             pixel_size=pixel_size,
-        ),
-        OMEImageSeries.from_array(
-            "Object labels",
+        )),
+        OMEImageSeries('Object labels', image_factory(
             labels,
-            image_type="label",
-            channel_names=("Object labels",),
+            kind='label',
+            channel_names=('Object labels',),
             pixel_size=pixel_size,
-        ),
+        )),
     )
 
     report = OMEMultiSeriesWriter(
@@ -145,13 +144,14 @@ def test_multi_series_writer_preserves_heterogeneous_series_and_provenance(
         )
 
     with OMETiffReader(output, series=1) as reader:
-        assert reader.series_count == 2
+        assert len(reader.series_names) == 2
         assert reader.series_name == "Object labels"
         assert reader.series_names == ("Normalized signal", "Object labels")
         np.testing.assert_array_equal(reader.asarray(), labels)
 
 
 def test_multi_series_float32_precision_trim_skips_non_float32_series(
+    image_factory,
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "mixed-precision.ome.tif"
@@ -159,20 +159,18 @@ def test_multi_series_float32_precision_trim_skips_non_float32_series(
     intensity = np.linspace(0.0, 50.0, 32 * 32, dtype=np.float32).reshape(32, 32)
     labels = (np.arange(32 * 32, dtype=np.uint16).reshape(32, 32) % 17)
     series = (
-        OMEImageSeries.from_array(
-            "Signal",
+        OMEImageSeries('Signal', image_factory(
             intensity,
-            image_type="multichannel",
-            channel_names=("DAPI",),
+            kind='multichannel',
+            channel_names=('DAPI',),
             pixel_size=pixel_size,
-        ),
-        OMEImageSeries.from_array(
-            "Labels",
+        )),
+        OMEImageSeries('Labels', image_factory(
             labels,
-            image_type="label",
-            channel_names=("Labels",),
+            kind='label',
+            channel_names=('Labels',),
             pixel_size=pixel_size,
-        ),
+        )),
     )
 
     report = OMEMultiSeriesWriter(
@@ -195,16 +193,16 @@ def test_multi_series_float32_precision_trim_skips_non_float32_series(
 
 
 def test_multi_series_writer_rejects_ambiguous_names_and_non_json_provenance(
+    image_factory,
     tmp_path: Path,
 ) -> None:
     pixel_size = PixelSize(0.5, 0.5, "µm")
-    image = OMEImageSeries.from_array(
-        "Duplicate",
+    image = OMEImageSeries('Duplicate', image_factory(
         np.zeros((16, 16), dtype=np.uint16),
-        image_type="label",
-        channel_names=("Labels",),
+        kind='label',
+        channel_names=('Labels',),
         pixel_size=pixel_size,
-    )
+    ))
 
     duplicate_output = tmp_path / "duplicate.ome.tif"
     with pytest.raises(ValueError, match="series names must be unique"):
@@ -272,28 +270,28 @@ def test_miti_validator_requires_contiguous_ifd_mapping_across_images() -> None:
     )
 
 
-def test_multi_series_writer_allows_per_series_grayscale_jpeg(tmp_path: Path) -> None:
+def test_multi_series_writer_allows_per_series_grayscale_jpeg(
+    image_factory,
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("imagecodecs")
     output = tmp_path / "mixed-compression.ome.tif"
     pixel_size = PixelSize(0.5, 0.5, "µm")
     visualization = np.arange(32 * 48, dtype=np.uint8).reshape(32, 48)
     labels = (np.arange(32 * 48, dtype=np.uint16).reshape(32, 48) % 17)
     series = (
-        OMEImageSeries.from_array(
-            "Visualization",
+        OMEImageSeries('Visualization', image_factory(
             visualization,
-            image_type="multichannel",
-            channel_names=("Visualization",),
+            kind='multichannel',
+            channel_names=('Visualization',),
             pixel_size=pixel_size,
-            compression="JPEG",
-        ),
-        OMEImageSeries.from_array(
-            "Labels",
+        ), compression='JPEG'),
+        OMEImageSeries('Labels', image_factory(
             labels,
-            image_type="label",
-            channel_names=("Labels",),
+            kind='label',
+            channel_names=('Labels',),
             pixel_size=pixel_size,
-        ),
+        )),
     )
 
     report = OMEMultiSeriesWriter(
@@ -315,16 +313,14 @@ def test_multi_series_writer_allows_per_series_grayscale_jpeg(tmp_path: Path) ->
         np.testing.assert_array_equal(tiff.series[1].asarray(), labels)
 
 
-def test_multi_series_writer_rejects_jpeg_label_series(tmp_path: Path) -> None:
+def test_multi_series_writer_rejects_jpeg_label_series(image_factory, tmp_path: Path) -> None:
     pixel_size = PixelSize(0.5, 0.5, "µm")
-    labels = OMEImageSeries.from_array(
-        "Labels",
+    labels = OMEImageSeries('Labels', image_factory(
         np.zeros((16, 16), dtype=np.uint8),
-        image_type="label",
-        channel_names=("Labels",),
+        kind='label',
+        channel_names=('Labels',),
         pixel_size=pixel_size,
-        compression="JPEG",
-    )
+    ), compression='JPEG')
 
     with pytest.raises(ValueError, match="require lossless compression"):
         OMEMultiSeriesWriter(

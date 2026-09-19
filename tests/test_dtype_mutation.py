@@ -604,7 +604,7 @@ def test_mutation_cli_trims_float32_mantissa_and_updates_ome_significant_bits(
 
     with OMETiffReader(output) as reader:
         assert reader.dtype == np.dtype("float32")
-        assert reader.inspection_report["ome"]["images"][0]["significant_bits"] == 20
+        assert reader.inspect().report["ome"]["images"][0]["significant_bits"] == 20
         np.testing.assert_array_equal(
             reader.asarray(),
             round_float32_mantissa(data, 11)[0],

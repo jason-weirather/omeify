@@ -17,20 +17,11 @@ import omeify.mutation as mutation_module
 import omeify.workflow as workflow_module
 from omeify import PixelSize
 from omeify.cli import _CompactLogHandler, main
-from omeify.dtype_mutation import DTypeMutationSource, analyze_dtype_mutation
+from omeify.dtype_mutation import analyze_dtype_mutation
 from omeify.io._writer.pyramid import iter_downsampled_tiles, iter_tiles
 from omeify.io.ome_tiff_writer import OMETiffWriter
 from omeify.io.tiff import ArrayPlaneReader
 from omeify.progress import ProgressLogger
-
-
-class _ArraySource:
-    def __init__(self, array: np.ndarray) -> None:
-        self.array = np.asarray(array)
-
-    def plane_readers(self, *, cache_mib: int = 64) -> list[ArrayPlaneReader]:
-        del cache_mib
-        return [ArrayPlaneReader(self.array[index]) for index in range(self.array.shape[0])]
 
 
 class _AlwaysValidSchema:
@@ -103,6 +94,7 @@ def test_tile_iterators_emit_progress_without_changing_pixels(caplog) -> None:
 
 
 def test_writer_logs_pyramid_final_assembly_verification_and_cleanup(
+    image_factory,
     tmp_path: Path,
     monkeypatch,
     caplog,
@@ -120,14 +112,17 @@ def test_writer_logs_pyramid_final_assembly_verification_and_cleanup(
     with caplog.at_level(logging.INFO, logger="omeify.io._writer"):
         report = OMETiffWriter(
             output,
-            image_type="multichannel",
-            channel_names=["DAPI"],
-            pixel_size=PixelSize(0.5, 0.5, "µm"),
-            compression="Uncompressed",
+            compression='Uncompressed',
             tile_size=16,
             pyramid_levels=1,
             max_workers=1,
-        ).write(image, axes="YX")
+        ).write(image_factory(
+            image,
+            kind='multichannel',
+            channel_names=['DAPI'],
+            pixel_size=PixelSize(0.5, 0.5, 'µm'),
+            axes='YX',
+        ))
 
     assert report["verification"]["base_pixel_values_match"] is True
     with tifffile.TiffFile(output) as tiff:
@@ -151,7 +146,10 @@ def test_writer_logs_pyramid_final_assembly_verification_and_cleanup(
     )
 
 
-def test_mutation_analysis_logs_scans_and_maps_each_channel_immediately(caplog) -> None:
+def test_mutation_analysis_logs_scans_and_maps_each_channel_immediately(
+    caplog,
+    image_factory,
+) -> None:
     data = np.stack(
         [
             np.arange(32 * 32, dtype=np.float32).reshape(32, 32),
@@ -161,9 +159,7 @@ def test_mutation_analysis_logs_scans_and_maps_each_channel_immediately(caplog) 
 
     with caplog.at_level(logging.INFO, logger="omeify.dtype_mutation"):
         plans = analyze_dtype_mutation(
-            _ArraySource(data),
-            channel_names=("Integer-like", "Continuous"),
-            source_dtype=np.float32,
+            image_factory(data, channel_names=("Integer-like", "Continuous")),
             dtype="uint16",
             range_mode="full",
             sample_pixels_per_channel=1024,
@@ -177,9 +173,12 @@ def test_mutation_analysis_logs_scans_and_maps_each_channel_immediately(caplog) 
     assert "Mutation analysis complete: planned 2 channel(s)" in caplog.text
 
 
-def test_mutation_analysis_maps_one_channel_before_scanning_the_next(monkeypatch) -> None:
+def test_mutation_analysis_maps_one_channel_before_scanning_the_next(
+    monkeypatch,
+    image_factory,
+) -> None:
     events: list[str] = []
-    source = _ArraySource(np.zeros((2, 1, 1), dtype=np.float32))
+    source = image_factory(np.zeros((2, 1, 1), dtype=np.float32), channel_names=("A", "B"))
 
     def fake_scan(
         reader,
@@ -218,8 +217,7 @@ def test_mutation_analysis_maps_one_channel_before_scanning_the_next(monkeypatch
 
     plans = analyze_dtype_mutation(
         source,
-        channel_names=("A", "B"),
-        source_dtype=np.float32,
+
         dtype="uint16",
         sample_pixels_per_channel=1024,
     )
@@ -246,19 +244,6 @@ def test_channel_logging_shows_discovered_names_and_explicit_renames(caplog) -> 
     assert "[0] 'DAPI' -> 'DNA'" in caplog.text
 
 
-def test_convert_and_mutate_share_boundary_helpers_and_writer_without_calling_each_other() -> None:
-    assert conversion_module._apply_channel_renames is workflow_module.apply_channel_renames
-    assert (
-        conversion_module._validate_channel_rename_mapping
-        is workflow_module.validate_channel_rename_mapping
-    )
-    assert mutation_module.apply_channel_renames is workflow_module.apply_channel_renames
-    assert (
-        mutation_module.validate_channel_rename_mapping
-        is workflow_module.validate_channel_rename_mapping
-    )
-    assert conversion_module.OMETiffWriter is mutation_module.OMETiffWriter
-    assert conversion_module.convert is not mutation_module.mutate
 
 
 def test_mutate_uses_shared_writer_through_dtype_transform_adapter(
@@ -294,9 +279,10 @@ def test_mutate_uses_shared_writer_through_dtype_transform_adapter(
     observed: dict[str, object] = {}
 
     class RecordingWriter(OMETiffWriter):
-        def write_source(self, source, **kwargs):
-            observed["source"] = source
-            return super().write_source(source, **kwargs)
+        def write(self, image, **kwargs):
+            observed["dtype"] = image.dtype
+            observed["pixels"] = image.asarray()
+            return super().write(image, **kwargs)
 
     monkeypatch.setattr(mutation_module, "OMETiffWriter", RecordingWriter)
     report = mutation_module.mutate(
@@ -311,7 +297,8 @@ def test_mutate_uses_shared_writer_through_dtype_transform_adapter(
         max_workers=1,
     )
 
-    assert isinstance(observed["source"], DTypeMutationSource)
+    assert observed["dtype"] == np.dtype("uint16")
+    np.testing.assert_array_equal(tifffile.imread(output), observed["pixels"])
     assert report["verification"]["base_pixel_values_match"] is True
     assert output.is_file()
 
@@ -440,16 +427,3 @@ def test_verbose_help_describes_single_and_repeated_levels() -> None:
         assert "timestamps, debug details" in result.output
         assert "1-second" in result.output
         assert "tracebacks" in result.output
-
-
-def test_public_writers_share_one_internal_construction_engine() -> None:
-    import omeify.io._writer as shared_writer
-    import omeify.io.ome_tiff_writer as single_writer
-    from omeify.io.ome_multi_series_writer import (
-        ome_multi_series_writer as multi_writer,
-    )
-
-    assert single_writer.WriterEngine is shared_writer.WriterEngine
-    assert multi_writer.WriterEngine is shared_writer.WriterEngine
-    assert single_writer.prepare_image is shared_writer.prepare_image
-    assert multi_writer.prepare_image is shared_writer.prepare_image

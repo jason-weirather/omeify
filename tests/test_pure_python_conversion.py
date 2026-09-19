@@ -494,7 +494,7 @@ def test_indica_mif_reader_parses_channels_ifd_map_and_tiff_resolution(
         assert reader.shape == data.shape
         assert reader.channel_names == ("DAPI", "CD3 (Opal 480)")
         assert reader.pixel_size == PixelSize(0.5, 0.4, "µm")
-        assert reader.level_count == 2
+        assert len(reader.levels) == 2
         assert reader[0].source_id == "0"
         assert reader[1].source_metadata["rgb"] == 256
         np.testing.assert_array_equal(
@@ -974,12 +974,12 @@ def test_ome_reader_is_the_python_source_interface(tmp_path: Path) -> None:
 
     with OMETiffReader(source) as reader:
         assert reader.source_byte_order == "big"
-        assert reader.output_axes == "CYX"
-        assert reader.output_shape == (2, 32, 32)
+        assert reader.axes == "CYX"
+        assert reader.shape == (2, 32, 32)
         assert reader.pixel_size is not None
         assert reader.pixel_size.to_tuple() == (0.5, 0.6, "µm")
         assert reader.channel_names == ("Marker 1", "Marker 2")
-        assert len(reader.plane_readers()) == 2
+        np.testing.assert_array_equal(reader.read_region(0, 32, 0, 32), data)
 
 
 def test_click_group_exposes_version_inspect_mutate_and_convert() -> None:
@@ -1094,9 +1094,9 @@ def test_convert_helper_dogfoods_public_ome_tiff_writer(
     called = {"value": False}
 
     class RecordingWriter(OMETiffWriter):
-        def write_source(self, *args, **kwargs):
+        def write(self, image, **kwargs):
             called["value"] = True
-            return super().write_source(*args, **kwargs)
+            return super().write(image, **kwargs)
 
     monkeypatch.setattr(conversion_module, "OMETiffWriter", RecordingWriter)
     data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)

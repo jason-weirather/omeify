@@ -6,8 +6,8 @@ from omeify.io.spec import OMEImageSpec
 from omeify.io.tiff import ArrayPlaneReader, PlaneReader
 
 
-class ArraySource:
-    """Adapt one canonical NumPy array to the shared plane-reader contract."""
+class ArrayPlanes:
+    """Tiny independent array oracle for low-level writer/verification tests."""
 
     def __init__(self, array: np.ndarray, spec: OMEImageSpec) -> None:
         self._array = np.asarray(array)

@@ -18,7 +18,8 @@ from omeify import OMETiffReader, OMETiffWriter, PixelSize, TiffInspector
 from omeify import _calibration as calibration
 from omeify import intelligence as ai
 from omeify.cli import main
-from omeify.io._writer import ArraySource, WriterEngine, prepare_image
+from omeify.io._writer import WriterEngine, prepare_image
+from plane_fixture import ArrayPlanes
 from omeify.io._writer.single_verification import verify_single_output
 from omeify.io.ome_multi_series_writer.verification import verify_output
 from omeify.io.spec import OMEImageSpec
@@ -353,11 +354,11 @@ def test_context_budget_and_mismatch_priority(tmp_path):
 
 def prepared_image(path, *, name=None, size=PixelSize(0.5, 0.6, "µm")):
     data = np.zeros((2, 33, 49), dtype=np.uint16)
-    writer = OMETiffWriter(path, pixel_size=size, compression="Uncompressed", tile_size=16,
-                          pyramid_levels=2, channel_names=("DAPI", "CD3"))
+    writer = OMETiffWriter(path, compression="Uncompressed", tile_size=16,
+                          pyramid_levels=2)
     spec = OMEImageSpec.from_shape(image_type="multichannel", axes="CYX", shape=data.shape,
                                    dtype=data.dtype, channel_names=("DAPI", "CD3"), pixel_size=size)
-    prepared = prepare_image(ArraySource(data, spec), spec, name=name, downsample="mean",
+    prepared = prepare_image(ArrayPlanes(data, spec), spec, name=name, downsample="mean",
                              compression_name="Uncompressed", settings=writer._settings,
                              lossy_policy="rgb-only")
     return prepared, writer._settings

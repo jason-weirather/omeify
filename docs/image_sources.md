@@ -1,25 +1,102 @@
-# Images without files: Omeify 0.17
+# Images and sources: Omeify 0.18
 
-Omeify now separates **image meaning** from **pixel origin**. The semantic classes
-are `MultichannelImage`, `RGBImage`, and `LabelImage`. Their backend is an
-`ImageSource`. A source need not have a path, a TIFF byte stream, or a complete
-array. No Mocktome-specific implementation or dependency lives in Omeify.
+Omeify has one library input model: an **Image** backed by an **ImageSource**.
+File readers, array images, and procedural images use the same lifecycle,
+regional reads, logical channels, and writer bridge. Omeify does not import
+Mocktome or contain simulator-specific dispatch.
 
-The single-image and heterogeneous writers accept these images through the
-existing bounded plane-reader engine. The converter, metadata-minimization rules,
-TIFF decoding, pyramid arithmetic, and atomic installation remain shared.
+This is a deliberate breaking library cleanup. The CLI commands, arguments,
+options, conversion/mutation policies, and report structure are unchanged.
+The version value changes. There are no deprecated forwarding APIs. File opening
+now validates the complete advertised level description; inconsistent metadata
+can fail earlier than a later regional read in the former reader implementation.
 
-## 1. Notebook: wrap an array produced by any program
+## Supported patterns
+
+| Task | Canonical library operation |
+|---|---|
+| Read an OME intensity/RGB series | `with OMETiffReader(path, series=0) as image:` |
+| Read categorical labels | `with OMETiffLabelReader(path, series=0) as labels:` |
+| Read a vendor image | Its explicit reader, for example `AkoyaFusionQPTiffReader(path)` |
+| Describe an existing intensity array | `MultichannelImage.from_array(array, axes="CYX", ...)` |
+| Describe RGB or labels | `RGBImage.from_array(...)` or `LabelImage.from_array(...)` |
+| Implement a procedural backend | Subclass `ImageSource`; implement `_read_region()` |
+| Use that backend | `with MultichannelImage(source) as image:` (or RGB/label wrapper) |
+| Select/reorder/assemble lazy scalar channels | `MultichannelImage.from_channels(channels, ...)` |
+| Override calibration/names without changing pixels | `image.with_metadata(...)` |
+| Read a rectangle | `image.read_region(y0, y1, x0, x1, level=0, channels=...)` |
+| Materialize deliberately | `image.asarray(level=0)` or `channel.asarray(level=0)` |
+| Write one image | `OMETiffWriter(path, ...).write(image, level=0)` |
+| Write heterogeneous named images | `OMEMultiSeriesWriter(path, ...).write(series)` |
+| Name an image in that collection | `OMEImageSeries(name, image, ...)` |
+| Manage temporary-file lifetime | `with TemporaryOMETiffWriter(...) as writer:` |
+| Inspect file structure | `reader.inspect()` or independently `TiffInspector(path)` |
+
+Image metadata is available on the image itself. There is no public
+`image.metadata` record duplicating those properties. `ImageMetadata` is the
+provider's validated, immutable descriptor, not a second consumer API.
+Physical TIFF planes are private encoder details, not an alternative provider
+contract. The storage backend is not exposed through `image.source`.
+
+## 1. Read, select channels, and write
+
+Run in a kernel with this checkout installed. These examples assume the input
+has a channel called DAPI and at least two scalar channels.
 
 ```python
 from pathlib import Path
+from omeify import MultichannelImage, OMETiffReader, OMETiffWriter
+
+out = Path("Scratch/omeify_library")
+out.mkdir(parents=True, exist_ok=True)
+
+with OMETiffReader("input.ome.tif") as image:
+    print(image)
+    print(image.channel_names)
+    print(image.shape, image.axes, image.dtype)
+    print(image.pixel_size)
+    print(image.levels)
+
+    height, width = image.levels[0].spatial_shape
+    patch = image.read_region(0, min(256, height), 0, min(256, width), channels=[0, 1])
+    dapi = image.get_by_name("DAPI")
+    dapi_patch = dapi.read_region(0, min(256, height), 0, min(256, width))
+
+    # Select/reorder using lazy handles, not full-channel arrays.
+    with MultichannelImage.from_channels([image[1], dapi]) as selected:
+        report = OMETiffWriter(
+            out / "selected.ome.tif",
+            compression="Deflate",
+            tile_size=512,
+            overwrite=False,
+        ).write(selected)
+
+# patch and dapi_patch own their pixels and remain usable.
+# image, selected, and dapi cannot perform further reads outside their lifetimes.
+```
+
+`from_channels()` can also assemble scalar channels from different open images.
+It verifies matching dtype, selected-level spatial shape, and calibration (with
+unit conversion). It does not prove that two samples are registered. Registration
+and biological correspondence remain the caller's responsibility.
+
+The result has one `CYX` level, even for one selected channel. Select `level=N`
+when constructing it to use that resolution as the new base. Keep every parent
+image open until use of the assembled image finishes. No full array is created.
+Lists and tuples are both ordinary channel selections; strings are not.
+
+An integer channel index, a unique name, and an exact OME channel ID are different
+lookup operations: `image[index]`, `get_by_name(name)`, and `get_by_id(id)`.
+Duplicate names are allowed but name lookup rejects ambiguity. Channel metadata is
+read-only; rename with `with_metadata()` or `from_channels(channel_names=...)`.
+
+## 2. Arrays from notebooks and other libraries
+
+```python
 import numpy as np
 from omeify import MultichannelImage, OMETiffWriter, PixelSize
 
-out = Path("Scratch/image_sources")
-out.mkdir(parents=True, exist_ok=True)
-array = np.zeros((3, 1024, 1536), dtype=np.float32)
-
+array = np.zeros((3, 512, 768), dtype=np.float32)
 with MultichannelImage.from_array(
     array,
     axes="CYX",
@@ -27,118 +104,100 @@ with MultichannelImage.from_array(
     pixel_size=PixelSize(0.5, 0.5, "µm"),
     copy=False,
 ) as image:
-    print(image)
-    print(image.channel_names)
-    patch = image.read_region(100, 356, 200, 456, channels=[0, 2])
-    dapi = image.get_by_name("DAPI").read_region(100, 356, 200, 456)
-
+    patch = image.read_region(0, 128, 0, 128)
     report = OMETiffWriter(
-        out / "signals.ome.tif",
-        tile_size=256,
-        compression="Deflate",
-        overwrite=False,
+        "Scratch/signals.ome.tif", compression="Deflate", overwrite=False,
     ).write(image)
 ```
 
-`patch` is `(2, 256, 256)` and `dapi` is `(256, 256)`. They remain usable after the
-context exits; their contents do not alias source storage. This example borrows
-the original array, so it is **file-free, not a lazy simulation**.
+Constructors return **unopened** images, including `from_array()`. Use `with`, or
+explicit `open()` and `try/finally: close()` when a notebook must keep an image
+open across cells. Do not leave a live lazy viewer attached to an image whose
+context has exited. File-free access does not necessarily mean lazy generation:
+this example's full array already exists.
 
-`from_array()` returns an already-open image for ordinary notebook use. A `with`
-block is still useful for giving it a clear lifetime. `copy=False` avoids copying
-the full array at construction. The caller must not mutate or resize a borrowed
-array during an observation. `copy=True` explicitly takes a complete snapshot.
-Closing an array source does not close a caller-owned NumPy memory map.
+`copy=False` deliberately borrows large arrays; do not mutate or resize them
+while observed. `copy=True` takes a full independent snapshot. Non-contiguous
+NumPy views and memory maps work without copying the entire array by default.
+Closing does not close a caller-owned memory map. A retained array is released
+when its owning Python references are released, not merely because a context
+ends. Masked arrays require an explicit mask/data policy upstream.
 
-`PixelSize` requires X, Y, and a unit. Omit it for an uncalibrated image that you
-only need to read. Writing still requires usable calibration, either in the image
-or supplied explicitly to the writer. It is never guessed.
+Declare `axes="YX"` for a single scalar intensity plane, and `axes="CYX"` for a
+channel stack. Array size is not used to guess whether three dimensions mean RGB.
+RGB and label constructors fix their respective `YXS` and `YX` layouts.
 
-## 2. RGB and labels use the same pattern
+A list of separately stored arrays need not be stacked into a large copy. Wrap
+each scalar array with `MultichannelImage.from_array(..., axes="YX")`, keep those
+images open using `contextlib.ExitStack`, and assemble their `image[0]` handles
+with `from_channels()`.
 
-```python
-from omeify import RGBImage, LabelImage, PixelSize
+## 3. Current Mocktome outputs: mIF, H&E, and oracle labels
 
-size = PixelSize(0.5, 0.5, "µm")
-rgb = np.zeros((1024, 1536, 3), dtype=np.uint8)
-label_array = np.zeros((1024, 1536), dtype=np.uint32)
-
-with RGBImage.from_array(rgb, pixel_size=size) as he:
-    rgb_patch = he.read_region(100, 356, 200, 456)
-    assert rgb_patch.shape == (256, 256, 3)
-    assert he.logical_channel_count == 1
-    assert he.sample_count == 3
-
-with LabelImage.from_array(label_array, pixel_size=size) as labels:
-    label_patch = labels.read_region(100, 356, 200, 456)
-    assert label_patch.dtype == np.uint32
-    assert label_patch.shape == (256, 256)
-```
-
-Label values are categorical identifiers, not intensities or an inferred object
-count. No cell/nucleus/vessel knowledge is added to Omeify. Label-image writes
-retain lossless storage and nearest-neighbor pyramids. A nonzero
-`background_label=` may describe an in-memory label image, but ordinary OME-TIFF
-does not encode that application policy. Supply it again when reopening with
-`OMETiffLabelReader`, or record it in application provenance.
-
-RGB means three interleaved samples, not three independent fluorescent stains.
-A three-dimensional array passed to `MultichannelImage.from_array()` defaults to
-`CYX`; it is never silently interpreted as RGB. Generic access supports real
-numeric dtypes (and boolean intensity arrays); the TIFF writer retains its narrower
-supported dtype rules, including **uint8-only RGB output**. No automatic conversion
-is introduced. Masked arrays require an explicit mask/data policy upstream.
-
-## 3. Real OME-TIFFs remain ordinary readers
-
-Existing code keeps working:
+This is executable with Mocktome 0.4's existing eager API. It does **not** claim
+that Omeify adds lazy sectioning or new `section.mif_image()` methods to Mocktome.
 
 ```python
-from omeify import OMETiffReader
+from pathlib import Path
+from mocktome import Mocktome, SpectralAcquisitionSpec, tonsil_like_recipe
+from omeify import (
+    LabelImage, MultichannelImage, OMEImageSeries, OMEMultiSeriesWriter,
+    OMETiffWriter, PixelSize, RGBImage,
+)
 
-with OMETiffReader("real.ome.tif") as image:
-    patch = image.read_region(100, 356, 200, 456, channels=[0, 2])
-    print(image.metadata)          # Immutable canonical ImageMetadata.
-    print(image.level_descriptors)
+out = Path("Scratch/mocktome_omeify")
+out.mkdir(parents=True, exist_ok=True)
+recipe = tonsil_like_recipe(
+    width_um=128, height_um=128, depth_um=32,
+    microns_per_pixel=0.5, seed=7,
+)
+engine = Mocktome(recipe)
+volume = engine.build_volume()
+section = engine.section(volume, z_um=14, thickness_um=4)
+mif = engine.render_mif(
+    section, acquisition=SpectralAcquisitionSpec(seed=101, retain_spectral=False),
+)
+he = engine.render_he(section)
+size = PixelSize(recipe.microns_per_pixel, recipe.microns_per_pixel, "µm")
+
+with (
+    MultichannelImage.from_array(
+        mif.data, axes="CYX", channel_names=mif.channel_names,
+        pixel_size=size, copy=False,
+    ) as signals,
+    RGBImage.from_array(he.rgb, pixel_size=size, copy=False) as brightfield,
+    LabelImage.from_array(section.nucleus_labels, pixel_size=size, copy=False) as nuclei,
+):
+    report = OMETiffWriter(
+        out / "mif.ome.tif", compression="Deflate", overwrite=False,
+    ).write(signals)
+
+    product_report = OMEMultiSeriesWriter(
+        out / "paired_products.ome.tif", compression="Deflate", overwrite=False,
+    ).write((
+        OMEImageSeries("H&E", brightfield),
+        OMEImageSeries("Nuclear truth", nuclei),
+    ))
 ```
 
-The explicit composition form is also available:
+For a complete runnable example, including full small-image readback checks:
 
 ```python
-from omeify import Image, MultichannelImage, LabelImage, OMETiffSource
-
-with MultichannelImage(OMETiffSource("real.ome.tif")) as image:
-    patch = image.read_region(100, 356, 200, 456, channels=[0, 2])
-
-# Auto-select RGBImage or MultichannelImage from the source's declared semantics.
-with Image.from_source(OMETiffSource("real.ome.tif")) as image:
-    print(type(image).__name__)
-
-# A scalar TIFF is not automatically known to contain categorical labels.
-with LabelImage(OMETiffSource("labels.ome.tif", image_type="label")) as labels:
-    patch = labels.read_region(100, 356, 200, 456)
+from examples.mocktome_io import run_example
+result = run_example("Scratch/mocktome_omeify")
 ```
 
-`OMETiffSource` reuses the existing OME readers and TIFF decoder. It is not a
-second TIFF implementation. Its `path` belongs to that backend. The generic
-`Image` and `ImageSource` do not require one.
+Launch the notebook from the repository root to import `examples`. Mocktome must
+be installed separately. It is not an Omeify dependency. Increase `width_um` and
+`height_um` only after budgeting for Mocktome's eager intermediate arrays; wrapping
+those arrays does not remove that allocation.
 
-`reader.as_image()` creates an opened semantic facade borrowing an already-open
-reader. `ReaderImageSource` is the explicit adapter, also usable with the existing
-vendor readers. `reader.source` exposes a session-bound borrowing adapter.
+Oracle labels are still application truth. Omeify sees categorical integer
+pixels, not cell geometry, cell counts, or projection policies. Nonzero
+`background_label` is application metadata, not a standard OME-TIFF semantic tag;
+record it in application provenance and supply it when reopening labels.
 
-```python
-with OMETiffReader("real.ome.tif") as reader:
-    with reader.as_image() as image:
-        patch = image.read_region(100, 356, 200, 456)
-    assert reader.is_open          # The borrowing facade did not close it.
-```
-
-## 4. A genuinely on-demand source
-
-External libraries should subclass `ImageSource`, declare `ImageMetadata`, and
-implement `_read_region`. They need no TIFF tags, OME-XML, or plane-reader code.
-This is the minimal contract for a procedural backend:
+## 4. Implementing a genuinely regional provider
 
 ```python
 import numpy as np
@@ -150,232 +209,210 @@ class RampSource(ImageSource):
             axes="CYX",
             shape=(2, 100_000, 120_000),
             dtype=np.dtype("float32"),
-            image_type="multichannel",
             channel_names=("X", "Y"),
             pixel_size=PixelSize(0.5, 0.5, "µm"),
         ))
 
     def _read_region(self, y0, y1, x0, x1, *, level, channels):
-        height, width = y1 - y0, x1 - x0
-        x = np.arange(x0, x1, dtype=np.float32)[None, :]
-        y = np.arange(y0, y1, dtype=np.float32)[:, None]
-        fields = (x, y)
-        return np.stack([
-            np.broadcast_to(fields[c], (height, width)) for c in channels
-        ])
+        shape = (y1 - y0, x1 - x0)
+        fields = (
+            np.arange(x0, x1, dtype=np.float32)[None, :],
+            np.arange(y0, y1, dtype=np.float32)[:, None],
+        )
+        return np.stack([np.broadcast_to(fields[c], shape) for c in channels])
 
 with MultichannelImage(RampSource()) as image:
     patch = image.read_region(20_000, 20_256, 50_000, 50_256)
-    print(image.shape)             # (2, 100000, 120000)
-    print(patch.shape)             # (2, 256, 256)
+    print(image.shape, patch.shape)
 ```
 
-That entire advertised image never exists. Only the requested rectangle is
-calculated. The base class normalizes requests, handles empty regions, validates
-returned shape/dtype, normalizes byte order without numeric casting, and returns
-caller-owned contiguous arrays. Implement `_read_region`, not a replacement for
-the defensive public `read_region` method.
-
-Override `_open` and `_close` only when the backend needs handles/workers/caches.
-A file backend may assign its descriptor to `self._metadata` in `_open`.
-Metadata discovery must not decode/render pixels. `clear_cache()` is optional and
-must not change the scientific observation or close its source.
-
-For a simulated RGB product use `axes="YXS"`, `image_type="rgb"`, and shape
-`(height, width, 3)`. For oracle labels use `axes="YX"`, `image_type="label"`, and
-an integer dtype. The returned data must match those declared semantics.
-
-### The provider's scientific obligations
-
-A source describes one fixed observation during its open lifetime. Repeated reads,
-overlapping regions, channel subsets, and different read orders must agree. A new
-random exposure is a new observation, not a consequence of panning a viewer.
-Use absolute coordinates or another equivalent deterministic construction for
-noise and procedural textures. A selected output channel must still account for
-unrequested latent contributors if the declared acquisition couples channels.
-
-Spatial filters require the provider to evaluate its necessary halo and return
-only the requested center. Neighbors with centers outside a region may contribute
-inside it. Omeify neither knows nor guesses a simulator's physical support.
-
-Writing may read a region more than once: pyramid construction, base writing,
-and lossless spot verification all consume the same source. A non-repeatable
-provider can fail verification. Numerical contract tests cannot establish whether
-a custom provider has modeled biology or optics correctly.
-
-The interface guarantees *regional requests*, not cheap execution inside an
-arbitrary backend. No parallel-read safety is assumed; consumers must serialize
-access unless their backend explicitly provides a stronger guarantee. There is
-no universal cache, simulator worker pool, global normalization, or hidden
-whole-image scan in the new facade.
-
-## 5. Coordinates, axes, channels, and ownership
-
-Bounds are **half-open integer pixel-edge coordinates in the selected level**:
-`[y0:y1, x0:x1]`. Pixel centers are `(index + 0.5)` in that level. Bounds outside
-the raster, reversed bounds, fractional indices, and boolean indices are rejected;
-there is no implicit clipping or padding. Empty spatial regions return empty arrays
-without calling the provider.
-
-| Layout | `read_region` result | Meaning of `channels=` |
-|---|---|---|
-| `CYX` | `(selected_C, height, width)` | Logical channel indices; requested order and duplicates preserved. |
-| `YX` | `(height, width)` | Only channel zero. |
-| `YXS` | `(height, width, selected_S)` | RGB sample indices, preserving historical `OMETiffReader` behavior. |
-
-For full RGB, omit `channels=`. The logical RGB channel is `image[0]`, which returns
-all three samples. Existing vendor-reader RGB conveniences remain unchanged;
-`reader.as_image()` provides the unified sample-selection behavior. Lazy `Channel`
-access uses YX for scalar channels and YXS for the logical RGB channel.
-
-There is no implicit NumPy `__array__` implementation. `asarray(level=...)` and
-`channel.array` are deliberate whole-level/channel materializations. Writers do
-not invoke either for an Image input.
-
-Image wrappers own their source by default. Borrow a shared source explicitly:
-
-```python
-source = RampSource()
-with source:
-    with MultichannelImage(source, owns_source=False) as image:
-        patch = image.read_region(0, 256, 0, 256)
-    assert source.is_open
-```
-
-Closing is idempotent. Closed images cannot be read. Reopening creates a new
-session: old Channel objects and writer-plane adapters are rejected rather than
-silently rebound. Do not nest contexts on the same composed image or source;
-use separate borrowing wrappers. Metadata describes the data, while session
-generation is only a lifetime token, not a content hash or persistent specimen ID.
-
-A backend depending on local files must expose those paths through
-`backing_paths`. Image-aware writers reject replacing a declared source file,
-including symlink/hard-link aliases. This is separate from OME metadata and never
-causes source paths to be copied into the output header.
-
-## 6. Explicit multiresolution metadata
-
-Use `image.level_descriptors`, `image.level_shape(level)`,
-`image.pixel_size_at_level(level)`, and `image.level_downsample(level)`.
-The last returns `(scale_y, scale_x)` or `None`.
-
-`ImageLevel` carries the index, canonical axes/shape, optional calibration, and
-optional declared `downsample_yx`. Base scale is `(1, 1)`. Do not infer sampling
-scale from rounded dimensions: a 5-by-7 raster reduced 2x becomes 3-by-4 but still
-has a 2x sampling step. Missing calibration on a third-party TIFF pyramid remains
-unknown. Source-backed images expose descriptors through `.levels` too; existing
-readers keep their native TIFF `.levels` objects for compatibility. New consumers
-should use `.level_descriptors` instead of TIFF-specific attributes.
-
-All levels share a coordinate origin and axis directions; this interface does not
-encode arbitrary affine registration. Available levels describe the same image,
-not separate microscope acquisitions. An independently simulated higher-resolution
-exposure should be a different source.
-
-`ArraySource` supports supplied reduced arrays with `level_arrays=` and a complete
-`levels=` descriptor sequence, including level zero. It does not generate a
-pyramid at construction or guess reduced-level calibration.
-
-## 7. One writer for any open Image
-
-```python
-from omeify import OMETiffWriter
-
-with MultichannelImage(RampSource()) as image:
-    # This would evaluate/write the entire declared image tile-by-tile.
-    # Use the smaller examples/image_sources.py fixture for a quick test.
-    report = OMETiffWriter(
-        "Scratch/virtual.ome.tif",
-        tile_size=1024,
-        compression="Deflate",
-        overwrite=False,
-    ).write(image)
-```
-
-The writer infers image type, channel names, pixel calibration, and RGB ICC profile
-from the image. An explicitly conflicting `image_type` or `axes` is rejected.
-Explicit channel-name and pixel-size overrides remain possible and do not mutate
-the source. It writes the selected `level=0` by default; selecting another level
-uses that level's calibration as the new output base.
-
-**Input pyramids are not copied.** Output pyramids are rebuilt by the existing
-writer from the selected source level. The existing scratch-disk footprint remains;
-streaming avoids a full base array in RAM, not all temporary storage. Labels still
-require lossless compression and nearest reduction. RGB writing remains uint8.
-NaN payloads and signed zero retain the existing fidelity/precision rules.
-
-The writer borrows the image and leaves it open after success or failure. Keep
-its context active until writing finishes. `write_source()` and `PlaneReaderSource`
-remain available unchanged for existing advanced callers. They are the lower-level
-writer bridge, not a second generic image architecture.
-
-The existing output-path-first API is preserved:
-`OMETiffWriter(path, ...).write(image)`. Earlier design sketches using a static
-`OMETiffWriter.write(image, path)` were pseudocode, not the implemented signature.
-
-For temporary files:
-
-```python
-from omeify import TemporaryOMETiffWriter
-
-with MultichannelImage.from_array(array, pixel_size=PixelSize(.5, .5, "µm")) as image:
-    with TemporaryOMETiffWriter(compression="Deflate") as writer:
-        writer.write(image)
-        temporary_path = writer.path
-        # Consume the temporary file here, while this context remains active.
-```
-
-The convenience function also supports
-`write_ometiff(path, image=image, ...)`. It is mutually exclusive with its existing
-`channels=` array/channel-list argument.
-
-## 8. Heterogeneous products in one OME-TIFF
-
-```python
-from omeify import OMEImageSeries, OMEMultiSeriesWriter, RGBImage, LabelImage
-
-with (
-    RGBImage.from_array(rgb, pixel_size=size) as he,
-    LabelImage.from_array(label_array, pixel_size=size) as labels,
-):
-    report = OMEMultiSeriesWriter(
-        "Scratch/products.ome.tif", compression="Deflate", overwrite=False,
-    ).write((
-        OMEImageSeries.from_image("H&E", he),
-        OMEImageSeries.from_image("Nuclear labels", labels),
-    ))
-```
-
-`from_image` discovers metadata but reads no pixels. It borrows the current image
-session until `.write()` completes. Existing `from_array` and `from_source` APIs
-are retained. Single- and multi-series output still use the same shared engine.
-Application provenance remains explicit; simulator truth is not smuggled into
-ordinary image headers.
-
-## 9. Run the supplied example in Jupyter
-
-From the repository root, in a kernel with the patched Omeify installed:
+Only the requested rectangle exists. The smaller `examples/image_sources.py`
+uses this mechanism to write a 3072-by-2048 procedural image and an RGB/label
+multi-series file:
 
 ```python
 from examples.image_sources import run_example
 result = run_example("Scratch/omeify_sources", overwrite=False)
 ```
 
-It writes a 3072-by-2048 procedural three-channel image and a separate RGB/label
-multi-series file, and checks a full-resolution region against its file readback.
-It needs neither Matplotlib nor a GUI. Restart an existing kernel after upgrading.
+For a future Mocktome provider, the image's source may query a spatial index and
+render intersecting geometry. That implementation belongs in Mocktome. Declare
+`image_type="rgb"`, `axes="YXS"`, shape `(H, W, 3)` for H&E, or
+`image_type="label"`, `axes="YX"`, integer dtype for oracle labels. Use the
+matching semantic image wrapper. No TIFF byte stream is required.
 
-For Mocktome's *current eager results*, wrap `mif.data`, `he.rgb`, and the selected
-truth-label array using the corresponding `from_array` factory. Supply channel
-names and the section's calibration. This immediately removes the need for an
-intermediate TIFF, but does not make Mocktome rendering lazy.
+Providers must implement `_read_region`, not bypass the common public validation
+method. `_open()`/`_close()` are optional resource hooks. Metadata discovery must
+not generate pixels. If a backend depends on local files, expose `backing_paths`
+so writers can protect them from replacement, including symlink/hard-link aliases.
 
-True Mocktome regional synthesis and its `mif_image`/`he_image`/`label_image`
-conveniences must be implemented in Mocktome against this contract. They are not
-methods added by this Omeify patch. Zarr/PNG backends, widgets, ImageView/crop
-wrappers, arbitrary Z/T selection, and simulator-specific caching remain separate.
+A source is a **fixed observation**, not a new exposure every time it is read.
+Repeated reads, overlaps, reordered requests, and channel subsets must agree.
+Coordinate-stable randomness, necessary filter halos, neighbor contributions,
+and retained unmixing contributors are the provider's responsibility. Saving and
+restoring specimen truth also belongs to the simulator, not this I/O interface.
+Writers may request pixels repeatedly during pyramid construction and verification.
 
-Version 0.17.0 retains the existing file reader, writer, converter, and CLI entry
-points. Downstream package constraints such as `omeify<0.17` must be reviewed before
-upgrading those environments. A consumer that accepts only a filename still needs
-an image-input route; the new contract cannot silently change that consumer's API.
+The contract promises regional requests, not inexpensive generation by an arbitrary
+backend. It does not impose a global cache, simulator worker pool, thread-safety
+promise, automatic normalization, or a spatial registration model.
+
+## 5. Coordinates, channels, and levels
+
+Bounds are half-open **integer pixel-edge coordinates in the selected level**.
+Negative, reversed, fractional, boolean, and out-of-bounds requests fail. Empty
+spatial requests return an empty correctly shaped array without calling the
+backend. Returned arrays own their data and use native byte order, without a
+numeric dtype cast. Signed zeros and NaN payloads are preserved by byte swapping.
+
+| Layout | Full regional result | Meaning of `channels=` |
+|---|---|---|
+| `CYX` | `(selected_C, H, W)` | Logical channel indices; order and duplicates retained |
+| `YX` | `(H, W)` | Only logical channel zero |
+| `YXS` | `(H, W, 3)` | Only logical channel zero, containing all three RGB samples |
+
+A single-channel OME-TIFF may reopen as `YX` even when supplied as singleton
+`CYX`, because TIFF readers may squeeze that axis. Its logical channel is still
+scalar `YX`; use the channel handle when comparing such round trips.
+
+**RGB sample selection is not a channel selection.** To inspect red after a bounded
+read, use `rgb_patch[..., 0]`. `image[0]` is the logical RGB channel. This is now the
+same for OME-TIFF, vendor RGB, and array/procedural images.
+
+Use the single resolution surface:
+
+```python
+level = image.levels[1]
+print(level.shape, level.axes, level.spatial_shape)
+print(level.pixel_size, level.downsample_yx)
+```
+
+`ImageLevel` contains explicit sampling information. A 5-by-7 raster reduced
+2x has shape 3-by-4 and still has a 2x sampling step. Do not calculate sampling
+scale from shape ratios. Unknown third-party level calibration stays `None`.
+Metadata-only file open now validates all advertised levels, without decoding
+pixels. Source levels describe one observation, not different microscope exposures.
+
+`level_arrays=` and `levels=` on array construction describe existing multiscale
+arrays; no hidden pyramid is generated. File `.native_axes`/`.native_shape`
+describe original storage only. Native TIFF directory objects belong to file
+inspection, not the generic `.levels` interface.
+
+## 6. Metadata changes and writing policy
+
+```python
+with OMETiffReader("uncalibrated.ome.tif") as raw:
+    with raw.with_metadata(pixel_size=PixelSize(0.5, 0.5, "µm")) as calibrated:
+        OMETiffWriter("calibrated.ome.tif", compression="Deflate").write(calibrated)
+```
+
+`with_metadata()` creates a borrowed view, not an in-place edit. It supports final
+ordered channel names, physical calibration, and an RGB ICC profile. `None` keeps
+the existing value. Known level scales are recalibrated; unknown scales stay
+unknown. It does not infer or remove missing experimental information.
+
+Writers only take storage settings: compression, tiling, pyramid count, scratch
+location, workers, output precision, software tag, UUID and overwrite policy.
+Image axes, dtype, channel names and calibration belong to the Image. Writing an
+uncalibrated image fails; dtype conversion and intensity normalization are not
+implicit. RGB writing remains uint8; labels require lossless storage and nearest
+pyramids. Explicit float32 mantissa trimming remains available.
+
+A writer is an operation object; it opens and closes its real file resources
+inside `write()`. It therefore does not need an otherwise empty outer `with`.
+Temporary files do have a caller-visible lifetime:
+
+```python
+from omeify import TemporaryOMETiffWriter
+
+with MultichannelImage.from_array(array, axes="CYX", pixel_size=size) as image:
+    with TemporaryOMETiffWriter(compression="Deflate") as temporary:
+        temporary.write(image)
+        use_path = temporary.path
+        # The path exists here; consume it before leaving the context.
+```
+
+Writers borrow images and leave them open on success or failure. They may evict
+source decode caches between passes; eviction must not change pixels or close
+resources. Source pyramids are rebuilt from the selected input level, not copied.
+Temporary reduced TIFFs still consume scratch space. Bounded RAM does not mean
+no temporary files.
+
+Single-image and heterogeneous writers share the existing encoder, pyramid
+arithmetic, metadata validation, precision handling and atomic installation.
+`convert()` and `mutate()` now use this same Image write path. Their user-facing
+operations and CLI remain distinct and unchanged.
+
+## 7. Lifetime and ownership
+
+An image owns its supplied backend by default. `owns_source=False` borrows an
+already-open source. File-origin constructors own the file source. Metadata and
+channel views own only their view backend and borrow parents.
+
+Closing is idempotent. Old lazy handles do not reconnect to a reopened image.
+Views must be recreated for the new session. Nested contexts on the same image
+or source are rejected so an inner exit cannot silently close an outer scope.
+Use separate borrowing wrappers when scopes genuinely differ.
+
+No implicit `__array__` conversion exists. Whole-image reads are explicit methods.
+A viewer requires an open source for future requests; a returned NumPy patch does
+not. Keep source contexts around live viewers/analyses, or close them explicitly
+when the interactive work is finished.
+
+## 8. Migration from 0.17
+
+| Removed/changed | Current form |
+|---|---|
+| `writer.write(array)` with writer-side image metadata | Semantic `.from_array(...)`, then `.write(image)` |
+| `writer.write_image(image)` | `.write(image)` |
+| Public `write_source` / `PlaneReaderSource` | External `ImageSource` implementation, wrapped as Image |
+| `write_ometiff(...)` | `OMETiffWriter(path, ...).write(image)` |
+| `OMEImageSeries.from_array/from_source/from_image` | `OMEImageSeries(name, image, ...)` |
+| Public `ArraySource`, `OMETiffSource`, `ReaderImageSource` adapters | Named array constructors, file readers, or external `ImageSource` |
+| `reader.as_image()` | Reader already is an Image |
+| `image.metadata`, `image.source` | Image's direct metadata/read API; provider descriptor is separate |
+| `channel.array` | `channel.asarray()` |
+| `level_descriptors`, native TIFF `.levels` | `.levels` is always `ImageLevel` descriptors |
+| `level_shape(n)`, `pixel_size_at_level(n)`, `level_downsample(n)` | `levels[n].shape`, `.pixel_size`, `.downsample_yx` |
+| `level_count`, `is_pyramidal` | `len(image.levels)`, `len(image.levels) > 1` |
+| `logical_channel_count`, `logical_channel_names`, `size_c` | `channel_count`, `channel_names`, `sample_count` |
+| `is_rgb`, `is_label` | `image_type == "rgb"` / `"label"` |
+| Writer `output_path` attribute | `writer.path` |
+| `analyze_dtype_mutation(source, channel_names=..., source_dtype=...)` | `analyze_dtype_mutation(image, ...)`; metadata comes from the image |
+| `reader.series_count` | `len(reader.series_names)` |
+| `reader.inspection` / `inspection_report` | `reader.inspect()` / `reader.inspect().report` |
+| `reader.tiff`, `reader.series`, physical `plane_readers` | Explicit file inspection; ordinary pixels use Image reads |
+| Implicitly open `.from_array()` | Context manager or explicit `.open()` |
+| `channels=[2, 0]` on RGB | Read logical channel 0, select RGB samples in returned patch |
+
+Source-native axes remain available as `native_axes` and `native_shape` on file
+readers. Generic axes/shape always describe the normalized product. Conversion
+report fields still distinguish source layout from normalized layout.
+
+### Tilework and Cadastre need coordinated migration
+
+The available Tilework 6586040 adapter uses `is_rgb` and calls
+`pixel_size_at_level()` with a fallback based on rounded image dimensions.
+Change it to `image_type == "rgb"` and `reader.levels[level].pixel_size`, and
+**remove that shape-ratio fallback**. Do not let a missing removed method quietly
+select different calibration. Its existing bounded CYX/YXS-to-YXC conversion can
+stay. Constructed Omeify Images can enter the same adapter as file readers; there
+is no reason to create a simulator-specific Tilework branch.
+
+The available Cadastre acfb391 output code creates `OMEImageSeries.from_source`
+from `ArtifactSource` and `VisualizationStackSource`, typed as `PlaneReaderSource`.
+Those providers need the new `ImageSource` descriptor/regional interface and an
+open semantic wrapper; series construction becomes `OMEImageSeries(name, image)`.
+Its existing bounded artifact reads, contour halos, JPEG display policy, and
+scientific postprocessing should not be changed merely to migrate I/O.
+
+Cadastre's tissue workflow and local-DAPI preparation also reopen paths. Migrating
+its writer is not the same as enabling end-to-end file-free input. The latter
+needs a deliberate Image-accepting workflow and lifetime for all stages that
+reread the observation. Keep its CLI opening real files at the boundary.
+
+This patch changes Omeify only. These sibling observations are based on the
+available snapshots, not an assertion that their latest checkouts were modified
+or tested. Migrate their call sites and dependency bounds before upgrading their
+production environments. The same removed APIs may affect ttwhy, Fieldwork,
+CellGate, or notebook helpers; search those callers rather than adding shims here.

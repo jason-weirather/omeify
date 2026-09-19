@@ -1,154 +1,100 @@
+"""Lazy logical channels; all reads go through the owning image contract."""
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from numbers import Integral
-from types import MappingProxyType
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .tiff import PlaneReader
+from .image_metadata import integer
 
-
-def normalize_channel_indices(
-    selection: int | Sequence[int] | None,
-    size: int,
-    *,
-    field: str = "channels",
-) -> list[int]:
-    if selection is None:
-        return list(range(size))
-    if isinstance(selection, (bool, np.bool_, str, bytes)):
-        raise TypeError(f"{field} must be an integer index or a sequence of integer indices")
-    if isinstance(selection, Integral):
-        selected = [int(selection)]
-    else:
-        values = tuple(selection)
-        if any(isinstance(v, (bool, np.bool_)) or not isinstance(v, Integral) for v in values):
-            raise TypeError(f"{field} must contain integer indices, not booleans or floats")
-        selected = [int(v) for v in values]
-    if not selected:
-        raise ValueError(f"{field} must contain at least one index")
-    for index in selected:
-        if index < 0 or index >= size:
-            raise IndexError(f"Channel {index} is outside the available range 0..{size - 1}")
-    return selected
+if TYPE_CHECKING:
+    from .base import Image
 
 
 class Channel:
-    """Lazy logical image channel backed by regional/random-access I/O.
+    """A read-only logical-channel view of one image descriptor and open session.
 
-    Metadata properties never read pixel data. ``array`` is the explicit escape
-    hatch that materializes the full-resolution channel.
+    Obtain channels from the parent image. Metadata is a projection of the same
+    immutable descriptor, not an independently editable copy. asarray() explicitly
+    materializes a whole channel. Scalar channels return YX; RGB returns YXS.
     """
 
-    def __init__(
-        self,
-        *,
-        index: int,
-        channel_id: str,
-        name: str,
-        dtype: np.dtype | str | type,
-        shape: Sequence[int],
-        samples_per_pixel: int = 1,
-        plane_reader_factory: Callable[[int], PlaneReader],
-        array_reader: Callable[[int], np.ndarray] | None = None,
-        ensure_available: Callable[[], None] | None = None,
-        source_id: str | None = None,
-        id_is_generated: bool = False,
-        source_metadata: Mapping[str, Any] | None = None,
-    ) -> None:
-        self.index = int(index)
-        if self.index < 0:
-            raise ValueError("Channel index must be zero or greater")
-        self.id = str(channel_id)
-        self.name = str(name)
-        if not self.id:
-            raise ValueError("Channel ID must be non-empty")
-        if not self.name:
-            raise ValueError("Channel name must be non-empty")
-        self.dtype = np.dtype(dtype).newbyteorder("=")
-        self.shape = tuple(int(item) for item in shape)
-        if len(self.shape) not in {2, 3} or any(item < 1 for item in self.shape):
-            raise ValueError(f"Channel shape must be positive YX or YXS, found {self.shape}")
-        self.samples_per_pixel = int(samples_per_pixel)
-        if self.samples_per_pixel < 1:
-            raise ValueError("samples_per_pixel must be at least one")
-        if len(self.shape) == 2 and self.samples_per_pixel != 1:
-            raise ValueError("A YX Channel must have SamplesPerPixel=1")
-        if len(self.shape) == 3 and self.shape[-1] != self.samples_per_pixel:
-            raise ValueError(
-                f"YXS Channel shape {self.shape} does not match "
-                f"SamplesPerPixel={self.samples_per_pixel}"
-            )
-        self.source_id = None if source_id is None else str(source_id)
-        self.id_is_generated = bool(id_is_generated)
-        self.source_metadata = MappingProxyType(dict(source_metadata or {}))
-        self._plane_reader_factory = plane_reader_factory
-        self._array_reader = array_reader
-        self._ensure_available = ensure_available
-        self._readers: dict[int, PlaneReader] = {}
+    def __init__(self, image: Image, index: int) -> None:
+        image._ensure_open()
+        index = integer(index, "channel index")
+        if index >= image.channel_count:
+            raise IndexError("Channel index is outside the image")
+        self._image = image
+        self._generation = image._generation
+        self._description = image._metadata
+        self._index = index
+
+    @property
+    def index(self) -> int:
+        return self._index
+
+    @property
+    def id(self) -> str:
+        declared = self._description.channel_ids[self.index]
+        return declared if declared is not None else f"Channel:0:{self.index}"
+
+    @property
+    def name(self) -> str:
+        return self._description.channel_names[self.index]
+
+    @property
+    def dtype(self) -> np.dtype:
+        return self._description.dtype
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        spatial = self._description.levels[0].spatial_shape
+        return (*spatial, 3) if self.samples_per_pixel == 3 else spatial
+
+    @property
+    def samples_per_pixel(self) -> int:
+        return self._description.samples_per_pixel
+
+    @property
+    def source_id(self) -> str | None:
+        return self._description.channel_source_ids[self.index]
+
+    @property
+    def id_is_generated(self) -> bool:
+        return self._description.channel_ids[self.index] is None
+
+    @property
+    def source_metadata(self) -> Mapping[str, Any]:
+        return self._description.channel_metadata[self.index]
 
     @property
     def height(self) -> int:
-        return int(self.shape[0])
+        return self.shape[0]
 
     @property
     def width(self) -> int:
-        return int(self.shape[1])
+        return self.shape[1]
 
     def _ensure(self) -> None:
-        if self._ensure_available is not None:
-            self._ensure_available()
-
-    def _reader(self, level: int = 0) -> PlaneReader:
-        self._ensure()
-        if isinstance(level, (bool, np.bool_)) or not isinstance(level, Integral):
-            raise TypeError("level must be an integer")
-        level_index = int(level)
-        if level_index < 0:
-            raise IndexError("Pyramid level must be zero or greater")
-        reader = self._readers.get(level_index)
-        if reader is None:
-            reader = self._plane_reader_factory(level_index)
-            self._readers[level_index] = reader
-        return reader
+        self._image._ensure_session(self._generation)
 
     def read_region(
-        self,
-        y0: int,
-        y1: int,
-        x0: int,
-        x1: int,
-        *,
-        level: int = 0,
+        self, y0: int, y1: int, x0: int, x1: int, *, level: int = 0,
     ) -> np.ndarray:
-        return np.ascontiguousarray(self._reader(level).read_region(y0, y1, x0, x1))
+        self._ensure()
+        values = self._image.read_region(y0, y1, x0, x1, level=level, channels=(self.index,))
+        return values[0] if self._description.axes == "CYX" else values
 
     def asarray(self, *, level: int = 0) -> np.ndarray:
         self._ensure()
-        if isinstance(level, (bool, np.bool_)) or not isinstance(level, Integral):
-            raise TypeError("level must be an integer")
-        if level < 0:
-            raise IndexError("Pyramid level must be zero or greater")
-        if self._array_reader is not None:
-            value = np.asarray(self._array_reader(int(level)))
-        else:
-            reader = self._reader(level)
-            value = reader.read_region(0, reader.height, 0, reader.width)
-        if np.dtype(value.dtype).newbyteorder("=") != self.dtype:
-            raise TypeError(
-                f"Channel {self.index} materialized dtype {value.dtype}; expected {self.dtype}"
-            )
-        return np.ascontiguousarray(value)
-
-    @property
-    def array(self) -> np.ndarray:
-        return self.asarray(level=0)
+        height, width = self._description.level(level).spatial_shape
+        return self.read_region(0, height, 0, width, level=level)
 
     def clear_cache(self) -> None:
-        for reader in self._readers.values():
-            reader.clear_cache()
+        """Release the owning source's cache; no independent channel cache exists."""
+        self._ensure()
+        self._image.clear_cache()
 
     def __repr__(self) -> str:
         return (

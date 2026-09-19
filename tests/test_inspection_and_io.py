@@ -208,20 +208,21 @@ def test_ome_tiff_reader_holds_file_open_reads_regions_and_matches_inspect(
         assert ome.shape == data.shape
         assert ome.dtype == np.dtype("uint16")
         assert ome.channel_names == ("DAPI", "PanCK", "CD3")
-        assert ome.size_c == 3
+        assert ome.sample_count == 3
         np.testing.assert_array_equal(ome.read_region(2, 7, 3, 9), data[:, 2:7, 3:9])
         np.testing.assert_array_equal(
             ome.read_region(2, 7, 3, 9, channels=[2, 0]),
             data[[2, 0], 2:7, 3:9],
         )
         expected = TiffInspector(source).render_text()
-        assert str(ome) == expected
+        assert ome.inspect().render_text() == expected
+        assert "channels=" in repr(ome)
         cli_result = CliRunner().invoke(main, ["inspect", str(source)])
         assert cli_result.exit_code == 0, cli_result.output
         assert cli_result.output.rstrip("\n") == expected
 
     assert not reader.is_open
-    with pytest.raises(RuntimeError, match="must be opened"):
+    with pytest.raises(RuntimeError, match="closed"):
         _ = reader.axes
 
 
@@ -276,11 +277,6 @@ def test_reader_rejects_non_ome_tiff(tmp_path: Path) -> None:
             pass
 
 
-def test_generic_rgb_and_label_interfaces_are_available() -> None:
-    assert RGBImage.samples_per_pixel == 3
-    assert RGBImage.channel_names == ("RGB",)
-    assert RGBImage.sample_names == ("Red", "Green", "Blue")
-    assert LabelImage.background_label == 0
 
 
 def test_cli_inspect_text_json_and_output_file(tmp_path: Path) -> None:
@@ -323,19 +319,20 @@ def test_ome_tiff_reader_reads_interleaved_rgb_regions(tmp_path: Path) -> None:
 
     with OMETiffReader(source) as ome:
         assert ome.axes == "YXS"
-        assert ome.size_c == 3
+        assert ome.sample_count == 3
         assert ome.channel_names == ("RGB",)
-        assert ome.logical_channel_count == 1
+        assert ome.channel_count == 1
         assert ome.sample_count == 3
         assert ome.sample_names == ("Red", "Green", "Blue")
         np.testing.assert_array_equal(ome.read_region(1, 6, 2, 9), data[1:6, 2:9, :])
         np.testing.assert_array_equal(
-            ome.read_region(1, 6, 2, 9, channels=[2, 0]),
-            data[1:6, 2:9, :][..., [2, 0]],
+            ome.read_region(1, 6, 2, 9, channels=[0]),
+            data[1:6, 2:9, :],
         )
 
 
 def test_public_ome_tiff_writer_emits_miti_profiled_multichannel_output(
+    image_factory,
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "writer.ome.tif"
@@ -343,13 +340,15 @@ def test_public_ome_tiff_writer_emits_miti_profiled_multichannel_output(
 
     report = OMETiffWriter(
         output,
-        image_type="multichannel",
-        channel_names=["DAPI", "PanCK", "CD3"],
-        pixel_size=PixelSize(0.5, 0.6, "µm"),
-        compression="Uncompressed",
+        compression='Uncompressed',
         tile_size=16,
         pyramid_levels=1,
-    ).write(data)
+    ).write(image_factory(
+        data,
+        kind='multichannel',
+        channel_names=['DAPI', 'PanCK', 'CD3'],
+        pixel_size=PixelSize(0.5, 0.6, 'µm'),
+    ))
 
     assert report["image"]["image_type"] == "multichannel"
     assert report["miti_header"]["is_valid"] is True
@@ -360,7 +359,7 @@ def test_public_ome_tiff_writer_emits_miti_profiled_multichannel_output(
     assert assessment["extra_metadata"] == []
 
     with OMETiffReader(output) as image:
-        assert image.logical_channel_count == 3
+        assert image.channel_count == 3
         assert image.sample_count == 3
         np.testing.assert_array_equal(
             image.read_region(2, 8, 3, 10),
@@ -369,6 +368,7 @@ def test_public_ome_tiff_writer_emits_miti_profiled_multichannel_output(
 
 
 def test_writer_software_tag_defaults_to_omeify_and_accepts_override(
+    image_factory,
     tmp_path: Path,
 ) -> None:
     data = np.zeros((1, 16, 16), dtype=np.uint16)
@@ -377,23 +377,27 @@ def test_writer_software_tag_defaults_to_omeify_and_accepts_override(
 
     default_report = OMETiffWriter(
         default_output,
-        image_type="multichannel",
-        channel_names=["DAPI"],
-        pixel_size=PixelSize(0.5, 0.5, "µm"),
-        compression="Uncompressed",
+        compression='Uncompressed',
         tile_size=16,
         pyramid_levels=0,
-    ).write(data)
+    ).write(image_factory(
+        data,
+        kind='multichannel',
+        channel_names=['DAPI'],
+        pixel_size=PixelSize(0.5, 0.5, 'µm'),
+    ))
     custom_report = OMETiffWriter(
         custom_output,
-        image_type="multichannel",
-        channel_names=["DAPI"],
-        pixel_size=PixelSize(0.5, 0.5, "µm"),
-        compression="Uncompressed",
+        compression='Uncompressed',
         tile_size=16,
         pyramid_levels=0,
-        software="downstream-app 2.4",
-    ).write(data)
+        software='downstream-app 2.4',
+    ).write(image_factory(
+        data,
+        kind='multichannel',
+        channel_names=['DAPI'],
+        pixel_size=PixelSize(0.5, 0.5, 'µm'),
+    ))
 
     with tifffile.TiffFile(default_output) as tiff:
         assert str(tiff.pages[0].tags["Software"].value).startswith("omeify ")
@@ -406,13 +410,12 @@ def test_writer_software_tag_defaults_to_omeify_and_accepts_override(
     with pytest.raises(ValueError, match="non-empty string"):
         OMETiffWriter(
             tmp_path / "bad-software.ome.tif",
-            channel_names=["DAPI"],
-            pixel_size=PixelSize(0.5, 0.5, "µm"),
             software="   ",
         )
 
 
 def test_float32_writer_can_trim_mantissa_and_declare_reduced_significant_bits(
+    image_factory,
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "trimmed-float32.ome.tif"
@@ -427,14 +430,16 @@ def test_float32_writer_can_trim_mantissa_and_declare_reduced_significant_bits(
 
     report = OMETiffWriter(
         output,
-        image_type="multichannel",
-        channel_names=["DAPI"],
-        pixel_size=PixelSize(0.5, 0.5, "µm"),
-        compression="Uncompressed",
+        compression='Uncompressed',
         tile_size=16,
         pyramid_levels=0,
         float32_mantissa_bits=11,
-    ).write(data)
+    ).write(image_factory(
+        data,
+        kind='multichannel',
+        channel_names=['DAPI'],
+        pixel_size=PixelSize(0.5, 0.5, 'µm'),
+    ))
 
     assert report["image"]["significant_bits"] == 20
     assert report["image"]["float32_mantissa_bits"] == 11
@@ -481,20 +486,25 @@ def test_float32_mantissa_rounding_uses_nearest_ties_to_even() -> None:
     )
 
 
-def test_float32_precision_trimming_is_applied_to_pyramid_values(tmp_path: Path) -> None:
+def test_float32_precision_trimming_is_applied_to_pyramid_values(
+    image_factory,
+    tmp_path: Path,
+) -> None:
     output = tmp_path / "trimmed-pyramid.ome.tif"
     data = np.linspace(0.0, 200.0, 32 * 32, dtype=np.float32).reshape(32, 32)
 
     OMETiffWriter(
         output,
-        image_type="multichannel",
-        channel_names=["DAPI"],
-        pixel_size=PixelSize(0.5, 0.5, "µm"),
-        compression="Uncompressed",
+        compression='Uncompressed',
         tile_size=16,
         pyramid_levels=1,
         float32_mantissa_bits=11,
-    ).write(data)
+    ).write(image_factory(
+        data,
+        kind='multichannel',
+        channel_names=['DAPI'],
+        pixel_size=PixelSize(0.5, 0.5, 'µm'),
+    ))
 
     with tifffile.TiffFile(output) as tiff:
         for level in tiff.series[0].levels:
@@ -504,35 +514,43 @@ def test_float32_precision_trimming_is_applied_to_pyramid_values(tmp_path: Path)
             assert np.all((raw[finite] & np.uint32((1 << 12) - 1)) == 0)
 
 
-def test_generic_rgb_writer_defaults_to_lossless_lzw(tmp_path: Path) -> None:
-    writer = OMETiffWriter(
-        tmp_path / "rgb-default.ome.tif",
-        image_type="rgb",
-        pixel_size=PixelSize(0.5, 0.5, "µm"),
-    )
+def test_generic_rgb_writer_defaults_to_lossless_lzw(tmp_path: Path, image_factory) -> None:
+    # Assert current storage policy without opening a second metadata input path.
+    from omeify.io._writer.preparation import prepare_image
+    from omeify.io.image_planes import ImagePlaneSource
 
-    assert writer.compression_name == "LZW"
+    image = image_factory(np.zeros((16, 16, 3), np.uint8), kind="rgb",
+                          pixel_size=PixelSize(.5, .5, "µm"))
+    source = ImagePlaneSource(image)
+    writer = OMETiffWriter(tmp_path / "rgb.ome.tif", tile_size=16)
+    prepared = prepare_image(source, source.output_spec(), name=None, downsample=None,
+                             compression_name=writer._settings.compression_name, settings=writer._settings,
+                             lossy_policy="rgb-only")
+    assert prepared.compression.name == "LZW"
 
 
-def test_planar_writer_rejects_lossy_compression(tmp_path: Path) -> None:
+def test_planar_writer_rejects_lossy_compression(image_factory, tmp_path: Path) -> None:
     output = tmp_path / "lossy-planar.ome.tif"
     data = np.zeros((1, 16, 16), dtype=np.uint8)
 
     with pytest.raises(ValueError, match="Lossy compression is restricted to RGB"):
         OMETiffWriter(
             output,
-            image_type="multichannel",
-            channel_names=["DAPI"],
-            pixel_size=PixelSize(0.5, 0.5, "µm"),
-            compression="JPEG",
+            compression='JPEG',
             tile_size=16,
             pyramid_levels=0,
-        ).write(data)
+        ).write(image_factory(
+            data,
+            kind='multichannel',
+            channel_names=['DAPI'],
+            pixel_size=PixelSize(0.5, 0.5, 'µm'),
+        ))
 
     assert not output.exists()
 
 
 def test_writer_fails_closed_when_ome_schema_validation_is_unavailable(
+    image_factory,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -543,18 +561,23 @@ def test_writer_fails_closed_when_ome_schema_validation_is_unavailable(
     with pytest.raises(RuntimeError, match="schema validation could not be performed"):
         OMETiffWriter(
             output,
-            image_type="multichannel",
-            channel_names=["DAPI"],
-            pixel_size=PixelSize(0.5, 0.5, "µm"),
-            compression="Uncompressed",
+            compression='Uncompressed',
             tile_size=16,
             pyramid_levels=0,
-        ).write(data)
+        ).write(image_factory(
+            data,
+            kind='multichannel',
+            channel_names=['DAPI'],
+            pixel_size=PixelSize(0.5, 0.5, 'µm'),
+        ))
 
     assert not output.exists()
 
 
-def test_label_writer_and_reader_stay_at_the_virtual_io_boundary(tmp_path: Path) -> None:
+def test_label_writer_and_reader_stay_at_the_virtual_io_boundary(
+    image_factory,
+    tmp_path: Path,
+) -> None:
     output = tmp_path / "labels.ome.tif"
     labels = np.array(
         [
@@ -568,13 +591,15 @@ def test_label_writer_and_reader_stay_at_the_virtual_io_boundary(tmp_path: Path)
 
     report = OMETiffWriter(
         output,
-        image_type="label",
-        channel_names=["Cells"],
-        pixel_size=PixelSize(0.5, 0.5, "µm"),
-        compression="Uncompressed",
+        compression='Uncompressed',
         tile_size=16,
         pyramid_levels=1,
-    ).write(labels)
+    ).write(image_factory(
+        labels,
+        kind='label',
+        channel_names=['Cells'],
+        pixel_size=PixelSize(0.5, 0.5, 'µm'),
+    ))
 
     assert report["image"]["image_type"] == "label"
     assert report["pyramid"]["downsample_method"] == "nearest"
@@ -589,13 +614,15 @@ def test_label_writer_and_reader_stay_at_the_virtual_io_boundary(tmp_path: Path)
 
     with pytest.raises(ValueError, match="lossless compression"):
         OMETiffWriter(
-            tmp_path / "lossy-label.ome.tif",
-            image_type="label",
-            pixel_size=PixelSize(0.5, 0.5, "µm"),
-            compression="JPEG",
+            tmp_path / 'lossy-label.ome.tif',
+            compression='JPEG',
             tile_size=16,
             pyramid_levels=0,
-        ).write(labels.astype(np.uint8))
+        ).write(image_factory(
+            labels.astype(np.uint8),
+            kind='label',
+            pixel_size=PixelSize(0.5, 0.5, 'µm'),
+        ))
 
 
 def test_runtime_dependencies_exclude_scikit_image() -> None:
