@@ -204,6 +204,15 @@ def source_miti_header(reader: Any) -> dict[str, object] | None:
     return None if value is None else dict(value)
 
 
+def _report_metadata(value: Any) -> Any:
+    """Return ordinary report containers, detached from frozen channel metadata."""
+    if isinstance(value, Mapping):
+        return {key: _report_metadata(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_report_metadata(item) for item in value]
+    return value
+
+
 def build_input_report(
     reader: Any,
     input_file: Path,
@@ -222,7 +231,7 @@ def build_input_report(
             "name": channel.name,
             "source_id": channel.source_id,
             "id_is_generated": channel.id_is_generated,
-            "source_metadata": dict(channel.source_metadata),
+            "source_metadata": _report_metadata(channel.source_metadata),
         }
         for channel in reader.channels
     ]

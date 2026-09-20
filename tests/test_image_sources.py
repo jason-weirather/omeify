@@ -1,7 +1,9 @@
 """Current image/provider workflows, not compatibility tests for retired APIs."""
 from __future__ import annotations
 
+import json
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -13,11 +15,13 @@ from omeify import (
     OMETiffWriter, PixelSize, RGBImage, TemporaryOMETiffWriter,
 )
 
+from omeify.workflow import build_input_report
+
 SIZE = PixelSize(0.5, 0.5, "µm")
 
 
 class CoordinateSource(ImageSource):
-    def __init__(self, kind="multichannel", height=65, width=79):
+    def __init__(self, kind="multichannel", height=65, width=79, *, channel_metadata=None):
         axes = {"multichannel": "CYX", "rgb": "YXS", "label": "YX"}[kind]
         shape = (
             (2, height, width) if axes == "CYX"
@@ -25,7 +29,7 @@ class CoordinateSource(ImageSource):
         )
         super().__init__(ImageMetadata(
             axes=axes, shape=shape, dtype=np.dtype("uint8" if kind == "rgb" else "uint32"),
-            image_type=kind, pixel_size=SIZE,
+            image_type=kind, pixel_size=SIZE, channel_metadata=channel_metadata,
         ))
         self.calls = []
 
@@ -242,3 +246,90 @@ def test_nested_context_failure_does_not_close_outer():
             with image:
                 pass
         assert image.is_open
+
+
+
+def test_channel_metadata_is_a_recursive_snapshot() -> None:
+    exposure = {"milliseconds": 7.5}
+    steps = [{"settings": exposure}]
+    wavelengths = [405, 450]
+    record = {"steps": steps, "also": (exposure,), "wavelengths": wavelengths}
+    source = CoordinateSource(channel_metadata=(record, record))
+    frozen = source.metadata.channel_metadata[0]
+
+    exposure["milliseconds"] = 99
+    wavelengths.append(570)
+    steps.clear()
+    record["extra"] = "later"
+    assert frozen["steps"][0]["settings"]["milliseconds"] == 7.5
+    assert frozen["also"][0]["milliseconds"] == 7.5
+    assert frozen["wavelengths"] == (405, 450)
+    assert "extra" not in frozen
+    with pytest.raises(TypeError):
+        frozen["extra"] = "not writable"
+    with pytest.raises(TypeError):
+        frozen["steps"][0]["settings"]["milliseconds"] = 12
+    with pytest.raises(TypeError):
+        frozen["wavelengths"][0] = 488
+    assert not source.calls
+
+
+def test_frozen_channel_metadata_survives_views_and_report_export(tmp_path) -> None:
+    record = {"settings": {"gains": [1.0, 2.0], "enabled": True, "note": None}}
+    source = CoordinateSource(channel_metadata=(record, record))
+    path = tmp_path / "input.fixture"
+    path.write_bytes(b"Report size fixture; no file decoding is involved.")
+    with MultichannelImage(source) as image:
+        with image.with_metadata(channel_names=["DNA", "CD3"]) as renamed:
+            with MultichannelImage.from_channels([renamed[1], renamed[0]]) as selected:
+                assert selected[0].source_metadata["settings"]["gains"] == (1.0, 2.0)
+                with pytest.raises(TypeError):
+                    selected[0].source_metadata["settings"]["enabled"] = False
+                assert not source.calls
+                np.testing.assert_array_equal(
+                    selected.read_region(0, 2, 0, 3),
+                    image.read_region(0, 2, 0, 3, channels=[1, 0]),
+                )
+
+                # Exercise the actual shared report boundary without TIFF or schema fixtures.
+                reader = SimpleNamespace(
+                    channels=selected.channels, dtype=selected.dtype,
+                    native_shape=selected.shape, shape=selected.shape,
+                    native_axes=selected.axes, axes=selected.axes,
+                    source_byte_order="little", input_type_description="test source",
+                )
+                report = build_input_report(reader, path, selected.pixel_size)
+                exported = report["channels"][0]["source_metadata"]
+                assert json.loads(json.dumps(exported)) == record
+                exported["settings"]["gains"].append(3.0)
+                assert selected[0].source_metadata["settings"]["gains"] == (1.0, 2.0)
+        assert image.is_open
+
+
+@pytest.mark.parametrize(
+    "fault", ["object", "array", "key", "mapping_cycle", "sequence_cycle", "depth"],
+)
+def test_channel_metadata_rejects_unsupported_or_cyclic_values(fault) -> None:
+    error = TypeError
+    if fault == "object":
+        record = {"value": object()}
+    elif fault == "array":
+        record = {"value": np.arange(3)}
+    elif fault == "key":
+        record = {"nested": {1: "not a string key"}}
+    elif fault == "mapping_cycle":
+        record = {}
+        record["self"] = record
+        error = ValueError
+    elif fault == "sequence_cycle":
+        loop = []
+        loop.append((loop,))
+        record = {"value": loop}
+        error = ValueError
+    else:
+        record = {}
+        for _ in range(64):
+            record = {"nested": record}
+        error = ValueError
+    with pytest.raises(error, match="channel_metadata"):
+        CoordinateSource(channel_metadata=(record, record))

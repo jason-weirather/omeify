@@ -90,6 +90,17 @@ lookup operations: `image[index]`, `get_by_name(name)`, and `get_by_id(id)`.
 Duplicate names are allowed but name lookup rejects ambiguity. Channel metadata is
 read-only; rename with `with_metadata()` or `from_channels(channel_names=...)`.
 
+`ImageMetadata.channel_metadata` and `channel.source_metadata` are recursively
+immutable snapshots, not live views of caller-owned dictionaries. Records accept
+plain Python `None`, `bool`, `int`, `float`, and `str` values, string-keyed mappings,
+and lists/tuples. Mappings are copied into read-only proxies; lists/tuples become
+tuples, recursively. Reusing one input container is allowed, but reference cycles,
+more than 64 nested containers, non-string keys, arrays, and arbitrary objects are
+rejected. Convert unsupported metadata explicitly before constructing a descriptor;
+no value is silently stringified, and non-finite float declarations are not repaired.
+This rule applies to channel metadata, not borrowed image pixels or ICC profiles.
+The conversion/mutation reports still contain detached ordinary JSON containers.
+
 ## 2. Arrays from notebooks and other libraries
 
 ```python
