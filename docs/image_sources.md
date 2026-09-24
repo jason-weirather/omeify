@@ -5,9 +5,10 @@ File readers, array images, and procedural images use the same lifecycle,
 regional reads, logical channels, and writer bridge. Omeify does not import
 Mocktome or contain simulator-specific dispatch.
 
-This is a deliberate breaking library cleanup. The CLI commands, arguments,
-options, conversion/mutation policies, and report structure are unchanged.
-The version value changes. There are no deprecated forwarding APIs. File opening
+This is a deliberate breaking library cleanup. Conversion/mutation policies
+and report structure are unchanged. Independently, the CLI now requires
+`--output` / `-o` for the destination of `convert` and `mutate`; their Python
+call signatures are unchanged. There are no deprecated forwarding APIs. File opening
 now validates the complete advertised level description; inconsistent metadata
 can fail earlier than a later regional read in the former reader implementation.
 
@@ -352,7 +353,7 @@ no temporary files.
 Single-image and heterogeneous writers share the existing encoder, pyramid
 arithmetic, metadata validation, precision handling and atomic installation.
 `convert()` and `mutate()` now use this same Image write path. Their user-facing
-operations and CLI remain distinct and unchanged.
+operations remain distinct; CLI destinations use `--output` / `-o`.
 
 ## 7. Lifetime and ownership
 

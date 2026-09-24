@@ -324,6 +324,7 @@ def test_cli_single_verbose_level_enables_only_omeify_stage_logs(
         [
             "convert",
             str(source),
+            "--output",
             str(output),
             "--type",
             "component",
@@ -396,6 +397,7 @@ def test_cli_repeated_verbose_level_keeps_full_diagnostic_prefixes(
         [
             "convert",
             str(source),
+            "--output",
             str(output),
             "--type",
             "component",

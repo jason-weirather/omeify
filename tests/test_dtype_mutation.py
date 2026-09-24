@@ -407,6 +407,7 @@ def test_mutation_cli_emits_structured_per_channel_report(tmp_path: Path) -> Non
         [
             "mutate",
             str(source),
+            "--output",
             str(output),
             "--type",
             "ome_tiff",
@@ -540,6 +541,7 @@ def test_mutation_cli_accepts_channel_rename_json_with_interspersed_options(
             "--output-json",
             str(report_path),
             "--verbose",
+            "-o",
             str(output),
         ],
     )
@@ -574,6 +576,7 @@ def test_mutation_cli_trims_float32_mantissa_and_updates_ome_significant_bits(
         [
             "mutate",
             str(source),
+            "--output",
             str(output),
             "--type",
             "ome_tiff",
@@ -621,6 +624,7 @@ def test_mutation_cli_requires_exactly_one_pixel_mutation(tmp_path: Path) -> Non
         [
             "mutate",
             str(source),
+            "--output",
             str(tmp_path / "missing.ome.tif"),
             "--type",
             "ome_tiff",
@@ -634,6 +638,7 @@ def test_mutation_cli_requires_exactly_one_pixel_mutation(tmp_path: Path) -> Non
         [
             "mutate",
             str(source),
+            "--output",
             str(tmp_path / "both.ome.tif"),
             "--type",
             "ome_tiff",

@@ -188,9 +188,13 @@ def main() -> None:
     "input_path",
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
 )
-@click.argument(
+@click.option(
+    "-o",
+    "--output",
     "output_path",
     type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Destination OME-TIFF file.",
 )
 @click.option(
     "--type",
@@ -315,7 +319,10 @@ def convert_command(
     overwrite: bool,
     verbose: int,
 ) -> None:
-    """Convert INPUT_PATH into a metadata-minimized pyramidal OME-TIFF at OUTPUT_PATH."""
+    """Convert INPUT_PATH into a metadata-minimized pyramidal OME-TIFF.
+
+    Supply the destination file with --output / -o.
+    """
 
     _configure_logging(verbose)
     rename_channels, rename_mode = _load_channel_renames(
@@ -366,9 +373,13 @@ def convert_command(
     "input_path",
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
 )
-@click.argument(
+@click.option(
+    "-o",
+    "--output",
     "output_path",
     type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Destination OME-TIFF file.",
 )
 @click.option(
     "--type",
@@ -532,7 +543,10 @@ def mutate_command(
     overwrite: bool,
     verbose: int,
 ) -> None:
-    """Create an explicitly pixel-mutated OME-TIFF from planar floating-point INPUT_PATH."""
+    """Create an explicitly pixel-mutated OME-TIFF from planar floating-point INPUT_PATH.
+
+    Supply the destination file with --output / -o.
+    """
 
     _configure_logging(verbose)
     if (dtype is None) == (float32_mantissa_bits is None):

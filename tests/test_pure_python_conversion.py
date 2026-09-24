@@ -1039,6 +1039,7 @@ def test_cli_svs_type_routes_to_rgb_converter(tmp_path: Path) -> None:
         [
             "convert",
             str(source),
+            "-o",
             str(output),
             "--type",
             "svs",

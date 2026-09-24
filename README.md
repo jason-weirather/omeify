@@ -171,6 +171,11 @@ representation. The four commands keep different responsibilities explicit:
 | `omeify mutate` | Use the same writer for an intentional float-to-integer or float32-precision change, with a report of the transformation. |
 | `omeify version` | Report Omeify's version; `--json` also records the image-I/O dependency versions. |
 
+`convert` and `mutate` require a destination file via **`--output` / `-o`**.
+The input remains positional; a second positional output path is not accepted.
+`--output-json` separately selects a report file. `inspect` still prints to
+stdout by default and accepts an optional `--output` / `-o` for its report.
+
 ### Inspect, convert, and retain the report
 
 This example uses an Akoya multiplex QPTIFF. Replace the paths with your own:
@@ -178,7 +183,7 @@ This example uses an Akoya multiplex QPTIFF. Replace the paths with your own:
 ```bash
 omeify inspect input.qptiff
 
-omeify convert input.qptiff normalized.ome.tif \
+omeify convert input.qptiff --output normalized.ome.tif \
   --type qptiff_mif \
   --compression LZW \
   --no-overwrite \
@@ -216,7 +221,7 @@ must be present or supplied.
 An existing OME-TIFF can be normalized too:
 
 ```bash
-omeify convert source.ome.tif normalized.ome.tif \
+omeify convert source.ome.tif --output normalized.ome.tif \
   --type ome_tiff --no-overwrite
 ```
 
@@ -225,7 +230,7 @@ with 4:4:4 sampling. To avoid adding a lossy encoding step, choose a lossless
 option explicitly, for example:
 
 ```bash
-omeify convert slide.svs slide.ome.tif \
+omeify convert slide.svs --output slide.ome.tif \
   --type svs --compression Deflate --no-overwrite
 ```
 
@@ -233,7 +238,7 @@ For an intentional numeric change, use `mutate`, for example on a planar
 floating-point image:
 
 ```bash
-omeify mutate processed.ome.tif compact.ome.tif \
+omeify mutate processed.ome.tif --output compact.ome.tif \
   --type ome_tiff --dtype uint16 --range-mode auto \
   --no-overwrite --output-json compact.mutation.json
 ```

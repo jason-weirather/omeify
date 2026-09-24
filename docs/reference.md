@@ -106,7 +106,7 @@ independently using the writer's existing centimeter density convention.
 When no usable calibration remains, provide an explicit override:
 
 ```bash
-omeify convert component.tif component.ome.tif \
+omeify convert component.tif --output component.ome.tif \
   --type component \
   --pixel-size-x 0.5068 \
   --pixel-size-y 0.5068 \
@@ -191,12 +191,26 @@ omeify version   Show package and dependency versions
 
 The former pre-subcommand form is not accepted or forwarded.
 
+`convert` and `mutate` take one positional `INPUT_PATH` and require an output
+file through `--output FILE` or `-o FILE`:
+
+```bash
+omeify convert input.ome.tif -o output.ome.tif --type ome_tiff
+omeify mutate input.ome.tif -o output.ome.tif --type ome_tiff --dtype uint16
+```
+
+The former positional destination is no longer accepted. Omitting the output
+option is a usage error before image processing begins; `--output-json` cannot
+substitute for it. That option remains an optional report destination, separate
+from the OME-TIFF. `inspect` retains its optional `--output` / `-o` report file
+and defaults to stdout. Python `convert()` and `mutate()` signatures are unchanged.
+
 ### `omeify convert`
 
 Akoya mIF QPTIFF:
 
 ```bash
-omeify convert input.qptiff output.ome.tif \
+omeify convert input.qptiff --output output.ome.tif \
   --type qptiff_mif \
   --compression LZW \
   --tile-size 1024 \
@@ -207,7 +221,7 @@ omeify convert input.qptiff output.ome.tif \
 Akoya Fusion multiplex QPTIFF, preferring `Biomarker` and falling back to `Name`:
 
 ```bash
-omeify convert fusion.qptiff fusion.ome.tif \
+omeify convert fusion.qptiff --output fusion.ome.tif \
   --type qptiff_fusion \
   --channel-name-field auto
 ```
@@ -219,7 +233,7 @@ renamed value becomes the minimized OME channel name.
 Indica Labs/HALO mIF TIFF:
 
 ```bash
-omeify convert halo-mif.tif halo-mif.ome.tif \
+omeify convert halo-mif.tif --output halo-mif.ome.tif \
   --type indica_mif
 ```
 
@@ -229,7 +243,7 @@ ImageDescription. The source pyramid is not copied.
 Aperio SVS with an explicit JPEG policy:
 
 ```bash
-omeify convert slide.svs slide.ome.tif \
+omeify convert slide.svs --output slide.ome.tif \
   --type svs \
   --jpeg-quality 92 \
   --jpeg-subsampling 444
@@ -252,7 +266,7 @@ Name mode interprets JSON keys as normalized source channel names:
 ```
 
 ```bash
-omeify convert input.ome.tif output.ome.tif \
+omeify convert input.ome.tif --output output.ome.tif \
   --type ome_tiff \
   --rename-channels-json renames.json \
   --rename-channels-by name
@@ -269,7 +283,7 @@ Index mode interprets JSON keys as zero-based integer strings:
 ```
 
 ```bash
-omeify convert input.ome.tif output.ome.tif \
+omeify convert input.ome.tif --output output.ome.tif \
   --type ome_tiff \
   --rename-channels-json renames.json \
   --rename-channels-by index
@@ -281,6 +295,7 @@ mode. Malformed or mixed mappings fail rather than being guessed.
 Common conversion options:
 
 ```text
+-o, --output FILE          Required destination OME-TIFF file
 --series N                 Source TIFF series; default 0
 --compression NAME         LZW, Deflate, ZSTD, JPEG, or Uncompressed
 --jpeg-quality N           JPEG quality from 1 through 100; default 90
@@ -308,7 +323,7 @@ Integer dtype mutation scans the source by bounded regions, selects one fixed ma
 full-resolution channel, and reports the anticipated quantization loss:
 
 ```bash
-omeify mutate halo-float.tif compact.ome.tif \
+omeify mutate halo-float.tif --output compact.ome.tif \
   --type indica_mif \
   --dtype uint16 \
   --range-mode auto \
@@ -320,7 +335,7 @@ precision exceeds the meaningful precision of the measurement. The recommended s
 processed Akoya PhenoImager HT data is 11 retained fraction bits:
 
 ```bash
-omeify mutate halo-float.ome.tif halo-float-compact.ome.tif \
+omeify mutate halo-float.ome.tif --output halo-float-compact.ome.tif \
   --type ome_tiff \
   --float32-mantissa-bits 11 \
   --compression LZW \
@@ -370,6 +385,7 @@ should reuse fixed mappings instead of selecting a new automatic mapping per sli
 Important mutation options:
 
 ```text
+-o, --output FILE               Required destination OME-TIFF file
 --dtype TYPE                    Convert to uint8 or uint16; exclusive with mantissa trimming
 --float32-mantissa-bits N       Retain N float32 fraction bits; range 0..22
 --range-mode MODE               auto, preserve, or full; integer dtype mutation only
@@ -890,7 +906,7 @@ machinery; they do not have a separate image-level read path. Arrays enter throu
 explicit named constructors. External providers implement `ImageSource` in their
 own package. Omeify contains no Mocktome-specific code or dependency.
 
-**0.18 is a breaking library consolidation, not a CLI change.** The old writer
+**0.18 is a breaking library consolidation.** The old writer
 synonyms, public plane-source adapters, expensive `.array` property, and competing
 level/metadata access paths are removed. Current notebook patterns, provider
 requirements, and a complete migration table are in [Images and sources](image_sources.md).

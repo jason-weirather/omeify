@@ -416,6 +416,7 @@ def test_cli_channel_rename_json_by_name_and_index(tmp_path: Path) -> None:
         [
             "convert",
             str(source),
+            "--output",
             str(name_output),
             "--type",
             "ome_tiff",
@@ -442,6 +443,7 @@ def test_cli_channel_rename_json_by_name_and_index(tmp_path: Path) -> None:
         [
             "convert",
             str(source),
+            "--output",
             str(index_output),
             "--type",
             "ome_tiff",
@@ -475,6 +477,7 @@ def test_cli_rejects_missing_malformed_and_mixed_channel_rename_modes(tmp_path: 
         [
             "convert",
             str(source),
+            "--output",
             str(tmp_path / "missing.ome.tif"),
             "--type",
             "ome_tiff",
@@ -490,6 +493,7 @@ def test_cli_rejects_missing_malformed_and_mixed_channel_rename_modes(tmp_path: 
         [
             "convert",
             str(source),
+            "--output",
             str(tmp_path / "mixed-index.ome.tif"),
             "--type",
             "ome_tiff",
@@ -512,6 +516,7 @@ def test_cli_rejects_missing_malformed_and_mixed_channel_rename_modes(tmp_path: 
         [
             "convert",
             str(numeric_source),
+            "--output",
             str(numeric_output),
             "--type",
             "ome_tiff",
@@ -690,6 +695,7 @@ def test_fusion_cli_profile_and_subcommand_only_policy(tmp_path: Path) -> None:
         [
             "convert",
             str(source),
+            "--output",
             str(output),
             "--type",
             "qptiff_fusion",
