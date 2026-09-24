@@ -185,10 +185,18 @@ def compression_settings(
     if normalized in {"jpeg", "jpg"}:
         if dtype != np.dtype("uint8"):
             raise ValueError("JPEG output is restricted to uint8 images")
+        args: dict[str, object] = {"level": jpeg_quality}
+        if is_rgb:
+            # photometric="rgb" describes the INPUT to tifffile, not necessarily
+            # the JPEG stream. Its default output is YCbCr, even at 4:4:4, which
+            # can trigger a second color conversion in Bio-Formats. Encode true
+            # RGB at 4:4:4; only explicitly subsampled output uses YCbCr. tifffile
+            # uses outcolorspace for both the encoder and the TIFF photometric.
+            args["outcolorspace"] = "RGB" if jpeg_subsampling == "444" else "YCBCR"
         return CompressionSettings(
             "JPEG",
             "jpeg",
-            {"level": jpeg_quality},
+            args,
             None,
             False,
             JPEG_SUBSAMPLING_FACTORS[jpeg_subsampling] if is_rgb else None,

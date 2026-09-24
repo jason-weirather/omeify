@@ -226,7 +226,10 @@ omeify convert source.ome.tif --output normalized.ome.tif \
 ```
 
 **Brightfield defaults are lossy.** H&E QPTIFF and SVS profiles use JPEG quality 90
-with 4:4:4 sampling. To avoid adding a lossy encoding step, choose a lossless
+with 4:4:4 sampling. JPEG 4:4:4 is encoded as true RGB with matching TIFF
+photometric tags, avoiding the 4:4:4 YCbCr double-conversion path in some
+Bio-Formats readers. Explicit 4:2:2, 4:2:0, and 4:1:1 choices use YCbCr with
+matching sampling tags. To avoid adding a lossy encoding step, choose a lossless
 option explicitly, for example:
 
 ```bash
@@ -373,6 +376,19 @@ certification for every consumer version, codec, or multi-series product.
 A label raster is an image product, not a QuPath project or an export of its
 annotation objects.
 
+**RGB storage is not an H&E stain declaration.** QuPath's image-type estimate
+is separate from its recognition of `uint8 (rgb)` pixels. A saved choice or an
+incorrect thumbnail-based estimate can still select Fluorescence. Choose
+Brightfield (H&E) for known H&E data; Omeify does not fabricate acquisition or
+stain metadata for every RGB image. Changing image type cannot repair an
+incorrect JPEG color conversion.
+
+Omeify 0.18.2 makes JPEG color-space selection explicit in the shared writer,
+including CLI conversion, ordinary/temporary library writes, and RGB series in
+multi-image files. Existing files are not changed by upgrading. Re-export from
+the original SVS or the original RGB array, then open the new output in QuPath.
+See the [JPEG policy and regression tests][jpeg-policy] for details.
+
 QuPath, Bio-Formats, and other tools do not have to reproduce Omeify's Python
 classes to use the output. The [OME-TIFF specification][ome-tiff-spec] describes
 the shared file format; the rules above describe Omeify's narrower use of it.
@@ -446,6 +462,7 @@ Apache License 2.0. See [LICENSE][license].
 [supported-inputs]: https://github.com/jason-weirather/omeify/blob/main/docs/reference.md#supported-inputs
 [commands]: https://github.com/jason-weirather/omeify/blob/main/docs/reference.md#command-line-reference
 [python-api]: https://github.com/jason-weirather/omeify/blob/main/docs/reference.md#python-api
+[jpeg-policy]: https://github.com/jason-weirather/omeify/blob/main/docs/reference.md#compression-policy
 [verification]: https://github.com/jason-weirather/omeify/blob/main/docs/reference.md#validation-and-verification
 [io-behavior]: https://github.com/jason-weirather/omeify/blob/main/docs/reference.md#io-scratch-space-and-failure-behavior
 [image-sources]: https://github.com/jason-weirather/omeify/blob/main/docs/image_sources.md

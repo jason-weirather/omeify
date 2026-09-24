@@ -134,7 +134,12 @@ def common_write_options(
         "photometric": spec.photometric,
         "tile": (tile_size, tile_size),
         "compression": compression.tifffile_value,
-        "compressionargs": compression.compression_args,
+        # tifffile may add encoder-specific keys to this dictionary. Keep the
+        # prepared policy immutable across base levels, SubIFDs, and series.
+        "compressionargs": (
+            None if compression.compression_args is None
+            else dict(compression.compression_args)
+        ),
         "predictor": compression.predictor,
         "metadata": None,
         "maxworkers": max_workers,

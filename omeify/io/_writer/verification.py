@@ -370,7 +370,7 @@ def verify_storage(
                 subframe.aspage(),
                 spec=spec,
                 expected_compression=expected_compression,
-                    expected_subsampling=compression.subsampling,
+                expected_subsampling=compression.subsampling,
                 reduced=True,
                 context=(
                     f"{prepared.display_name} plane {plane_index} "
@@ -408,8 +408,23 @@ def verify_page_layout(
     if int(page.samplesperpixel) != spec.samples_per_pixel:
         raise ValueError(f"{context} has the wrong SamplesPerPixel")
     if spec.is_rgb:
-        if int(page.photometric) not in {2, 6} or int(page.planarconfig) != 1:
+        if int(page.planarconfig) != 1:
             raise ValueError(f"{context} does not use contiguous RGB storage")
+        # Check the on-disk encoding policy, not merely whether this reader can
+        # turn either RGB or YCbCr into an RGB array. Accepting both concealed
+        # the 4:4:4 YCbCr/Bio-Formats double-conversion interoperability failure.
+        expected_photometric = (
+            tifffile.PHOTOMETRIC.YCBCR
+            if expected_compression == int(tifffile.COMPRESSION.JPEG)
+            and expected_subsampling != (1, 1)
+            else tifffile.PHOTOMETRIC.RGB
+        )
+        if int(page.photometric) != int(expected_photometric):
+            raise ValueError(
+                f"{context} PhotometricInterpretation={int(page.photometric)} "
+                f"does not match the RGB encoding policy "
+                f"({expected_photometric.name}={int(expected_photometric)})"
+            )
     elif int(page.photometric) != 1:
         raise ValueError(f"{context} does not use grayscale photometric storage")
     if expected_subsampling is not None:

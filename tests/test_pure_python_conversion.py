@@ -697,7 +697,7 @@ def test_brightfield_profiles_default_to_conservative_jpeg_policy() -> None:
 
     assert settings.name == "JPEG"
     assert settings.tifffile_value == "jpeg"
-    assert settings.compression_args == {"level": 90}
+    assert settings.compression_args == {"level": 90, "outcolorspace": "RGB"}
     assert settings.subsampling == (1, 1)
     assert settings.lossless is False
 

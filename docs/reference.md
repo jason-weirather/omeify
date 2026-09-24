@@ -155,15 +155,81 @@ OME-TIFF defaults to LZW so the operation does not introduce a new lossy encodin
 The brightfield JPEG defaults are:
 
 - quality `90`
-- 4:4:4 chroma sampling, represented to tifffile as `(1, 1)`
+- 4:4:4 sampling, represented to tifffile as `(1, 1)`
+- true RGB JPEG components (`compressionargs={"outcolorspace": "RGB", ...}`)
+  with TIFF `PhotometricInterpretation=RGB` (`2`)
 
-Available JPEG sampling choices are `444`, `422`, `420`, and `411`. The TIFF tile size must satisfy
-the selected JPEG sampling alignment. Lossless LZW, Deflate, ZSTD, and uncompressed output remain
+Available JPEG sampling choices are `444`, `422`, `420`, and `411`. `444` keeps
+all three RGB components at full resolution. The explicitly subsampled choices
+use `outcolorspace="YCBCR"`, TIFF `PhotometricInterpretation=YCbCr` (`6`), and
+matching `YCbCrSubSampling` tags. No sampling request is silently changed.
+The TIFF tile size must satisfy the selected JPEG sampling alignment. Lossless LZW, Deflate, ZSTD, and uncompressed output remain
 available for RGB.
 
 The ordinary single-image writer permits JPEG only for `uint8` RGB. The multi-series writer also
 permits JPEG for explicitly selected non-label `uint8` visualization series. Label series always
 require lossless compression.
+
+#### RGB JPEG interoperability
+
+Before 0.18.2, Omeify passed `photometric="rgb"` and `(1, 1)` sampling to
+[tifffile][tifffile-jpeg-source] without choosing the JPEG output color space.
+That photometric argument describes the input array; tifffile normally encodes
+JPEG as YCbCr and writes the corresponding TIFF tag. A YCbCr TIFF with 4:4:4
+sampling can select a special correction path in
+[Bio-Formats' TIFF parser][bioformats-tiff-source]; its
+[JPEG codec][ome-jpeg-source] may then perform a second color conversion after
+Java ImageIO has already returned RGB. A white background can become magenta.
+This is not normal JPEG quantization or a stain-vector problem.
+
+The shared writer now requests **actual RGB JPEG encoding** for `444`, not a
+header-only relabel of YCbCr data. Source arrays and the logical OME channel
+model stay RGB. Mean pyramids are still built from uncompressed RGB samples,
+then every final base/SubIFD uses the same explicit encoder policy. Lossless
+RGB remains TIFF RGB; scalar JPEG previews remain grayscale; label images
+remain lossless. ICC profiles are preserved without an implicit color-management
+transform. Quality remains 90 by default, but the RGB encoding can change file
+size and lossy quantization relative to the previous YCbCr encoding.
+
+Verification now requires the exact photometric for the selected encoding on
+**every base plane and SubIFD**, rather than accepting either RGB or YCbCr.
+This checks the storage policy; it is not a general assertion that every viewer
+or saved QuPath project will choose the intended biological image type.
+[QuPath's image-type selection][qupath-image-type] is a separate user preference
+or estimate. Omeify does not infer H&E, fluorescence, illumination, or stain
+vectors from a generic RGB array. For known H&E, choose Brightfield (H&E) in
+QuPath when necessary. Re-export older affected files from the original source;
+upgrading the writer does not alter existing TIFFs.
+
+Run the focused color regressions (small synthetic RGB swatches, all four
+sampling choices, public conversion/CLI/single/temporary/multi-series routes):
+
+```bash
+python -m pytest -q tests/test_rgb_jpeg.py
+```
+
+The end-to-end writes require the normal `imagecodecs` and `ome-schema`
+dependencies. They check physical tags, independent expected colors, raw JPEG
+tile decoding, and Omeify/tifffile reads at every level. They explicitly skip
+when those dependencies are absent, rather than substituting a codec or validator.
+
+An optional integration test uses the **real Java Bio-Formats OME-TIFF reader**,
+including its JPEG decoder, without adding Java to Omeify's runtime dependencies:
+
+```bash
+OMEIFY_BIOFORMATS_JAR=/path/to/bioformats_package.jar \
+  python -m pytest -q tests/test_rgb_jpeg.py -k bioformats
+```
+
+Supply an existing [Bio-Formats package JAR][bioformats-downloads] and Java 11+.
+The test does not download software, run QuPath's GUI, or replace Bio-Formats
+with a local approximation. Without the environment variable, it is skipped.
+
+[tifffile-jpeg-source]: https://github.com/cgohlke/tifffile/blob/v2026.5.15/tifffile/tifffile.py
+[bioformats-tiff-source]: https://github.com/ome/bioformats/blob/develop/components/formats-bsd/src/loci/formats/tiff/TiffParser.java
+[ome-jpeg-source]: https://github.com/ome/ome-codecs/blob/master/src/main/java/ome/codecs/JPEGCodec.java
+[qupath-image-type]: https://qupath.readthedocs.io/en/stable/docs/starting/first_steps.html#setting-the-image-type
+[bioformats-downloads]: https://downloads.openmicroscopy.org/bio-formats/
 
 ### UUID, Software tag, and ICC profile
 
