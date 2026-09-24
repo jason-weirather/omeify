@@ -17,7 +17,7 @@ from omeify.cli import main
 from omeify.intelligence import IntelligenceError
 from omeify.preview import build_preview
 from omeify.regions import parse_regions
-from omeify.visual_intelligence import _materialize, locate_regions
+from omeify.visual_intelligence import _materialize, answer_visual_question, locate_regions
 
 
 def runner():
@@ -28,6 +28,14 @@ def runner():
 def response(bbox=(600, 100, 900, 900), size=None):
     return json.dumps({"status": "located", "message": "Approximate test location.",
                        "regions": [{"name": "right tissue", "bbox": list(bbox), "size_px": size}]})
+
+
+def visual_answer_response(status="answered"):
+    return json.dumps({
+        "status": status,
+        "paragraphs": [{"text": "The displayed signal is concentrated on the right side."}],
+        "cautions": [{"text": "This answer is based on one display-transformed overview."}],
+    })
 
 
 def test_normalized_coordinates_and_fixed_dimensions():
@@ -80,6 +88,16 @@ def test_binned_mean_preview_matches_independent_bins(image_factory):
     expected = np.rint(means.reshape(ph, pw) / a.max() * 255).astype(np.uint8)
     np.testing.assert_array_equal(pixels, expected)
     assert context["base_pixels_per_preview_pixel_xy"] == [515 / pw, 259 / ph]
+
+
+def test_preview_context_includes_physical_scale(image_factory):
+    image = image_factory(
+        np.zeros((2, 32, 64), dtype=np.uint16),
+        channel_names=("CD3", "DAPI"), pixel_size=PixelSize(.5, .75, "µm"),
+    )
+    _, context = build_preview(image, max_size=128)
+    assert context["microns_per_pixel_xy"] == [0.5, 0.75]
+    assert context["field_of_view_um_xy"] == [32.0, 24.0]
 
 
 def test_huge_source_uses_known_pyramid_without_base_reads():
@@ -182,25 +200,55 @@ def test_single_vision_request_and_crop_compatible_output(image_factory, vision_
     assert len(vision_double["calls"]) == 2  # No automatic retries.
 
 
+def test_visual_question_request_includes_scale_context(image_factory, vision_double):
+    vision_double["response"] = visual_answer_response()
+    image = image_factory(
+        np.arange(2 * 64 * 96, dtype=np.uint16).reshape(2, 64, 96),
+        channel_names=("CD3", "DAPI"), pixel_size=PixelSize(.5, .5, "µm"),
+    )
+    doc = answer_visual_question(
+        image, "Does the DAPI look spatially uneven?", preview_size=128,
+        registry=vision_double["registry"], preview_channels=(("DAPI", "blue"),),
+    )
+    sent, options = vision_double["calls"][-1]
+    assert set(sent) == {"question", "context"}
+    assert sent["context"]["channel_selection"] == "explicit_composite"
+    assert sent["context"]["microns_per_pixel_xy"] == [0.5, 0.5]
+    assert sent["context"]["field_of_view_um_xy"] == [48.0, 32.0]
+    assert doc["answer"]["status"] == "answered"
+    assert options["attachments"][0].type == "image/png"
+
+
 def test_cli_visual_stdout_and_failure_does_not_replace_report(tmp_path, vision_double):
     path = tmp_path / "PRIVATE-NAME.ome.tiff"
     tifffile.imwrite(path, np.zeros((128, 256), dtype=np.uint16), ome=True,
                      metadata={"axes": "YX", "Channel": {"Name": ["DAPI"]}})
-    args = ["inspect", str(path), "-i", "-q", "right tissue", "--geojson", "--preview-size", "128"]
-    result = runner().invoke(main, args)
+    geojson_args = ["inspect", str(path), "-i", "-q", "right tissue", "--geojson", "--preview-size", "128"]
+    result = runner().invoke(main, geojson_args)
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["type"] == "FeatureCollection"
     assert "Sheetbend" in result.stderr and "PRIVATE-NAME" not in json.dumps(vision_double["calls"][0][0])
+    vision_double["response"] = visual_answer_response()
+    visual_args = [
+        "inspect", str(path), "-i", "-q", "Does the DAPI look uneven?", "--visual",
+        "--preview-size", "128", "--channel", "DAPI", "blue",
+    ]
+    result = runner().invoke(main, visual_args)
+    assert result.exit_code == 0, result.output
+    assert "Visual question (advisory)" in result.stdout
+    assert "Does the DAPI look uneven?" in result.stdout
     report = tmp_path / "prior.json"
     report.write_text("keep")
     vision_double["response"] = "not JSON"
-    result = runner().invoke(main, [*args, "-o", str(report)])
+    result = runner().invoke(main, [*geojson_args, "-o", str(report)])
     assert result.exit_code != 0 and report.read_text() == "keep"
     assert result.stdout == ""
     for flags in [["--geojson"], ["-i", "--geojson"], ["--preview-size", "128"],
-                  [*args[2:], "--intelligence-max-chars", "64000"],
-                  [*args[2:], "--preview-channel", "0", "--channel", "DAPI", "blue"],
-                  [*args[2:], "--channel", "DAPI", "blue", "--preview-range", "0", "10"]]:
+                  [*geojson_args[2:], "--intelligence-max-chars", "64000"],
+                  [*geojson_args[2:], "--preview-channel", "0", "--channel", "DAPI", "blue"],
+                  [*geojson_args[2:], "--channel", "DAPI", "blue", "--preview-range", "0", "10"],
+                  ["-i", "-q", "hi", "--visual", "--geojson"],
+                  ["-i", "-q", "hi", "--visual", "--roi-size", "64", "64"]]:
         assert runner().invoke(main, ["inspect", str(path), *flags]).exit_code == 2
 
 

@@ -167,6 +167,21 @@ def _write_or_echo(rendered: str, output: Path | None) -> None:
     output.write_text(rendered.rstrip("\n") + "\n", encoding="utf-8")
 
 
+def _render_visual_answer(report: dict[str, Any]) -> str:
+    answer = report["answer"]
+    lines = ["Visual question (advisory)", "-" * 26, f"Question: {report['question']}"]
+    status = answer["status"]
+    if status != "answered":
+        lines.append(f"Status: {status}")
+    lines.append("")
+    lines.extend(item["text"] for item in answer["paragraphs"])
+    if answer["cautions"]:
+        lines.append("")
+        lines.append("Cautions:")
+        lines.extend(f"- {item['text']}" for item in answer["cautions"])
+    return "\n".join(lines).rstrip()
+
+
 def _pixel_size_override(
     x: float | None,
     y: float | None,
@@ -715,7 +730,7 @@ def crop_command(
 )
 @click.option(
     "-q", "--question", type=str, default=None, metavar="TEXT",
-    help="Answer a metadata question, or locate regions with --geojson; requires -i.",
+    help="Answer a metadata question, answer a visual question with --visual, or locate regions with --geojson; requires -i.",
 )
 @click.option(
     "--intelligence-source", type=str, default=None,
@@ -737,24 +752,26 @@ def crop_command(
     default=DEFAULT_MAX_OUTPUT_TOKENS, show_default=True,
     help="Maximum generated tokens requested from the selected model; requires -i.",
 )
+@click.option("--visual", is_flag=True,
+              help="Answer a visual question only; sends a bounded image preview. Requires -i -q.")
 @click.option("--geojson", is_flag=True,
               help="Return visual ROI GeoJSON only; sends a bounded image preview. Requires -i -q.")
 @click.option("--type", "input_type", type=click.Choice(INPUT_TYPES), default="ome_tiff",
-              help="Input profile for --geojson only; default ome_tiff.")
+              help="Input profile for --visual / --geojson only; default ome_tiff.")
 @click.option("--series", type=click.IntRange(min=0), default=0,
-              help="Source series for --geojson only; default 0.")
+              help="Source series for --visual / --geojson only; default 0.")
 @click.option("--preview-size", type=click.IntRange(min=128, max=2048), default=1536,
-              help="Maximum preview edge in pixels for --geojson; default 1536.")
+              help="Maximum preview edge in pixels for --visual / --geojson; default 1536.")
 @click.option("--preview-channel", type=click.IntRange(min=0), default=None,
-              help="Scalar channel index for --geojson. Default: unique DAPI, otherwise channel 0.")
+              help="Scalar channel index for --visual / --geojson. Default: unique DAPI, otherwise channel 0.")
 @click.option("--channel", "preview_channels", nargs=2, metavar="NAME|INDEX COLOR", multiple=True,
-              help=("Repeat to build a false-color scalar preview composite for --geojson. "
+              help=("Repeat to build a false-color scalar preview composite for --visual / --geojson. "
                     "COLOR accepts names, #RRGGBB, or R,G,B."))
 @click.option("--preview-range", type=float, nargs=2, metavar="LOW HIGH", default=None,
-              help="Display-only scalar intensity range for one-channel --geojson previews.")
+              help="Display-only scalar intensity range for one-channel --visual / --geojson previews.")
 @click.option("--preview-quantile", type=click.FloatRange(min=0, max=1, min_open=True),
               default=0.999, show_default=True,
-              help="Auto-display upper quantile for scalar/composite --geojson previews.")
+              help="Auto-display upper quantile for scalar/composite --visual / --geojson previews.")
 @click.option("--roi-size", type=click.IntRange(min=1), nargs=2, metavar="WIDTH HEIGHT", default=None,
               help="Enforce exact full-resolution ROI dimensions for --geojson.")
 @click.option("-v", "--verbose", count=True, help="Progress on stderr; repeat for diagnostic logs.")
@@ -770,15 +787,15 @@ def inspect_command(
     intelligence_scopes: tuple[str, ...],
     intelligence_max_chars: int,
     intelligence_max_output_tokens: int,
-    geojson: bool, input_type: str, series: int, preview_size: int,
+    visual: bool, geojson: bool, input_type: str, series: int, preview_size: int,
     preview_channel: int | None, preview_channels: tuple[tuple[str, str], ...],
     preview_range: tuple[float, float] | None, preview_quantile: float,
     roi_size: tuple[int, int] | None, verbose: int,
 ) -> None:
-    """Inspect TIFF metadata, or explicitly locate visual regions with --geojson.
+    """Inspect TIFF metadata, answer visual questions, or locate visual regions.
 
-    Ordinary inspection never reads pixels. --geojson is an explicit opt-in to
-    transmit a bounded image overview to the selected Sheetbend source.
+    Ordinary inspection never reads pixels. --visual and --geojson are explicit
+    opt-ins to transmit a bounded image overview to the selected Sheetbend source.
 
     Inspection output is raw diagnostic metadata, not deidentified output. It
     may contain paths, filenames, vendor fields, or other identifying values.
@@ -790,19 +807,25 @@ def inspect_command(
         "input_type", "series", "preview_size", "preview_channel", "preview_channels",
         "preview_range", "preview_quantile", "roi_size",
     )
-    if geojson:
+    if visual and geojson:
+        raise click.UsageError("Choose at most one of --visual or --geojson")
+    visual_mode = visual or geojson
+    if visual_mode:
+        mode = "--geojson" if geojson else "--visual"
         if not intelligence or question is None:
-            raise click.UsageError("--geojson requires --intelligence / -i and --question / -q")
+            raise click.UsageError(f"{mode} requires --intelligence / -i and --question / -q")
         if any(ctx.get_parameter_source(name) != click.core.ParameterSource.DEFAULT
                for name in ("detail", "max_text_length", "intelligence_max_chars")):
-            raise click.UsageError("Metadata detail/text/budget options do not apply to --geojson")
+            raise click.UsageError("Metadata detail/text/budget options do not apply to --visual or --geojson")
     elif any(ctx.get_parameter_source(name) != click.core.ParameterSource.DEFAULT
              for name in visual_options):
-        raise click.UsageError("Visual input, preview, and ROI options require --geojson")
+        raise click.UsageError("Visual input, preview, and ROI options require --visual or --geojson")
     if preview_channels and preview_channel is not None:
         raise click.UsageError("Choose either --preview-channel or one or more --channel options")
     if preview_channels and preview_range is not None:
         raise click.UsageError("--preview-range applies only to one-channel previews, not --channel composites")
+    if visual and ctx.get_parameter_source("roi_size") != click.core.ParameterSource.DEFAULT:
+        raise click.UsageError("--roi-size applies only to --geojson")
     if question is not None:
         if not intelligence:
             raise click.UsageError("--question / -q requires --intelligence / -i")
@@ -825,6 +848,28 @@ def inspect_command(
         or (output.exists() and output.samefile(input_path))
     ):
         raise click.UsageError("--output must differ from INPUT_PATH")
+    if visual:
+        from omeify.io.source_reader import source_reader
+        from omeify.visual_intelligence import answer_visual_question
+
+        click.echo("Answering visual question through Sheetbend: sending a bounded image preview...", err=True)
+        try:
+            with source_reader(input_path, input_type=input_type, series=series,
+                               channel_name_field=None) as image:
+                result = answer_visual_question(
+                    image, question, series=series,
+                    preview_size=preview_size, preview_channel=preview_channel,
+                    preview_channels=preview_channels, preview_range=preview_range,
+                    preview_quantile=preview_quantile, source_name=intelligence_source,
+                    allowed_scopes=intelligence_scopes,
+                    max_output_tokens=intelligence_max_output_tokens,
+                )
+        except Exception as exc:
+            raise click.ClickException(str(exc)) from exc
+        rendered = (json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False)
+                    if as_json else _render_visual_answer(result))
+        _write_or_echo(rendered, output)
+        return
     if geojson:
         from omeify.io.source_reader import source_reader
         from omeify.visual_intelligence import locate_regions

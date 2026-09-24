@@ -309,6 +309,16 @@ def build_preview(
         pixels = np.clip(np.rint(pixels), 0, 255).astype(np.uint8)
         contrast = None
         channel_fields = {"channels": channels_context}
+    physical_context = {
+        "microns_per_pixel_xy": None,
+        "field_of_view_um_xy": None,
+    }
+    if image.pixel_size is not None:
+        size_um = image.pixel_size.converted_to("µm")
+        physical_context = {
+            "microns_per_pixel_xy": [size_um.x, size_um.y],
+            "field_of_view_um_xy": [width * size_um.x, height * size_um.y],
+        }
     context = {
         "width": pw, "height": ph, "base_width": width, "base_height": height,
         "base_pixels_per_preview_pixel_xy": [width / pw, height / ph],
@@ -319,6 +329,7 @@ def build_preview(
         "clip_quantile": None if rgb or display_range is not None else clip_quantile,
         "nonfinite_source_samples_omitted": nonfinite,
         "empty_preview_bins": int(valid.size - np.count_nonzero(valid)),
+        **physical_context,
         **channel_fields,
     }
     return pixels, context
