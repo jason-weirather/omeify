@@ -168,7 +168,7 @@ representation. The commands keep different responsibilities explicit:
 |---|---|
 | `omeify inspect` | Examine TIFF layout and metadata without loading the whole raster. It is not restricted to conversion profiles and does not rewrite the file. |
 | `omeify convert` | Normalize a supported image's layout and metadata, preserve numeric dtype and scale, rebuild pyramids, and verify the output. Lossy compression remains an explicit encoding policy. |
-| `omeify crop` | Export pixel-coordinate or GeoJSON rectangles as named OME-TIFF products; group equal names as separate series. |
+| `omeify crop` | Export pixel-coordinate or GeoJSON rectangles into one ordered multi-image OME-TIFF; split files only with explicit `--shatter`. |
 | `omeify mutate` | Use the same writer for an intentional float-to-integer or float32-precision change, with a report of the transformation. |
 | `omeify version` | Report Omeify's version; `--json` also records the image-I/O dependency versions. |
 
@@ -262,19 +262,29 @@ for the mapping rules, precision controls, channel renaming, and every option;
 ### Crop regions, or ask for their coordinates
 
 ```bash
-omeify crop slide.ome.tiff -o Scratch/slide --bounds 10000 5000 12048 7048
+omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff --bounds 10000 5000 12048 7048
 
 # Explicit visual mode sends one bounded overview through Sheetbend.
 omeify inspect slide.ome.tiff -i --geojson \
   -q "Return only the right tissue; name it right." > right.geojson
-omeify crop slide.ome.tiff -o Scratch/slide --geojson right.geojson
+omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff --geojson right.geojson
 ```
 
-Crop's `-o` is a filename prefix: the examples produce `slide-01.ome.tiff` or
-`slide-right.ome.tiff`. Default naming uses object names when present; `--naming
-index` always uses padded indices. Equal names share a file with one series per
-ROI. Polygons become bounding rectangles, not masks. `--roi-size 2048 2048` on
-visual inspection enforces exact full-resolution dimensions around the proposed
+Crop's `-o` is now the **exact destination filename**: both examples write
+`Scratch/regions.ome.tiff`. All ROIs become separate images/series in that file,
+in GeoJSON input order, including when names repeat. Series names combine the
+padded input index and annotation name, such as `01 - right`; unnamed regions
+use `01 - ROI`. Annotation names do not choose filenames by default.
+
+Add `--shatter by_index` for one file per ROI (`regions-01.ome.tiff`, etc.), or
+`--shatter by_name` for one file per name (`regions-right.ome.tiff`, etc.). Equal
+names then share a file as separate series; unnamed objects use their indices.
+A supplied TIFF extension is preserved, and a bare shattered prefix gets
+`.ome.tiff`. Without shatter, no extension or suffix is added. This **0.20
+breaking change** replaces `--naming`; see the [migration note](docs/regions.md#crop-020-migration).
+
+Polygons become bounding rectangles, not masks. `--roi-size 2048 2048` on visual
+inspection enforces exact full-resolution dimensions around the proposed
 location. For mIF previews, `--channel NAME_OR_INDEX COLOR` can be repeated to
 build a false-color composite (for example `--channel DAPI blue --channel panCK
 magenta`), and scalar auto-display now clips at an upper quantile of 0.999 by

@@ -18,6 +18,7 @@ from .io.pixel_size import PixelSize
 from .io.source_reader import InputType, source_reader
 from .regions import (
     MAX_GEOJSON_CHARS,
+    ShatterMode,
     group_outputs,
     load_geojson,
     parse_regions,
@@ -33,11 +34,11 @@ def _same_path(a: Path, b: Path) -> bool:
 
 
 def crop(
-    input_path: str | Path, output_base: str | Path, *,
+    input_path: str | Path, output_path: str | Path, *,
     bounds: Sequence[int] | None = None,
     geojson: Mapping[str, Any] | list[Any] | str | Path | None = None,
     input_type: InputType = "ome_tiff", series: int = 0,
-    naming: str = "name", clip: bool = False, labels: bool = False,
+    shatter: ShatterMode | None = None, clip: bool = False, labels: bool = False,
     pixel_size: PixelSize | None = None, channel_name_field: str | None = None,
     compression: str | None = None, tile_size: int | None = None,
     pyramid_levels: int | None = None, max_workers: int | None = None,
@@ -45,15 +46,20 @@ def crop(
     jpeg_quality: int = DEFAULT_JPEG_QUALITY,
     jpeg_subsampling: JPEGSubsampling = DEFAULT_JPEG_SUBSAMPLING,
 ) -> dict[str, Any]:
-    """Export full-resolution rectangles; same names become separate series in one file.
+    """Export full-resolution rectangles into one named, ordered OME-TIFF collection.
 
     Supply exactly one of integer ``bounds=(x0,y0,x1,y1)`` or pixel-coordinate
     ``geojson`` (a dict/list or a JSON file path). Float geometry edges are rounded
     outward. No polygon masking, resampling, stitching, or label renumbering occurs.
     Input coordinates are never interpreted as physical units or longitude/latitude.
 
-    Output names use properties.name when present, otherwise one-based indices
-    with at least two digits. ``naming='index'`` keeps every object in its own file.
+    ``output_path`` is the exact destination, with one series per ROI in input
+    order, even for a single ROI. Series names have a padded one-based index plus
+    the supplied name (or ROI). Model-supplied names never choose paths by default.
+    ``shatter='by_index'`` writes one file per ROI; ``shatter='by_name'`` groups
+    equal names into files, with unnamed ROIs falling back to their input indices.
+    Shattered filenames insert the name/index before a TIFF extension, or append
+    .ome.tiff when output_path is a bare prefix. No file is written at the prefix.
     All geometry and destinations are checked before writing any pixels. Each file
     installs atomically; a multiple-file export is NOT an all-or-nothing transaction.
     Writer defaults remain authoritative, including lossy RGB JPEG 90 / 422 / 512.
@@ -87,7 +93,8 @@ def crop(
     else:
         document = geojson
     regions = parse_regions(document)
-    outputs = group_outputs(regions, output_base, naming=naming)
+    outputs = group_outputs(regions, output_path, shatter=shatter)
+    index_width = max(2, len(str(len(regions))))
     reader = (OMETiffLabelReader(source_path, series=series) if labels else source_reader(
         source_path, input_type=input_type, series=series, channel_name_field=channel_name_field,
     ))
@@ -141,22 +148,24 @@ def crop(
                     for output_series, region in enumerate(members):
                         x0, y0, x1, y1 = rectangles[region.index]
                         view = stack.enter_context(image.crop(y0, y1, x0, x1))
-                        name = f"{region.name or 'ROI'} / {region.index:02d}"
+                        name = f"{region.index:0{index_width}d} - {region.name or 'ROI'}"
                         entries.append(OMEImageSeries(name, view))
                         roi_records.append({
                             "input_index": region.index, "name": region.name,
-                            "output_series": output_series, "bounds": [x0, y0, x1, y1],
+                            "output_series": output_series, "output_name": name,
+                            "bounds": [x0, y0, x1, y1],
                             "requested_bounds": list(region.bounds),
                             "clipped": (region.bounds[0] < 0 or region.bounds[1] < 0
                                         or region.bounds[2] > width or region.bounds[3] > height),
                             "source_offset_xy": [x0, y0],
                         })
                     write_report = writer.write(entries, provenance={
-                        "schema": "omeify.crop/1", "coordinate_system": "level0_pixels",
+                        "schema": "omeify.crop/2", "coordinate_system": "level0_pixels",
+                        "shatter": shatter,
                         "source_series": series, "source_size": [width, height],
                         "crop_mode": "bounding_rectangle", "regions": roi_records,
                     })
                 results.append({"path": str(writer.path), "regions": roi_records,
                                 "write_report": write_report})
-    return {"schema": "omeify.crop/1", "input_path": str(source_path), "source_series": series,
-            "naming": naming, "clip": clip, "outputs": results}
+    return {"schema": "omeify.crop/2", "input_path": str(source_path), "source_series": series,
+            "output_path": str(output_path), "shatter": shatter, "clip": clip, "outputs": results}

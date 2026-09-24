@@ -9,10 +9,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 MAX_GEOJSON_CHARS = 8_388_608
 MAX_REGIONS = 4096
+ShatterMode = Literal["by_index", "by_name"]
 
 
 def _constant(value: str) -> None:
@@ -166,22 +167,39 @@ def parse_regions(value: Mapping[str, Any] | list[Any]) -> tuple[Region, ...]:
 
 
 def group_outputs(
-    regions: Sequence[Region], output_base: str | Path, *, naming: str = "name",
+    regions: Sequence[Region], output_path: str | Path, *, shatter: ShatterMode | None = None,
 ) -> list[tuple[Path, tuple[Region, ...]]]:
-    """Group equal names; fail on unsafe/colliding filenames rather than overwrite an ROI."""
-    if naming not in {"name", "index"}:
-        raise ValueError("naming must be 'name' or 'index'")
-    base = Path(output_base)
+    """Keep all ROIs in one file unless explicitly shattered by input index or name.
+
+    Without shatter, output_path is the exact filename, even without an extension.
+    Shattered outputs insert a suffix before the supplied TIFF extension, or append
+    .ome.tiff when no TIFF extension was supplied. Input order is retained within
+    every file; name groups follow their first occurrence, never alphabetical order.
+    """
+    if shatter not in (None, "by_index", "by_name"):
+        raise ValueError("shatter must be None, 'by_index', or 'by_name'")
+    if not regions:
+        raise ValueError("At least one region is required")
+    base = Path(output_path)
     if not base.name or base.name in {".", ".."}:
-        raise ValueError("output_base must include a filename prefix")
-    for suffix in (".ome.tiff", ".ome.tif"):
+        raise ValueError("output_path must include a filename")
+    if base.is_dir():
+        raise IsADirectoryError(base)
+    if shatter is None:
+        return [(base, tuple(regions))]
+
+    extension = ".ome.tiff"
+    for suffix in (".ome.tiff", ".ome.tif", ".tiff", ".tif"):
         if base.name.lower().endswith(suffix):
-            base = base.with_name(base.name[:-len(suffix)])
+            stem, extension = base.name[:-len(suffix)], base.name[-len(suffix):]
+            if not stem or stem in {".", ".."}:
+                raise ValueError("Shattered output requires a filename prefix before the TIFF suffix")
+            base = base.with_name(stem)
             break
     width = max(2, len(str(len(regions))))
     groups: dict[tuple[str, str | int], list[Region]] = {}
     for region in regions:
-        key = ("name", region.name) if naming == "name" and region.name else ("index", region.index)
+        key = ("name", region.name) if shatter == "by_name" and region.name else ("index", region.index)
         groups.setdefault(key, []).append(region)
     used = set()
     outputs = []
@@ -189,11 +207,17 @@ def group_outputs(
         if kind == "name":
             stem = re.sub(r"[^\w.-]+", "-", unicodedata.normalize("NFKC", str(key))).strip("._-")
             if not stem or len(stem.encode("utf-8")) > 120:
-                raise ValueError("A region name cannot form a safe filename; use naming='index'")
+                raise ValueError(
+                    "A region name cannot form a safe filename; use --shatter by_index "
+                    "or omit shatter"
+                )
         else:
             stem = f"{int(key):0{width}d}"
         if stem.casefold() in used:
-            raise ValueError("Distinct region names collide as filenames; use naming='index'")
+            raise ValueError(
+                "Distinct region names collide as filenames; use --shatter by_index "
+                "or omit shatter"
+            )
         used.add(stem.casefold())
-        outputs.append((base.with_name(f"{base.name}-{stem}.ome.tiff"), tuple(members)))
+        outputs.append((base.with_name(f"{base.name}-{stem}{extension}"), tuple(members)))
     return outputs

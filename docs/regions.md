@@ -1,4 +1,4 @@
-# Cropping and visual region questions (0.19)
+# Cropping and visual region questions (0.20)
 
 Two explicit operations compose through **image-pixel GeoJSON**:
 
@@ -13,11 +13,11 @@ Ordinary inspection and metadata questions remain metadata-only.
 ## Crop known coordinates
 
 ```bash
-omeify crop slide.ome.tiff -o Scratch/slide \
+omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff \
   --bounds 10000 5000 12048 7048 -v
 ```
 
-This writes `Scratch/slide-01.ome.tiff`, a 2048 by 2048 rectangle. CLI bounds are
+This writes exactly `Scratch/regions.ome.tiff`, a 2048 by 2048 rectangle. CLI bounds are
 **X0 Y0 X1 Y1**, integer, half-open, in the selected series' **level-zero pixels**.
 They are not `x,y,width,height`, physical units, or pyramid-level coordinates.
 No source pixels are rescaled or masked. Output encoding can still be lossy.
@@ -37,13 +37,15 @@ renumbered. Storage, scratch, workers, and verbosity options appear in `crop --h
 ## Crop GeoJSON
 
 ```bash
-omeify crop slide.ome.tiff -o Scratch/slide --geojson regions.geojson -v
-omeify crop slide.ome.tiff -o Scratch/slide --geojson regions.geojson --naming index
+omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff --geojson regions.geojson -v
+omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff --geojson regions.geojson --shatter by_index
+omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff --geojson regions.geojson --shatter by_name
 ```
 
-Exactly one of `--bounds` or `--geojson` is required. `-o` / `--output` is a
-**filename prefix**, not a directory or a single output file. A trailing
-`.ome.tif` or `.ome.tiff` on the prefix is stripped before suffixing.
+Exactly one of `--bounds` or `--geojson` is required. Without `--shatter`,
+`-o` / `--output` is the **exact destination filename**, not a directory. One or
+many ROIs go into that one file. No extension, index, or model-generated suffix
+is added. Prefer an explicit `.ome.tif` or `.ome.tiff` filename for viewers.
 The crop report goes to stdout; progress goes to stderr.
 
 Supported inputs are a Feature, FeatureCollection, bare Polygon/MultiPolygon,
@@ -77,22 +79,49 @@ Example:
 }
 ```
 
-With prefix `Scratch/slide`, default naming writes `slide-left.ome.tiff` and
-`slide-right.ome.tiff`. `--naming index` instead writes `slide-01.ome.tiff` and
-`slide-02.ome.tiff`. Indices are one-based input order, padded to at least two
-places, or more when the object count requires it.
+With `-o Scratch/regions.ome.tiff`, the default writes **one file** containing
+series 0 named `01 - left` and series 1 named `02 - right`. Each ROI remains an
+independent image, retaining its own dimensions and pyramid; ROIs are not packed
+into a channel stack, stitched into a mosaic, or enclosed in one union rectangle.
 
-The default `--naming name` uses `properties.name`, falling back to the object's
-index when no name is present. A bare geometry may carry `name`. Classification
-labels are **not** silently substituted for object names. Equal names (after
-stripping surrounding whitespace) share **one file with one separate series
-per ROI**, in input order. They are not stitched into a mosaic or expanded into
-one potentially enormous union rectangle. Every series receives a unique name.
+**Input order is authoritative.** The first GeoJSON member becomes series 0,
+the second becomes series 1, and so on. Names, Feature IDs, `properties.index`,
+spatial location, and area do not sort the output. The prefix in a series name
+is its **one-based input index**, padded to at least two places, with more digits
+when the total ROI count requires them. `properties.name` supplies the label; a bare geometry may carry `name`.
+Classification labels are not substituted for names. An unnamed region gets
+`NN - ROI`. Duplicate annotation names remain separate, uniquely indexed series.
 
-Unsafe filename characters become hyphens. Distinct names that collide after
-sanitization or case folding are rejected, including collisions with an unnamed
-object's index. Use index naming to keep them distinct. Empty unsafe names or
-names with more than 120 UTF-8 bytes after sanitization are rejected too.
+### Explicit file splitting
+
+`--shatter` takes one required value and writes only the split files, not an
+additional combined file:
+
+| Mode | Files for the example above | Contents |
+|---|---|---|
+| No `--shatter` | `regions.ome.tiff` | All ROIs in input order |
+| `--shatter by_index` | `regions-01.ome.tiff`, `regions-02.ome.tiff` | One ROI per file, regardless of names |
+| `--shatter by_name` | `regions-left.ome.tiff`, `regions-right.ome.tiff` | One file per name; equal names share a file |
+
+Name grouping compares names after stripping surrounding whitespace. Unnamed
+objects receive individual files using their padded input indices. Groups follow
+their first occurrence, with members retained in original input order. For example,
+`right, left, right` becomes two files: the `right` file contains input ROIs 1 and
+3, and the `left` file contains ROI 2. Their series names retain those **global
+input indices**, while `output_series` is zero-based within each output file.
+
+A supplied `.ome.tiff`, `.ome.tif`, `.tiff`, or `.tif` extension is preserved;
+shatter inserts its suffix immediately before it. With a bare prefix, shatter
+adds `.ome.tiff`. Thus `sample.he.ome.tiff` becomes `sample.he-01.ome.tiff`,
+not `sample.he.ome.tiff-01.ome.tiff`. No path is derived from a region name except
+in explicit `by_name` mode.
+
+Unsafe filename characters become hyphens **only in `by_name` mode**. Distinct
+names that collide after sanitization or case folding are rejected, including
+collisions with an unnamed object's index. Empty unsafe names or names with more
+than 120 UTF-8 bytes after sanitization are rejected too. Omit shatter or select
+`by_index` to avoid making filenames depend on those names. Series labels retain
+the annotation text rather than the filename slug.
 
 Float geometry bounds round outward: floor the minima, ceil the maxima. The
 default rejects out-of-bounds ROIs; `--clip` opts into intersection with the image.
@@ -100,15 +129,32 @@ An empty intersection always fails. Every ROI and all destination paths are
 preflighted before writing pixels. Overwrite is on by default; `--no-overwrite`
 refuses existing entries, including dangling symlinks. Input image/GeoJSON aliases
 and colliding output paths are protected. Each file installs atomically, but a
-batch is not a multi-file transaction: completed files remain after a later I/O
-failure.
+shattered batch is not a multi-file transaction: completed files remain after a
+later I/O failure. The default combined file is installed as a single atomic
+product. Existing unrelated files, including old shattered outputs, are not deleted.
 
 These are named crop products written through `OMEMultiSeriesWriter`, including
 single-ROI files. Each file carries generated crop provenance: input series and
-shape, original requested bounds, exported bounds, output series indices, and
-source XY offsets. A crop's local `(0,0)` maps to that source offset. No source
+shape, original requested bounds, exported bounds, one-based input indices,
+zero-based output series indices, original names, output series names, the shatter
+mode, and source XY offsets. A crop's local `(0,0)` maps to that source offset. No source
 filename or arbitrary source annotation properties are copied into this metadata.
 Retain the original GeoJSON for polygon geometry and other annotation properties.
+
+## Crop 0.20 migration
+
+The new default is deliberately **one requested file**, replacing name-based
+file splitting. The `--naming` option and Python `naming=` argument are removed;
+no compatibility alias can silently retain the old default. Use
+`--shatter by_name` / `shatter="by_name"` for the former name-grouped export or
+`--shatter by_index` / `shatter="by_index"` for per-ROI files.
+
+Python's second parameter is now `output_path` rather than `output_base`.
+Positional calls still work, but without shatter they write the exact requested
+path. Change bare prefixes to complete filenames for combined output. Crop
+reports and embedded crop provenance use `omeify.crop/2`; the report includes
+`output_path` and `shatter` instead of `naming`, and each region adds `output_name`.
+No image, geometry, or previously written file is modified by upgrading.
 
 ## Ask for visual GeoJSON
 
@@ -129,7 +175,7 @@ The configured model and reasoning defaults remain Sheetbend's responsibility.
 omeify inspect slide.ome.tiff -i --geojson \
   -q "Return only the right tissue, with the name right." > right.geojson
 
-omeify crop slide.ome.tiff -o Scratch/slide --geojson right.geojson -v
+omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff --geojson right.geojson -v
 ```
 
 `inspect --geojson` requires both `-i` and `-q`. Stdout contains **only one
@@ -167,7 +213,7 @@ A direct pipeline is supported:
 set -o pipefail
 omeify inspect slide.ome.tiff -i --geojson \
   -q "Return only the right tissue; name it right." \
-  | omeify crop slide.ome.tiff -o Scratch/slide --geojson - -v
+  | omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff --geojson - -v
 ```
 
 Generated GeoJSON carries a foreign `omeify` member with series and dimensions.
@@ -247,7 +293,11 @@ with OMETiffReader("slide.ome.tiff") as image:
         allowed_scopes=("institutional", "local"),
     )
 
-report = crop("slide.ome.tiff", "Scratch/slide", geojson=regions)
+report = crop("slide.ome.tiff", "Scratch/regions.ome.tiff", geojson=regions)
+# Optional per-ROI files, still using the same writer and source coordinates:
+split_report = crop(
+    "slide.ome.tiff", "Scratch/split.ome.tiff", geojson=regions, shatter="by_index",
+)
 ```
 
 `Image.crop` constructs an unopened borrowed view, requiring strict integer,
@@ -265,7 +315,8 @@ python -m pytest -q tests/test_crop.py tests/test_visual_regions.py \
   tests/test_intelligence.py tests/test_intelligence_questions.py
 ```
 
-Offline tests cover lazy crop lifetimes, exact pixel slices, grouping and path
+Offline tests cover lazy crop lifetimes, exact pixel slices, combined/shattered
+ordering, literal output filenames, indexed series labels, grouping and path
 preflight, normalized-coordinate mapping, fixed-size edges, display binning,
 known/unknown pyramid sampling, and stdout/request boundaries. Controlled model
 and PNG doubles do not measure model accuracy or validate an actual endpoint.

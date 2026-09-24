@@ -620,15 +620,16 @@ def mutate_command(
 
 @main.command("crop", context_settings=_CONTEXT_SETTINGS)
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
-@click.option("-o", "--output", "output_base", required=True,
+@click.option("-o", "--output", "output_path", required=True,
               type=click.Path(dir_okay=False, path_type=Path),
-              help="Output filename prefix, not a directory.")
+              help="Exact destination OME-TIFF file; with --shatter, a filename/prefix to suffix.")
 @click.option("--bounds", type=int, nargs=4, metavar="X0 Y0 X1 Y1",
               help="Half-open integer bounds in level-zero pixels; exclusive with --geojson.")
 @click.option("--geojson", "geojson_path", type=str, metavar="FILE",
               help="Pixel-coordinate GeoJSON file, or - for stdin; exclusive with --bounds.")
-@click.option("--naming", type=click.Choice(["name", "index"]), default="name", show_default=True,
-              help="Equal names share a file as separate series; unnamed objects use padded indices.")
+@click.option("--shatter", type=click.Choice(["by_index", "by_name"]), default=None,
+              help=("Split into files by input index or by name (equal names share a file). "
+                    "Default: all ROIs in one file, in input order."))
 @click.option("--clip", is_flag=True, help="Explicitly clip out-of-bounds rectangles to the image.")
 @click.option("--type", "input_type", type=click.Choice(INPUT_TYPES),
               default="ome_tiff", show_default=True)
@@ -653,18 +654,22 @@ def mutate_command(
 @click.option("--overwrite/--no-overwrite", default=True, show_default=True)
 @click.option("-v", "--verbose", count=True, help="Progress on stderr; repeat for diagnostic logs.")
 def crop_command(
-    input_path: Path, output_base: Path, bounds: tuple[int, ...] | None, geojson_path: str | None,
-    naming: str, clip: bool, input_type: str, series: int, labels: bool,
+    input_path: Path, output_path: Path, bounds: tuple[int, ...] | None, geojson_path: str | None,
+    shatter: str | None, clip: bool, input_type: str, series: int, labels: bool,
     channel_name_field: str | None, pixel_size_x: float | None, pixel_size_y: float | None,
     pixel_size_unit: str | None, compression: str | None, jpeg_quality: int,
     jpeg_subsampling: str, tile_size: int | None, pyramid_levels: int | None,
     workers: int | None, cache_directory: Path | None, overwrite: bool, verbose: int,
 ) -> None:
-    """Crop rectangles from INPUT_PATH into PREFIX-name.ome.tiff files.
+    """Crop rectangles from INPUT_PATH into one ordered, multi-image OME-TIFF.
+
+    OUTPUT is the exact filename by default, even for a single ROI. Each region
+    becomes a named series in GeoJSON input order, not a channel or a mosaic.
+    --shatter by_index writes one file per ROI; by_name groups equal names into
+    files. Shattered filenames add a suffix before the TIFF extension.
 
     GeoJSON uses full-resolution XY pixel coordinates, not geographic coordinates.
-    Polygons are exported as bounding rectangles, without masking. Same-named
-    objects remain individual crops (series) in the same file, not a mosaic.
+    Polygons are exported as bounding rectangles, without masking.
     """
     _configure_logging(verbose)
     if (bounds is None) == (geojson_path is None):
@@ -677,8 +682,8 @@ def crop_command(
         else:
             geojson = geojson_path
         report = crop(
-            input_path, output_base, bounds=bounds, geojson=geojson,
-            input_type=input_type, series=series, naming=naming, clip=clip, labels=labels,
+            input_path, output_path, bounds=bounds, geojson=geojson,
+            input_type=input_type, series=series, shatter=shatter, clip=clip, labels=labels,
             channel_name_field=channel_name_field,
             pixel_size=_pixel_size_override(pixel_size_x, pixel_size_y, pixel_size_unit),
             compression=compression, jpeg_quality=jpeg_quality, jpeg_subsampling=jpeg_subsampling,

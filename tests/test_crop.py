@@ -94,18 +94,22 @@ def test_geometry_types_rounding_names_and_padding(tmp_path):
     a = rectangle_feature([1.2, 2.8, 9.1, 10.4], name="right tissue")
     b = rectangle_feature([20, 21, 30, 35], name="right tissue")
     c = rectangle_feature([0, 0, 5, 7], name="")
-    doc = collection(a, b, c)
-    regions = parse_regions(doc)
-    groups = group_outputs(regions, tmp_path / "slide")
+    regions = parse_regions(collection(a, b, c))
+    destination = tmp_path / "slide.ome.tiff"
+    assert group_outputs(regions, destination) == [(destination, regions)]
+    groups = group_outputs(regions, destination, shatter="by_name")
     assert [p.name for p, _ in groups] == ["slide-right-tissue.ome.tiff", "slide-03.ome.tiff"]
     assert [len(r) for _, r in groups] == [2, 1]
     assert pixel_bounds(regions[0].bounds, 100, 100) == (1, 2, 10, 11)
-    assert [p.name for p, _ in group_outputs(regions, "slide.ome.tiff", naming="index")] == [
+    assert [p.name for p, _ in group_outputs(regions, destination, shatter="by_index")] == [
         f"slide-{i:02d}.ome.tiff" for i in range(1, 4)]
     many = parse_regions(collection(*[c] * 101))
-    assert group_outputs(many, "slide")[0][0].name == "slide-001.ome.tiff"
+    for mode in ("by_index", "by_name"):
+        outputs = group_outputs(many, "slide", shatter=mode)
+        assert outputs[0][0].name == "slide-001.ome.tiff"
+        assert outputs[-1][0].name == "slide-101.ome.tiff"
     multi = {"type": "MultiPolygon", "coordinates": [a["geometry"]["coordinates"],
-                                                        b["geometry"]["coordinates"]]}
+                                                   b["geometry"]["coordinates"]]}
     assert len(parse_regions(multi)) == 1
     assert parse_regions(multi)[0].bounds == (1.2, 2.8, 30., 35.)
     assert len(parse_regions({"type": "GeometryCollection", "geometries": [multi, multi]})) == 2
@@ -131,63 +135,103 @@ def test_clipping_and_name_collisions():
         pixel_bounds([-2, 3, 20, 30], 10, 12)
     with pytest.raises(ValueError):
         pixel_bounds([20, 3, 30, 4], 10, 12, clip=True)
-    for names in [("a/b", "a b"), ("A", "a"), ("../../", "safe"), ("01", "")]:
+    for names in [("a/b", "a b"), ("A", "a"), ("../../", "safe"), ("02", ""), ("é" * 61, "safe")]:
         regions = parse_regions(collection(*[rectangle_feature([0, 0, 1, 1], name=n) for n in names]))
-        # The unnamed member is 02, so use 02 to exercise the name/index namespace collision.
-        if names == ("01", ""):
-            regions = parse_regions(collection(rectangle_feature([0, 0, 1, 1], name="02"),
-                                                rectangle_feature([0, 0, 1, 1], name="")))
-        with pytest.raises(ValueError):
-            group_outputs(regions, "out")
-        assert len(group_outputs(regions, "out", naming="index")) == 2
+        # Filename restrictions apply only when annotation names become filenames.
+        assert len(group_outputs(regions, "out")) == 1
+        assert len(group_outputs(regions, "out", shatter="by_index")) == 2
+        with pytest.raises(ValueError, match="by_index"):
+            group_outputs(regions, "out", shatter="by_name")
 
 
-def test_grouped_exports_use_real_lazy_crops(input_file, tmp_path, writer_spy):
+@pytest.mark.parametrize("shatter, groups", [
+    (None, [[0, 1, 2, 3]]), ("by_index", [[0], [1], [2], [3]]), ("by_name", [[0, 2], [1], [3]]),
+])
+def test_grouped_exports_use_real_lazy_crops(input_file, tmp_path, writer_spy, shatter, groups):
     path, pixels = input_file
-    doc = collection(rectangle_feature([2, 3, 14, 19], name="right"),
-                     rectangle_feature([25, 10, 45, 25], name="right"))
-    report = crop(path, tmp_path / "out", geojson=doc)
-    assert len(writer_spy) == 1 and len(report["outputs"]) == 1
-    np.testing.assert_array_equal(writer_spy[0]["pixels"][0], pixels[:, 3:19, 2:14])
-    np.testing.assert_array_equal(writer_spy[0]["pixels"][1], pixels[:, 10:25, 25:45])
-    assert writer_spy[0]["sizes"] == [PixelSize(.5, .7, "µm")] * 2
-    assert writer_spy[0]["provenance"]["regions"][1]["source_offset_xy"] == [25, 10]
-    assert writer_spy[0]["options"]["compression"] is None
+    boxes = [(2, 3, 14, 19), (25, 10, 45, 25), (3, 5, 14, 12), (0, 0, 8, 8)]
+    names = ["zeta", "alpha", "zeta", ""]
+    features = [rectangle_feature(b, name=n) for b, n in zip(boxes, names)]
+    for i, feature in enumerate(features):
+        feature["id"] = 100 - i  # IDs and arbitrary properties are not the ordering key.
+        feature["properties"]["index"] = 10 - i
+    output = tmp_path / "out.he.ome.tiff"
+    report = crop(path, output_path=output, geojson=collection(*features), shatter=shatter)
+    assert report["schema"] == "omeify.crop/2" and report["shatter"] == shatter
+    assert report["output_path"] == str(output) and "naming" not in report
+    assert len(writer_spy) == len(report["outputs"]) == len(groups)
+    if shatter is None:
+        assert writer_spy[0]["path"] == output
+    for call, result, indices in zip(writer_spy, report["outputs"], groups):
+        assert call["names"] == [f"{i + 1:02d} - {names[i] or 'ROI'}" for i in indices]
+        assert call["sizes"] == [PixelSize(.5, .7, "µm")] * len(indices)
+        assert call["options"]["compression"] is None and call["options"]["tile_size"] is None
+        assert call["provenance"]["schema"] == "omeify.crop/2"
+        assert call["provenance"]["shatter"] == shatter
+        assert call["provenance"]["regions"] == result["regions"]
+        for series, i in enumerate(indices):
+            x0, y0, x1, y1 = boxes[i]
+            np.testing.assert_array_equal(call["pixels"][series], pixels[:, y0:y1, x0:x1])
+            record = result["regions"][series]
+            assert record["source_offset_xy"] == [x0, y0]
+            assert record["input_index"] == i + 1 and record["output_series"] == series
+            assert record["name"] == (names[i] or None)
+            assert record["output_name"] == call["names"][series]
 
 
-def test_whole_batch_preflight_and_inputs_are_protected(input_file, tmp_path, writer_spy):
+@pytest.mark.parametrize("shatter, suffix", [(None, ""), ("by_index", "-02"), ("by_name", "-b")])
+def test_whole_batch_preflight_and_inputs_are_protected(input_file, tmp_path, writer_spy,
+                                                        shatter, suffix):
     path, _ = input_file
     doc = collection(rectangle_feature([1, 1, 10, 10], name="a"),
                      rectangle_feature([2, 2, 15, 15], name="b"))
-    later = tmp_path / "out-b.ome.tiff"
+    output = tmp_path / "out.ome.tiff"
+    later = tmp_path / f"out{suffix}.ome.tiff"
     later.write_text("keep")
     with pytest.raises(FileExistsError):
-        crop(path, tmp_path / "out", geojson=doc, overwrite=False)
+        crop(path, output, geojson=doc, shatter=shatter, overwrite=False)
     assert not writer_spy and later.read_text() == "keep"
+    later.unlink()
+    later.symlink_to(tmp_path / "missing")
+    with pytest.raises(FileExistsError):
+        crop(path, output, geojson=doc, shatter=shatter, overwrite=False)
     later.unlink()
     os.link(path, later)
     with pytest.raises(ValueError, match="replace"):
-        crop(path, tmp_path / "out", geojson=doc)
-    assert not writer_spy
+        crop(path, output, geojson=doc, shatter=shatter)
+    later.unlink()
+    later.mkdir()
+    with pytest.raises(IsADirectoryError):
+        crop(path, output, geojson=doc, shatter=shatter)
+    later.rmdir()
     with pytest.raises(ValueError):
-        crop(path, tmp_path / "out", bounds=(10, 10, 3, 3))
-    with pytest.raises(ValueError):
-        crop(path, tmp_path / "out", geojson=collection(
+        crop(path, output, bounds=(10, 10, 3, 3), shatter=shatter)
+    with pytest.raises(ValueError, match="outside"):
+        crop(path, output, shatter=shatter, geojson=collection(
             doc["features"][0], rectangle_feature([0, 0, 100, 100], name="b")))
     assert not writer_spy
 
 
-def test_cli_stdin_and_coordinate_guard(input_file, tmp_path, writer_spy):
+@pytest.mark.parametrize("shatter, filenames", [
+    (None, ["out.ome.tiff"]),
+    ("by_index", ["out-01.ome.tiff", "out-02.ome.tiff", "out-03.ome.tiff"]),
+    ("by_name", ["out-right.ome.tiff", "out-left.ome.tiff"]),
+])
+def test_cli_stdin_and_coordinate_guard(input_file, tmp_path, writer_spy, shatter, filenames):
     path, _ = input_file
-    doc = collection(rectangle_feature([1, 2, 10, 11], name="right"))
-    result = CliRunner().invoke(main, ["crop", str(path), "-o", str(tmp_path / "out"),
-                                     "--geojson", "-"], input=json.dumps(doc))
+    doc = collection(*[rectangle_feature([1, 2, 10, 11], name=n) for n in ("right", "left", "right")])
+    args = ["crop", str(path), "-o", str(tmp_path / "out.ome.tiff"), "--geojson", "-"]
+    if shatter is not None:
+        args += ["--shatter", shatter]
+    result = CliRunner().invoke(main, args, input=json.dumps(doc))
     assert result.exit_code == 0, result.output
-    assert len(json.loads(result.stdout)["outputs"]) == 1
+    report = json.loads(result.stdout)
+    assert [Path(o["path"]).name for o in report["outputs"]] == filenames
+    assert report["shatter"] == shatter
     doc["omeify"] = {"coordinate_system": "level0_pixels", "image_size": [128, 48], "series": 0}
     with pytest.raises(ValueError, match="dimensions or series"):
-        crop(path, tmp_path / "out", geojson=doc)
-    assert len(writer_spy) == 1
+        crop(path, tmp_path / "out.ome.tiff", geojson=doc, shatter=shatter)
+    assert len(writer_spy) == len(filenames)
 
 
 def test_real_crop_tiff_readback(input_file, tmp_path):
@@ -195,7 +239,102 @@ def test_real_crop_tiff_readback(input_file, tmp_path):
     path, a = input_file
     report = crop(path, tmp_path / "real", bounds=(2, 3, 40, 30), compression="Deflate", tile_size=16)
     output = Path(report["outputs"][0]["path"])
+    assert output == tmp_path / "real"  # No implicit extension or index, even for bounds.
     with OMETiffReader(output) as actual:
         np.testing.assert_array_equal(actual.asarray(), a[:, 3:30, 2:40])
         assert actual.pixel_size == PixelSize(.5, .7, "µm")
         assert len(actual.levels) > 1
+
+
+@pytest.mark.parametrize("output, shattered", [
+    ("out", "out-01.ome.tiff"), ("out.he", "out.he-01.ome.tiff"),
+    ("out.he.ome.tiff", "out.he-01.ome.tiff"), ("out.ome.tif", "out-01.ome.tif"),
+    ("out.tif", "out-01.tif"), ("out.tiff", "out-01.tiff"),
+    ("out.OME.TIFF", "out-01.OME.TIFF"),
+])
+def test_output_path_is_literal_unless_shattered(output, shattered):
+    regions = parse_regions(rectangle_feature([0, 0, 1, 1], name="arbitrary name"))
+    assert group_outputs(regions, output)[0][0] == Path(output)
+    assert group_outputs(regions, output, shatter="by_index")[0][0] == Path(shattered)
+
+
+def test_invalid_output_modes_and_destinations(input_file, tmp_path, writer_spy):
+    path, _ = input_file
+    doc = rectangle_feature([0, 0, 10, 10], name="x")
+    for mode in (True, "index", "name", "unexpected"):
+        with pytest.raises(ValueError, match="shatter"):
+            crop(path, tmp_path / "out", geojson=doc, shatter=mode)
+    for output in ("", ".", "..", "/", tmp_path):
+        with pytest.raises((ValueError, IsADirectoryError)):
+            group_outputs(parse_regions(doc), output)
+    with pytest.raises(ValueError, match="prefix"):
+        group_outputs(parse_regions(doc), ".ome.tiff", shatter="by_index")
+    args = ["crop", str(path), "-o", str(tmp_path / "out"), "--bounds", "0", "0", "10", "10"]
+    for flags in (["--shatter"], ["--shatter", "index"], ["--naming", "index"]):
+        assert CliRunner().invoke(main, args + flags).exit_code == 2
+    assert not writer_spy
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, result.output
+    assert writer_spy[0]["path"] == tmp_path / "out"
+    assert writer_spy[0]["names"] == ["01 - ROI"]
+
+
+def test_input_and_geojson_aliases_cannot_be_output(input_file, tmp_path, writer_spy):
+    path, _ = input_file
+    doc = rectangle_feature([0, 0, 10, 10], name="x")
+    annotations = tmp_path / "regions.json"
+    annotations.write_text(json.dumps(doc))
+    for output in (path, annotations):
+        with pytest.raises(ValueError, match="replace"):
+            crop(path, output, geojson=annotations)
+    alias = tmp_path / "alias.ome.tiff"
+    alias.symlink_to(path)
+    with pytest.raises(ValueError, match="replace"):
+        crop(path, alias, geojson=doc)
+    first, second = tmp_path / "out-01.ome.tiff", tmp_path / "out-02.ome.tiff"
+    first.write_text("prior")
+    os.link(first, second)
+    with pytest.raises(ValueError, match="alias each other"):
+        crop(path, tmp_path / "out.ome.tiff", geojson=collection(doc, doc), shatter="by_index")
+    assert not writer_spy and first.read_text() == second.read_text() == "prior"
+
+
+@pytest.mark.parametrize("shatter", [None, "by_index", "by_name"])
+@pytest.mark.parametrize("kind", ["multichannel", "rgb", "label"])
+def test_real_crop_collection_roundtrip(tmp_path, kind, shatter):
+    pytest.importorskip("omeschema", reason="Real OME schema validation dependency is required")
+    from omeify import OMETiffLabelReader
+
+    shape = (2, 48, 64) if kind == "multichannel" else (48, 64, 3) if kind == "rgb" else (48, 64)
+    data = np.arange(np.prod(shape), dtype=np.uint16).reshape(shape)
+    if kind == "rgb":
+        data = (data % 256).astype(np.uint8)
+    axes = "CYX" if kind == "multichannel" else "YXS" if kind == "rgb" else "YX"
+    source = tmp_path / "source.ome.tiff"
+    tifffile.imwrite(source, data, ome=True, photometric="rgb" if kind == "rgb" else "minisblack",
+                     metadata={"axes": axes, "PhysicalSizeX": .5, "PhysicalSizeY": .7,
+                               "PhysicalSizeXUnit": "µm", "PhysicalSizeYUnit": "µm"})
+    boxes = [(2, 3, 40, 30), (25, 10, 45, 25), (12, 13, 50, 40)]
+    doc = collection(*[rectangle_feature(b, name=n) for b, n in zip(boxes, ("zeta", "alpha", "zeta"))])
+    destination = tmp_path / "regions.ome.tiff"
+    report = crop(source, destination, geojson=doc, shatter=shatter, labels=kind == "label",
+                  compression="Deflate", tile_size=16)
+    expected_groups = {
+        None: [[1, 2, 3]], "by_index": [[1], [2], [3]], "by_name": [[1, 3], [2]],
+    }[shatter]
+    assert [[r["input_index"] for r in o["regions"]] for o in report["outputs"]] == expected_groups
+    assert destination.exists() == (shatter is None)
+    reader = OMETiffLabelReader if kind == "label" else OMETiffReader
+    for output in report["outputs"]:
+        write_report = output["write_report"]
+        assert write_report["ome"]["xml_is_valid"]
+        assert write_report["provenance"]["value"]["regions"] == output["regions"]
+        for record in output["regions"]:
+            with reader(output["path"], series=record["output_series"]) as image:
+                x0, y0, x1, y1 = boxes[record["input_index"] - 1]
+                expected = data[:, y0:y1, x0:x1] if kind == "multichannel" else data[y0:y1, x0:x1]
+                np.testing.assert_array_equal(image.asarray(), expected)
+                assert image.series_name == record["output_name"]
+                assert len(image.series_names) == len(output["regions"])
+                assert image.pixel_size == PixelSize(.5, .7, "µm") and image.dtype == data.dtype
+                assert image.image_type == kind

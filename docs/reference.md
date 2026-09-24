@@ -289,7 +289,7 @@ Omeify uses explicit subcommands:
 ```text
 omeify convert   Normalize a supported source into OME-TIFF
 omeify mutate    Create an explicitly pixel-mutated OME-TIFF
-omeify crop      Export coordinate/GeoJSON rectangles as named OME-TIFF products
+omeify crop      Export coordinate/GeoJSON rectangles into one ordered OME-TIFF
 omeify inspect   Inspect TIFF structure and metadata
 omeify version   Show package and dependency versions
 ```
@@ -500,8 +500,12 @@ Important mutation options:
 
 ### `omeify crop`
 
-See [cropping and visual region questions](regions.md) for the complete new
-command, naming/grouping, pixel coordinates, clipping, streaming, and Python API.
+Crop now writes **one OME-TIFF at the exact `--output` / `-o` path** by default,
+with one named series per ROI in GeoJSON input order. Use `--shatter by_index` for
+one file per ROI or `--shatter by_name` to group equal names into separate files.
+`--naming` was removed in 0.20; Python uses `crop(..., output_path=..., shatter=...)`.
+See [cropping and visual region questions](regions.md) for filename rules, indexed
+series labels, coordinates, clipping, streaming, provenance, and migration examples.
 
 ### `omeify inspect`
 
