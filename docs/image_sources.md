@@ -330,8 +330,8 @@ uncalibrated image fails; dtype conversion and intensity normalization are not
 implicit. RGB writing remains uint8; labels require lossless storage and nearest
 pyramids. Explicit float32 mantissa trimming remains available.
 
-Since 0.18.3, omitted compression and tile size resolve per image: RGB uses
-**lossy JPEG quality 90 / 4:2:2 and 256 × 256 tiles**, while scalar, multiplex,
+Since 0.18.4, omitted compression and tile size resolve per image: RGB uses
+**lossy JPEG quality 90 / 4:2:2 and 512 × 512 tiles**, while scalar, multiplex,
 and label images use lossless LZW and 1024 × 1024 tiles. This is shared by
 conversion, ordinary/temporary writes, and mixed-series writes, including RGB
 OME-TIFF inputs. Pass `compression="Deflate"` (or another lossless codec) for

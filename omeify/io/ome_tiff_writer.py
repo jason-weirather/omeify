@@ -42,7 +42,7 @@ class OMETiffWriter:
     images are one integer YX raster and use nearest-neighbor pyramids.
 
     Automatic storage (``compression=None``, ``tile_size=None``) is lossy JPEG
-    quality 90 / 4:2:2 with 256-pixel tiles for RGB, and lossless LZW with
+    quality 90 / 4:2:2 with 512-pixel tiles for RGB, and lossless LZW with
     1024-pixel tiles for scalar/multichannel/label images. Explicit settings win.
     Choose a lossless codec explicitly when exact RGB sample values are needed.
     """

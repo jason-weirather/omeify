@@ -56,11 +56,11 @@ def test_defaults_follow_image_meaning(image_factory, tmp_path: Path, writer_typ
     rgb = kind == "rgb"
     assert prepared.compression.name == ("JPEG" if rgb else "LZW")
     assert prepared.compression.lossless is not rgb
-    assert prepared.tile_size == (256 if rgb else 1024)
+    assert prepared.tile_size == (512 if rgb else 1024)
     assert prepared.downsample == ("nearest" if kind == "label" else "mean")
-    assert len(prepared.level_shapes) == (4 if rgb else 2)
+    assert len(prepared.level_shapes) == (3 if rgb else 2)
     if rgb:
-        assert prepared.level_shapes[-1] == (97, 129, 3)
+        assert prepared.level_shapes[-1] == (193, 257, 3)
         assert prepared.compression.compression_args == {"level": 90, "outcolorspace": "YCBCR"}
         assert prepared.compression.subsampling == (2, 1)
     # Preparing one image must not lock a reusable writer to that image's defaults.
@@ -73,10 +73,10 @@ def test_defaults_follow_image_meaning(image_factory, tmp_path: Path, writer_typ
 def test_explicit_storage_overrides_win(image_factory, tmp_path, writer_type, codec) -> None:
     image = image_factory(np.zeros((17, 33, 3), np.uint8), kind="rgb", pixel_size=_SIZE)
     prepared = _plan(image, writer_type(
-        tmp_path / "explicit.ome.tif", compression=codec, tile_size=512,
+        tmp_path / "explicit.ome.tif", compression=codec, tile_size=256,
         jpeg_quality=83, jpeg_subsampling="444", pyramid_levels=0,
     ))
-    assert prepared.tile_size == 512
+    assert prepared.tile_size == 256
     assert prepared.compression.name == codec
     assert len(prepared.level_shapes) == 1
     if codec == "JPEG":
@@ -107,7 +107,7 @@ def test_conversion_and_cli_share_public_defaults(tmp_path, monkeypatch) -> None
     assert seen["compression"] is None and seen["tile_size"] is None
     assert seen["jpeg_quality"] == 90 and seen["jpeg_subsampling"] == "422"
     help_result = CliRunner().invoke(main, ["convert", "--help"])
-    assert "256 for RGB; 1024 otherwise" in help_result.output
+    assert "512 for RGB; 1024 otherwise" in help_result.output
     assert "RGB OME-TIFF" in " ".join(help_result.output.split())
 
 
@@ -115,7 +115,7 @@ def test_temporary_writer_inherits_rgb_defaults(image_factory) -> None:
     image = image_factory(np.zeros((17, 33, 3), np.uint8), kind="rgb", pixel_size=_SIZE)
     with TemporaryOMETiffWriter() as temporary:
         prepared = _plan(image, temporary._writer)
-        assert prepared.tile_size == 256
+        assert prepared.tile_size == 512
         assert prepared.compression.compression_args == {"level": 90, "outcolorspace": "YCBCR"}
         assert prepared.compression.subsampling == (2, 1)
 
@@ -139,7 +139,7 @@ def test_verification_enforces_per_image_tile_size(image_factory, tmp_path, wron
 
     def page(reduced):
         value = SimpleNamespace(
-            is_tiled=True, tilewidth=256, tilelength=256, compression=7,
+            is_tiled=True, tilewidth=512, tilelength=512, compression=7,
             samplesperpixel=3, photometric=6, planarconfig=1, subfiletype=int(reduced),
             tags={"YCbCrSubSampling": SimpleNamespace(value=(2, 1))},
         )
@@ -150,7 +150,7 @@ def test_verification_enforces_per_image_tile_size(image_factory, tmp_path, wron
     base.pages = [reduced]
     verify_storage([base], prepared)
     [base, reduced][wrong_level].tilewidth = 1024
-    with pytest.raises(ValueError, match="requested 256-pixel tiles"):
+    with pytest.raises(ValueError, match="requested 512-pixel tiles"):
         verify_storage([base], prepared)
 
 
@@ -205,12 +205,12 @@ def test_all_public_routes_write_rgb_with_no_storage_options(tmp_path, route) ->
         assert report["options"]["jpeg_quality"] == 90
         assert report["options"]["jpeg_subsampling"] == "422"
         plan = report["series"][0] if route == "multi" else report["pyramid"]
-        assert plan["tile_size"] == 256
-        assert len(plan["level_shapes"]) == 3
+        assert plan["tile_size"] == 512
+        assert len(plan["level_shapes"]) == 2
         with tifffile.TiffFile(output) as tiff:
             for index, level in enumerate(tiff.series[0].levels):
                 page = level.pages[0].aspage()
-                assert (page.tilewidth, page.tilelength) == (256, 256)
+                assert (page.tilewidth, page.tilelength) == (512, 512)
                 assert int(page.compression) == 7 and int(page.photometric) == 6
                 assert tuple(page.tags["YCbCrSubSampling"].value) == (2, 1)
                 factor = 2**index
@@ -225,7 +225,7 @@ def test_all_public_routes_write_rgb_with_no_storage_options(tmp_path, route) ->
                 )
                 if index == 0:
                     np.testing.assert_allclose(
-                        values[250:262, 250:262], np.broadcast_to(pixels[0, 0], (12, 12, 3)),
+                        values[506:513, 506:518], np.broadcast_to(pixels[0, 0], (7, 12, 3)),
                         atol=4, rtol=0,
                     )
 
@@ -241,10 +241,10 @@ def test_mixed_series_defaults_and_compression_precedence(image_factory, tmp_pat
     output = tmp_path / "mixed.ome.tif"
     report = OMEMultiSeriesWriter(output).write(entries)
     assert [item["compression"] for item in report["series"]] == ["JPEG", "LZW", "LZW"]
-    assert [item["tile_size"] for item in report["series"]] == [256, 1024, 1024]
-    assert [item["subresolution_count"] for item in report["series"]] == [2, 0, 0]
+    assert [item["tile_size"] for item in report["series"]] == [512, 1024, 1024]
+    assert [item["subresolution_count"] for item in report["series"]] == [1, 0, 0]
     with tifffile.TiffFile(output) as tiff:
-        for index, expected_tile in enumerate([256, 1024, 1024]):
+        for index, expected_tile in enumerate([512, 1024, 1024]):
             for level in tiff.series[index].levels:
                 for frame in level.pages:
                     page = frame.aspage()
@@ -290,7 +290,7 @@ def test_multi_series_prepares_independent_defaults_and_overrides(
     writer = OMEMultiSeriesWriter(tmp_path / "not-written.ome.tif")
     with pytest.raises(PlansCaptured):
         writer.write(entries)
-    assert [(p.compression.name, p.tile_size) for p in plans] == [("JPEG", 256), ("LZW", 1024)]
+    assert [(p.compression.name, p.tile_size) for p in plans] == [("JPEG", 512), ("LZW", 1024)]
     plans.clear()
     writer = OMEMultiSeriesWriter(writer.path, compression="Deflate", tile_size=512)
     entries[0] = OMEImageSeries("RGB", image, compression="JPEG")
@@ -331,7 +331,7 @@ def test_mixed_tile_sizes_reach_real_staging_and_final_ifds(image_factory, tmp_p
     )
     assert result.verification["storage_matches_requested"]
     with tifffile.TiffFile(output) as tiff:
-        for index, (tile, depth) in enumerate([(256, 4), (1024, 2)]):
+        for index, (tile, depth) in enumerate([(512, 3), (1024, 2)]):
             assert len(tiff.series[index].levels) == depth
             for level in tiff.series[index].levels:
                 page = level.pages[0].aspage()

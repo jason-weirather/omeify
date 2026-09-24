@@ -17,7 +17,7 @@ LossyCompressionPolicy = Literal["rgb-only", "non-label"]
 
 DEFAULT_JPEG_QUALITY = 90
 DEFAULT_JPEG_SUBSAMPLING: JPEGSubsampling = "422"
-DEFAULT_RGB_TILE_SIZE = 256
+DEFAULT_RGB_TILE_SIZE = 512
 DEFAULT_SCALAR_TILE_SIZE = 1024
 
 OUTPUT_BYTEORDER: Literal["<", ">"] = "<"

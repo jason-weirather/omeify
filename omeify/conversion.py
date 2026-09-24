@@ -63,7 +63,7 @@ def convert(
     construction and verification to :class:`OMETiffWriter`.
 
     Omitted compression and tile size follow the selected image's type, not its
-    file profile: RGB uses lossy JPEG quality 90 / 4:2:2 and 256-pixel tiles;
+    file profile: RGB uses lossy JPEG quality 90 / 4:2:2 and 512-pixel tiles;
     non-RGB uses lossless LZW and 1024-pixel tiles. This includes RGB OME-TIFF
     inputs. Supply a lossless codec explicitly to preserve RGB sample values.
 

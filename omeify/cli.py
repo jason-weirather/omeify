@@ -257,7 +257,7 @@ def main() -> None:
     "--tile-size",
     type=click.IntRange(min=16),
     default=None,
-    show_default="256 for RGB; 1024 otherwise",
+    show_default="512 for RGB; 1024 otherwise",
     help="Square output tile size; must be divisible by 16.",
 )
 @click.option(

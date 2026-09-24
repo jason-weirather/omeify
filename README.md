@@ -227,7 +227,7 @@ omeify convert source.ome.tif --output normalized.ome.tif \
 ```
 
 **RGB defaults are lossy.** With no storage overrides, RGB uses **JPEG quality 90,
-4:2:2 YCbCr encoding, and 256 × 256 tiles**. This is the same policy for CLI
+4:2:2 YCbCr encoding, and 512 × 512 tiles**. This is the same policy for CLI
 conversion, Python `convert()`, ordinary and temporary image writers, and RGB
 series in multi-image output, including RGB OME-TIFF input. Scalar, multiplex,
 and label images retain lossless LZW and 1024 × 1024 tiles. Defaults follow the
@@ -352,7 +352,7 @@ from omeify import OMETiffWriter, PixelSize, RGBImage
 
 with RGBImage.from_array(rgb, pixel_size=PixelSize(0.5, 0.5, "µm")) as image:
     report = OMETiffWriter("he.ome.tif").write(image)
-    # JPEG quality 90 / 4:2:2, 256 × 256 tiles, automatic 2x pyramid.
+    # JPEG quality 90 / 4:2:2, 512 × 512 tiles, automatic 2x pyramid.
 ```
 
 Supply the array's actual physical pixel size. `compression="Deflate"` selects
@@ -408,9 +408,10 @@ Omeify 0.18.2 makes JPEG color-space selection explicit in the shared writer,
 including CLI conversion, ordinary/temporary library writes, and RGB series in
 multi-image files. Existing files are not changed by upgrading. Re-export from
 the original SVS or the original RGB array, then open the new output in QuPath.
-Version 0.18.3 changes automatic RGB storage to JPEG 90 / 4:2:2 and 256-pixel
-tiles, including library writes and RGB OME-TIFF conversions that previously
-defaulted to LZW. Choose lossless compression explicitly for reference rasters
+Version 0.18.3 changed automatic RGB storage to JPEG 90 / 4:2:2, including
+library writes and RGB OME-TIFF conversions that previously defaulted to LZW.
+Version 0.18.4 changes the automatic RGB tile size from 256 to 512 pixels.
+Choose lossless compression explicitly for reference rasters
 or exact-value workflows. See the [JPEG policy and regression tests][jpeg-policy]
 for details.
 

@@ -38,7 +38,7 @@ class OMEMultiSeriesWriter:
     writer engine.
 
     With no compression or tile-size override, each series independently uses
-    JPEG quality 90 / 4:2:2 and 256-pixel tiles for RGB, or lossless LZW and
+    JPEG quality 90 / 4:2:2 and 512-pixel tiles for RGB, or lossless LZW and
     1024-pixel tiles otherwise. Series compression overrides writer compression;
     explicit writer settings override automatic defaults.
     """

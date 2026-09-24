@@ -146,24 +146,23 @@ Automatic pyramid construction continues until the image fits within one output 
 `--pyramid-levels` or the corresponding writer argument to request an exact number of reduced
 levels. RGB downsampling is applied independently to all three samples while preserving `YXS`.
 
-When `tile_size` is omitted or `None`, the shared writer chooses **256 × 256 for
+When `tile_size` is omitted or `None`, the shared writer chooses **512 × 512 for
 RGB** and **1024 × 1024 for scalar, multiplex, and label images**. This applies
 to the base and every reduced level, independently for each multi-series image.
 An explicit `--tile-size N` / `tile_size=N` overrides automatic selection; in
 multi-series output it applies to all series. Lossless RGB still defaults to
-256-pixel tiles. Automatic RGB pyramids therefore continue until both dimensions
-fit in 256 pixels; explicit pyramid-level counts remain authoritative.
+512-pixel tiles. Automatic RGB pyramids therefore continue until both dimensions
+fit in 512 pixels; explicit pyramid-level counts remain authoritative.
 
-256 is a viewer-oriented choice, **not an OME-TIFF requirement**. Smaller tiles
-limit the unrelated pixels decoded for small region requests, at the cost of
-more tile records and codec calls; they do not guarantee smaller files or faster
-whole-slide scans. The [OME-TIFF specification][ome-pyramid-spec] recommends
-tiling large planes without mandating 256; [QuPath 0.7's writer][qupath-tile-source]
-uses 512 as its internal default. The pyramid's resolution steps remain 2x;
-storage tile size is not a downsampling factor.
+512 is a viewer-oriented compromise, **not an OME-TIFF requirement**. Compared
+with smaller tiles it reduces tile records and codec calls for broad reads, while
+remaining substantially smaller than 1024-pixel tiles for regional access. It does
+not guarantee smaller files or faster access for every workload. The
+[OME-TIFF specification][ome-pyramid-spec] recommends tiling large planes without
+mandating 512. The pyramid's resolution steps remain 2x; storage tile size is not
+a downsampling factor.
 
 [ome-pyramid-spec]: https://docs.openmicroscopy.org/ome-model/6.2.2/ome-tiff/specification.html#sub-resolutions
-[qupath-tile-source]: https://github.com/qupath/qupath/blob/v0.7.0/qupath-extension-bioformats/src/main/java/qupath/lib/images/writers/ome/OMEPyramidWriter.java
 
 ### Compression policy
 
@@ -405,7 +404,7 @@ Common conversion options:
 --compression NAME         JPEG for RGB, LZW otherwise; explicit overrides supported
 --jpeg-quality N           JPEG quality from 1 through 100; default 90
 --jpeg-subsampling MODE    444, 422, 420, or 411; default 422
---tile-size N              Square tiles; default 256 for RGB, 1024 otherwise
+--tile-size N              Square tiles; default 512 for RGB, 1024 otherwise
 --pyramid-levels N         Exact reduced-level count; automatic when omitted
 --downsample METHOD        mean or nearest
 --cache-directory PATH     Temporary pyramid scratch location
