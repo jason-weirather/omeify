@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 
 from .base import Image
-from .image_metadata import integer
 from .spec import OMEImageSpec
 
 
@@ -48,8 +47,7 @@ class ImagePlaneSource:
     def backing_paths(self) -> tuple[Path, ...]:
         return self._image.backing_paths
 
-    def plane_readers(self, *, cache_mib: int = 64) -> list[ImagePlaneReader]:
-        integer(cache_mib, "cache_mib")
+    def plane_readers(self) -> list[ImagePlaneReader]:
         self._image._ensure_session(self._generation)
         return [ImagePlaneReader(self._image, i, level=self._level)
                 for i in range(self._metadata.logical_channel_count)]

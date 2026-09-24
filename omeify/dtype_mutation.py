@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, Sequence
 
 import numpy as np
@@ -10,7 +10,6 @@ import numpy as np
 from .io.base import Image
 from .io.image_planes import ImagePlaneSource
 from .io.image_views import BorrowedSource
-from dataclasses import replace
 from .io.tiff import PlaneReader
 from .progress import ProgressLogger
 
@@ -38,10 +37,6 @@ def _target_dtype(value: str | np.dtype | type) -> np.dtype:
     if dtype.name not in TARGET_DTYPES:
         raise TypeError("dtype mutation currently supports only uint8 and uint16 output")
     return dtype
-
-
-def _safe_float(value: float | np.floating) -> float:
-    return float(value)
 
 
 def _quantile(values: np.ndarray, probability: float) -> float | None:
@@ -215,8 +210,8 @@ def _scan_plane(
                 finite_values = block[finite]
                 finite_pixels += int(finite_values.size)
                 if finite_values.size:
-                    minimum = min(minimum, _safe_float(np.min(finite_values)))
-                    maximum = max(maximum, _safe_float(np.max(finite_values)))
+                    minimum = min(minimum, float(np.min(finite_values)))
+                    maximum = max(maximum, float(np.max(finite_values)))
                     negative_pixels += int(np.count_nonzero(finite_values < 0))
                     zero_pixels += int(np.count_nonzero(finite_values == 0))
                     nonzero_values = finite_values[finite_values != 0]
@@ -823,7 +818,7 @@ def analyze_dtype_mutation(
         )
     normalized_target_dtype = _target_dtype(dtype)
     names = tuple(str(item) for item in channel_names)
-    readers = ImagePlaneSource(image).plane_readers(cache_mib=64)
+    readers = ImagePlaneSource(image).plane_readers()
     if len(readers) != len(names):
         for reader in readers:
             reader.clear_cache()

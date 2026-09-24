@@ -1004,142 +1004,41 @@ is available.
 
 ### Images and pixel sources (0.18)
 
-The library has one image contract. `MultichannelImage`, `RGBImage`, and `LabelImage`
-use an `ImageSource` to obtain pixels. File readers compose that same source
-machinery; they do not have a separate image-level read path. Arrays enter through
-explicit named constructors. External providers implement `ImageSource` in their
-own package. Omeify contains no Mocktome-specific code or dependency.
-
-**0.18 is a breaking library consolidation.** The old writer
-synonyms, public plane-source adapters, expensive `.array` property, and competing
-level/metadata access paths are removed. Current notebook patterns, provider
-requirements, and a complete migration table are in [Images and sources](image_sources.md).
-
-| Pattern | Library call |
-|---|---|
-| Open real images | `with OMETiffReader(path) as image:` or an explicit vendor reader |
-| Open categorical labels | `with OMETiffLabelReader(path) as labels:` |
-| Wrap intensity arrays | `MultichannelImage.from_array(array, axes="CYX", ...)` |
-| Wrap RGB or label arrays | `RGBImage.from_array(...)` / `LabelImage.from_array(...)` |
-| Serve procedural pixels | `with MultichannelImage(CustomSource(...)) as image:` |
-| Select/assemble lazy scalar channels | `MultichannelImage.from_channels([...])` |
-| Change metadata without changing pixels | `image.with_metadata(...)` |
-| Write one image | `OMETiffWriter(path, ...).write(image)` |
-| Write heterogeneous images | `OMEMultiSeriesWriter(path, ...).write(series)` |
-
-Constructors do not open resources. Use `with` or explicit `open()`/`close()`.
-Writers borrow the image and leave it open. Lazy channels and derived images are
-bound to their parents' open sessions; they do not quietly reconnect after a
-parent is closed and reopened. Regional NumPy results own their data and survive
-context exit. `copy=False` array construction deliberately borrows large data;
-keep it unchanged during use. `copy=True` takes a full independent snapshot.
+[Images and sources](image_sources.md) is the canonical guide to the common
+Image API: arrays, file readers, regional providers, channels, calibration,
+metadata views, and lifetime. The [0.17 migration table](image_sources.md#8-migration-from-017)
+lists removed interfaces; there is no parallel compatibility API.
 
 ### Readers and lazy channels
 
-```python
-from omeify import MultichannelImage, OMETiffReader, OMETiffWriter
+Use a format-specific reader in a context manager. The supported constructors are
+`AkoyaMIFQPTiffReader`, `AkoyaFusionQPTiffReader`, `AkoyaHEQPTiffReader`,
+`AperioSVSReader`, `AkoyaComponentTiffReader`, `IndicaMIFTiffReader`,
+`OMETiffReader`, and `OMETiffLabelReader`.
 
-with OMETiffReader("image.ome.tif") as image:
-    print(image)
-    print(image.pixel_size, image.channel_names)
-    print(image.series_name, image.series_names)
-    print(image.levels)  # Generic ImageLevel descriptors, never TIFF directory objects.
-
-    dapi = image.get_by_name("DAPI")
-    panck = image.get_by_name("PanCK")
-    patch = dapi.read_region(10_000, 11_024, 20_000, 21_024)
-    # dapi.asarray() is the explicit whole-channel materialization operation.
-
-    with MultichannelImage.from_channels([dapi, panck]) as selected:
-        report = OMETiffWriter(
-            "selected.ome.tif", compression="Deflate", overwrite=False,
-        ).write(selected)
-```
-
-`image[index]`, `get_by_name(name)`, and `get_by_id(id)` look up different channel
-identities. Ambiguous names fail. Channels retain normalized IDs, source IDs, and
-source metadata separately. Expensive reads are methods, not properties.
-
-`read_region(y0, y1, x0, x1, level=0, channels=None)` uses half-open integer bounds
-in the selected level. It supports `CYX`, `YX`, and RGB `YXS`. Channel selection
-always selects **logical channels**: RGB has one channel containing three samples.
-Read that channel and index the returned patch to select individual RGB samples.
-`channel_count` counts logical channels; `sample_count` counts stored samples.
-`image_type` distinguishes multichannel intensities, RGB, and categorical labels.
-
-`image.levels[n]` supplies that level's axes, shape, pixel size, and declared
-`downsample_yx`. Do not derive pixel size from rounded level dimensions. Unknown
-third-party level calibration remains unknown. All advertised levels are checked
-at file open without decoding pixels. Non-singleton Z/T is not a supported image
-product; use `TiffInspector` for metadata inspection of such files.
-
-The supported conversion profiles retain explicit reader constructors:
-
-```text
-AkoyaMIFQPTiffReader
-AkoyaFusionQPTiffReader
-AkoyaHEQPTiffReader
-AperioSVSReader
-AkoyaComponentTiffReader
-IndicaMIFTiffReader
-OMETiffReader
-OMETiffLabelReader
-```
-
-Akoya Fusion still exposes source `Name` and `Biomarker` independently through the
-channel's `source_metadata`. Source-native storage axes/shape are available as
-`native_axes` and `native_shape` on file readers. `reader.inspect()` returns the
-file inspector; `print(reader)` is now a compact image summary rather than the
-complete inspection tree. The `omeify inspect` CLI output is unchanged.
+The [reading example](image_sources.md#1-read-select-channels-and-write) covers
+channel lookup, regional reads, and lazy channel assembly. The
+[coordinate contract](image_sources.md#5-coordinates-channels-and-levels) defines
+logical RGB channels and level calibration. `reader.series_name` and
+`reader.series_names` follow TIFF-series order; `native_axes` and `native_shape`
+describe source storage. `reader.inspect()` supplies the full file diagnostics,
+while `print(reader)` is a compact image summary. Fusion source `Name` and
+`Biomarker` remain in each channel's `source_metadata`.
 
 ### Single-image writing and metadata
 
-Image metadata belongs to the Image; storage settings belong to the writer.
+Use `OMETiffWriter(path, ...).write(image, level=N)` with an open Image. The
+selected level becomes the output base; writing remains regional and rebuilds
+pyramids. Image metadata belongs to the Image, storage settings to the writer.
+See [array construction](image_sources.md#2-arrays-from-notebooks-and-other-libraries)
+and [metadata/writing policy](image_sources.md#6-metadata-changes-and-writing-policy)
+for complete examples. Automatic storage is defined under
+[compression](#compression-policy) and [pyramids](#pyramid-policy).
 
-```python
-import numpy as np
-from omeify import MultichannelImage, OMETiffWriter, PixelSize
-
-array = np.zeros((3, 512, 768), dtype=np.float32)
-with MultichannelImage.from_array(
-    array, axes="CYX", channel_names=("DAPI", "PanCK", "CD3"),
-    pixel_size=PixelSize(0.5, 0.5, "µm"), copy=False,
-) as image:
-    report = OMETiffWriter(
-        "image.ome.tif", compression="Deflate", tile_size=256, overwrite=False,
-    ).write(image)
-```
-
-Use `RGBImage.from_array(rgb, ...)` for `YXS` RGB and
-`LabelImage.from_array(labels, ...)` for categorical integer `YX`. Wrapping a
-NumPy array does not imply that generation of the array was lazy. A custom
-provider can instead generate only requested rectangles through `ImageSource`.
-
-Writer inputs are open Images, not arrays plus a second metadata declaration.
-`write(image, level=N)` materializes a chosen resolution as the new output base.
-It never invokes `image.asarray()` or `channel.asarray()`. It rebuilds pyramids
-through the shared bounded TIFF engine, including temporary scratch levels.
-
-For intentional calibration or final-name changes:
-
-```python
-from omeify import OMETiffReader, OMETiffWriter, PixelSize
-
-with OMETiffReader("input.ome.tif") as image:
-    with image.with_metadata(pixel_size=PixelSize(0.5, 0.5, "µm")) as calibrated:
-        OMETiffWriter("calibrated.ome.tif", compression="Deflate").write(calibrated)
-```
-
-This creates a borrowed metadata view. It does not mutate pixels, edit the input
-file, or infer an experimental fact. Calibration remains mandatory for writing.
-RGB writing stays uint8. Labels remain lossless with nearest-neighbor pyramids.
-
-The writer's explicit `float32_mantissa_bits=N` storage control remains available.
-It preserves float32 storage and exponent range while rounding retained fraction
-bits at the base and every rebuilt level. NaN/infinity payloads and signed zeros
-retain the existing fidelity policy; finite overflow raises rather than silently
-saturating. For a user-facing file mutation, prefer `mutate()` or its CLI command
-so the numeric change is explicit in the workflow and its report.
+Explicit `float32_mantissa_bits=N` rounds the base and rebuilt levels while
+retaining float32 storage and exponent range. NaN/infinity payloads and signed
+zeros retain the existing fidelity policy; finite overflow raises. Prefer
+[`mutate()`](#mutation) for a user-facing numeric transformation and its report.
 
 ### Heterogeneous and temporary products
 
@@ -1175,44 +1074,19 @@ products; source type and dtype are never changed implicitly.
 `TemporaryOMETiffWriter` has a distinct responsibility: temporary-path lifetime.
 It delegates encoding to the same ordinary writer.
 
-```python
-from omeify import OMETiffReader, TemporaryOMETiffWriter
-
-with OMETiffReader("input.ome.tif") as image:
-    with TemporaryOMETiffWriter(compression="Deflate") as temporary:
-        temporary.write(image)
-        temporary_path = temporary.path
-        # Consume the file here. It is removed on context exit.
-```
+See the [temporary-writer example](image_sources.md#6-metadata-changes-and-writing-policy)
+for context-managed use. The path is removed on context exit; consume it inside
+the context.
 
 ### Mocktome and external image providers
 
-For existing Mocktome 0.4 results, wrap `mif.data`, `he.rgb`, and the chosen
-section label array with the corresponding semantic `.from_array()` constructor.
-Use the section's pixel size and the rendered mIF channel names. This avoids an
-intermediate TIFF without claiming to make Mocktome's eager rendering lazy.
-
-A genuinely regional Mocktome provider belongs in Mocktome: subclass
-`ImageSource`, publish `ImageMetadata`, and implement `_read_region()`. Omeify
-validates bounds, selected logical channels, returned shape/dtype, and lifetime.
-The provider owns deterministic rendering, halos, and scientific truth.
-
-Runnable notebook imports from the repository root:
-
-```python
-from examples.image_sources import run_example
-result = run_example("Scratch/omeify_sources")  # Procedural pattern, no backing full array.
-
-# Requires a separately installed Mocktome, not a new Omeify dependency.
-from examples.mocktome_io import run_example
-result = run_example("Scratch/mocktome_omeify")
-```
-
-See [the migration guide](image_sources.md#8-migration-from-017) before
-upgrading downstream packages. In particular, Tilework must use explicit level
-calibration rather than its shape-ratio fallback, and Cadastre's old
-`PlaneReaderSource`/`OMEImageSeries.from_source` output route needs migration.
-These are not silently supported by a second API in Omeify 0.18.
+The [Mocktome example](image_sources.md#3-current-mocktome-outputs-mif-he-and-oracle-labels)
+wraps existing eager arrays; it does not make the simulator lazy. The
+[regional-provider example](image_sources.md#4-implementing-a-genuinely-regional-provider)
+shows the `ImageSource` contract. Runnable versions live in
+[`examples/mocktome_io.py`](../examples/mocktome_io.py) and
+[`examples/image_sources.py`](../examples/image_sources.py). Mocktome remains a
+separate, optional installation; providers own rendering, halos, and scientific truth.
 
 ## Writer architecture
 

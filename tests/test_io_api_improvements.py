@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import nullcontext
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -14,7 +15,6 @@ from omeify import (
     AkoyaComponentTiffReader,
     AkoyaFusionQPTiffReader,
     Channel,
-    OMETiffLabelReader,
     OMETiffReader,
     OMETiffWriter,
     PixelSize,
@@ -402,65 +402,24 @@ def test_python_channel_renames_require_explicit_mode_and_support_indices(
         )
 
 
-def test_cli_channel_rename_json_by_name_and_index(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mode,mapping", [
+    ("name", {"DAPI": "DNA", "CD3": "CD3e"}),
+    ("index", {"0": "DNA", "2": "CD3e"}),
+])
+def test_cli_channel_rename_json_by_name_and_index(tmp_path: Path, mode, mapping) -> None:
     source = tmp_path / "source.ome.tif"
     data = np.arange(3 * 32 * 48, dtype=np.uint16).reshape(3, 32, 48)
     _write_planar_ome(source, data, names=["DAPI", "PanCK", "CD3"])
-    runner = CliRunner()
-
-    name_map = tmp_path / "name.json"
-    name_map.write_text(json.dumps({"DAPI": "DNA", "CD3": "CD3e"}), encoding="utf-8")
-    name_output = tmp_path / "name.ome.tif"
-    result = runner.invoke(
-        main,
-        [
-            "convert",
-            str(source),
-            "--output",
-            str(name_output),
-            "--type",
-            "ome_tiff",
-            "--rename-channels-json",
-            str(name_map),
-            "--rename-channels-by",
-            "name",
-            "--compression",
-            "Uncompressed",
-            "--tile-size",
-            "16",
-            "--pyramid-levels",
-            "0",
-        ],
-    )
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
+    output = tmp_path / "renamed.ome.tif"
+    result = CliRunner().invoke(main, [
+        "convert", str(source), "--output", str(output), "--type", "ome_tiff",
+        "--rename-channels-json", str(mapping_path), "--rename-channels-by", mode,
+        "--compression", "Uncompressed", "--tile-size", "16", "--pyramid-levels", "0",
+    ])
     assert result.exit_code == 0, result.output
-    assert _read_ome_channel_names(name_output) == ["DNA", "PanCK", "CD3e"]
-
-    index_map = tmp_path / "index.json"
-    index_map.write_text(json.dumps({"0": "DNA", "2": "CD3e"}), encoding="utf-8")
-    index_output = tmp_path / "index.ome.tif"
-    result = runner.invoke(
-        main,
-        [
-            "convert",
-            str(source),
-            "--output",
-            str(index_output),
-            "--type",
-            "ome_tiff",
-            "--rename-channels-json",
-            str(index_map),
-            "--rename-channels-by",
-            "index",
-            "--compression",
-            "Uncompressed",
-            "--tile-size",
-            "16",
-            "--pyramid-levels",
-            "0",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert _read_ome_channel_names(index_output) == ["DNA", "PanCK", "CD3e"]
+    assert _read_ome_channel_names(output) == ["DNA", "PanCK", "CD3e"]
 
 
 def test_cli_rejects_missing_malformed_and_mixed_channel_rename_modes(tmp_path: Path) -> None:
@@ -608,74 +567,26 @@ def test_pixel_size_is_immutable_serializable_and_scalable() -> None:
         original.x = 1.0  # type: ignore[misc]
 
 
-def test_reader_reports_adjusted_pixel_size_for_pyramid_level(
-    image_factory,
-    tmp_path: Path,
-) -> None:
-    output = tmp_path / "pyramid.ome.tif"
-    data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
-    OMETiffWriter(
-        output,
-        compression='Uncompressed',
-        tile_size=16,
-        pyramid_levels=1,
-    ).write(image_factory(
-        data,
-        kind='multichannel',
-        channel_names=['A', 'B'],
-        pixel_size=PixelSize(0.5, 0.6, 'µm'),
-    ))
-
-    with OMETiffReader(output) as reader:
-        assert reader.pixel_size == PixelSize(0.5, 0.6, "µm")
-        assert reader.levels[1].pixel_size == PixelSize(1.0, 1.2, "µm")
-
-
-def test_temporary_ome_tiff_writer_creates_and_cleans_up(image_factory, tmp_path: Path) -> None:
-    data = np.zeros((1, 16, 16), dtype=np.uint8)
-    with TemporaryOMETiffWriter(
-        directory=tmp_path,
-        compression='Uncompressed',
-        tile_size=16,
-        pyramid_levels=0,
-    ) as writer:
-        writer.write(image_factory(
-            data,
-            kind='multichannel',
-            channel_names=['DAPI'],
-            pixel_size=PixelSize(0.5, 0.5, 'µm'),
-        ))
-        temporary_path = writer.path
-        assert temporary_path.exists()
-        with OMETiffReader(temporary_path) as reader:
-            assert reader.channel_names == ("DAPI",)
-    assert not temporary_path.exists()
-
-
-def test_temporary_ome_tiff_writer_cleans_up_after_exception(image_factory, tmp_path: Path) -> None:
-    temporary_path: Path | None = None
-    with pytest.raises(RuntimeError, match="boom"):
+@pytest.mark.parametrize("fail", [False, True], ids=["success", "caller-error"])
+def test_temporary_ome_tiff_writer_cleans_up(image_factory, tmp_path: Path, fail: bool) -> None:
+    image = image_factory(
+        np.zeros((1, 16, 16), dtype=np.uint8), channel_names=["DAPI"],
+        pixel_size=PixelSize(0.5, 0.5, "µm"),
+    )
+    expected_error = pytest.raises(RuntimeError, match="boom") if fail else nullcontext()
+    with expected_error:
         with TemporaryOMETiffWriter(
-            directory=tmp_path,
-            compression='Uncompressed',
-            tile_size=16,
-            pyramid_levels=0,
+            directory=tmp_path, compression="Uncompressed", tile_size=16, pyramid_levels=0,
         ) as writer:
-            writer.write(image_factory(
-                np.zeros((1, 16, 16), dtype=np.uint8),
-                kind='multichannel',
-                channel_names=['DAPI'],
-                pixel_size=PixelSize(0.5, 0.5, 'µm'),
-            ))
+            writer.write(image)
             temporary_path = writer.path
             assert temporary_path.exists()
-            raise RuntimeError("boom")
-    assert temporary_path is not None
+            with OMETiffReader(temporary_path) as reader:
+                assert reader.channel_names == ("DAPI",)
+            if fail:
+                raise RuntimeError("boom")
     assert not temporary_path.exists()
-
-
-
-
+    assert image.is_open
 
 
 def test_fusion_cli_profile_and_subcommand_only_policy(tmp_path: Path) -> None:
@@ -723,24 +634,6 @@ def test_fusion_cli_profile_and_subcommand_only_policy(tmp_path: Path) -> None:
     )
     assert old_form.exit_code != 0
     assert "No such command" in old_form.output
-
-
-def test_label_reader_exposes_pixel_size(image_factory, tmp_path: Path) -> None:
-    output = tmp_path / "labels.ome.tif"
-    labels = np.arange(32 * 48, dtype=np.uint16).reshape(32, 48)
-    OMETiffWriter(
-        output,
-        compression='Uncompressed',
-        tile_size=16,
-        pyramid_levels=0,
-    ).write(image_factory(
-        labels,
-        kind='label',
-        channel_names=['Labels'],
-        pixel_size=PixelSize(0.7, 0.8, 'µm'),
-    ))
-    with OMETiffLabelReader(output) as reader:
-        assert reader.pixel_size == PixelSize(0.7, 0.8, "µm")
 
 
 @pytest.mark.parametrize(

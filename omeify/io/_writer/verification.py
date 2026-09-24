@@ -190,7 +190,7 @@ def verify_prepared_images(
         points_per_plane = max(points_per_plane, len(coordinates))
         output_readers = frame_readers(frames)
         input_readers = (
-            item.source.plane_readers(cache_mib=16)
+            item.source.plane_readers()
             if item.compression.lossless
             else None
         )

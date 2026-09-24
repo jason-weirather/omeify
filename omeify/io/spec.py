@@ -193,10 +193,6 @@ class OMEImageSpec:
         return self.image_type == "rgb"
 
     @property
-    def is_label(self) -> bool:
-        return self.image_type == "label"
-
-    @property
     def output_axes(self) -> str:
         return self.axes
 

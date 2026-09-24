@@ -112,10 +112,6 @@ def canonical_length_unit(unit: str) -> str:
         raise ValueError(f"Unsupported physical-size unit {unit!r}") from exc
 
 
-def length_unit_is_supported(unit: str) -> bool:
-    return _unit_key(unit) in _LENGTH_TO_METERS
-
-
 @dataclass(frozen=True, slots=True)
 class PixelSize:
     """Immutable physical size of one pixel along X and Y.

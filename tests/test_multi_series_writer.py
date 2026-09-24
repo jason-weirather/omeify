@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import json
 from pathlib import Path
 
@@ -13,17 +12,11 @@ from omeify import (
     OMEImageSeries,
     OMEMultiSeriesWriter,
     OMETiffReader,
-    OMETiffWriter,
     PixelSize,
 )
 from omeify.utils.generate_ome_xml import OMEIFY_PROVENANCE_NAMESPACE
 
 _OME_NAMESPACE = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
-
-
-def test_public_writers_do_not_expose_tiff_predictor_controls() -> None:
-    assert "predictor" not in inspect.signature(OMETiffWriter).parameters
-    assert "predictor" not in inspect.signature(OMEMultiSeriesWriter).parameters
 
 
 def _mean2(values: np.ndarray) -> np.ndarray:

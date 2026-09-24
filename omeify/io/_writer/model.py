@@ -13,7 +13,7 @@ from .configuration import CompressionSettings, DownsampleMethod
 class PlaneReaderSource(Protocol):
     """Source contract consumed by Omeify's shared writer engine."""
 
-    def plane_readers(self, *, cache_mib: int = 64) -> list[PlaneReader]:
+    def plane_readers(self) -> list[PlaneReader]:
         """Return one random-access reader for each physical TIFF plane."""
 
 

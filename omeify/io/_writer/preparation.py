@@ -74,7 +74,7 @@ def prepare_image(
         spec.output_shape,
         display_name,
     )
-    readers = source.plane_readers(cache_mib=64)
+    readers = source.plane_readers()
     try:
         validate_readers(readers, spec)
     finally:

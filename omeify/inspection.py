@@ -900,11 +900,7 @@ def _question_block(report: dict[str, Any]) -> str:
     def wrap(value: str, *, prefix: str = "", continuation: str | None = None) -> str:
         # Escape ANSI, CR, backspace, bidi and other controls. Allow intentional
         # line breaks, but never let a question or model response control the terminal.
-        safe = "".join(
-            char if char.isprintable() or char == "\n"
-            else char.encode("unicode_escape").decode("ascii")
-            for char in value
-        )
+        safe = _terminal_text(value)
         return "\n".join(
             textwrap.fill(
                 line, width=width, initial_indent=prefix,

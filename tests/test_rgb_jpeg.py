@@ -64,6 +64,8 @@ def _assert_colors(actual: np.ndarray, level: int) -> None:
 def test_jpeg_color_space_is_explicit_and_preserves_sampling(sampling: str) -> None:
     settings = compression_settings("JPEG", np.dtype("uint8"), is_rgb=True,
                                     jpeg_quality=90, jpeg_subsampling=sampling)
+    assert settings.name == "JPEG"
+    assert settings.tifffile_value == "jpeg"
     assert settings.compression_args == {
         "level": 90, "outcolorspace": "RGB" if sampling == "444" else "YCBCR",
     }

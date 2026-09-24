@@ -9,7 +9,6 @@ from typing import Any
 from omeify.io._writer import (
     DownsampleMethod,
     JPEGSubsampling,
-    PlaneReaderSource,
     WriterEngine,
     WriterSettings,
     prepare_image,
@@ -23,7 +22,6 @@ from omeify.io._writer.configuration import (
 from omeify.io._writer.single_verification import verify_single_output
 from omeify.io.base import Image
 from omeify.io.image_planes import ImagePlaneSource, protect_source_paths
-from omeify.io.spec import OMEImageSpec
 from omeify.utils.generate_ome_xml import generate_ome_xml
 
 LOGGER = logging.getLogger(__name__)
@@ -92,16 +90,7 @@ class OMETiffWriter:
         Pyramids are rebuilt from the selected level; source arrays are not mutated.
         """
         source = ImagePlaneSource(image, level=level)
-        return self._write_source(source, source.output_spec())
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}(path={str(self.path)!r})"
-
-    def _write_source(
-        self,
-        source: PlaneReaderSource,
-        spec: OMEImageSpec,
-    ) -> dict[str, object]:
+        spec = source.output_spec()
         protect_source_paths(source, self._settings.output_path)
         prepared = prepare_image(
             source,
@@ -201,6 +190,9 @@ class OMETiffWriter:
                 "max_workers": self._settings.max_workers,
             },
         }
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(path={str(self.path)!r})"
 
 
 class TemporaryOMETiffWriter:

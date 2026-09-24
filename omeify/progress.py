@@ -107,11 +107,6 @@ class ProgressLogger:
         if normalized == self.total:
             self._finished = True
 
-    def advance(self, amount: int = 1) -> None:
-        """Advance the completed count by ``amount``."""
-
-        self.update(self._completed + int(amount))
-
     def finish(self) -> None:
         """Emit the final 100 percent line after a successful stage."""
 

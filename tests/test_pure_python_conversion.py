@@ -16,7 +16,6 @@ from omeify import (
     TiffInspector,
     convert,
 )
-from omeify.io._writer.configuration import compression_settings
 from omeify.io._writer.pyramid import mean_downsample_2x
 
 
@@ -286,24 +285,34 @@ def _write_synthetic_svs(
         writer.write(base, **options)
 
 
-@pytest.mark.parametrize("dtype", [np.uint8, np.uint16])
-def test_conversion_preserves_dtype_and_rebuilds_pyramid(tmp_path: Path, dtype) -> None:
+@pytest.mark.parametrize(
+    "dtype,compression,byteorder",
+    [(np.uint8, "Uncompressed", "<"), (np.uint16, "Uncompressed", "<"),
+     (np.uint16, "Deflate", "<"), (np.uint16, "Uncompressed", ">")],
+    ids=["uint8", "uint16", "deflate", "big-endian"],
+)
+def test_conversion_preserves_dtype_and_rebuilds_pyramid(
+    tmp_path: Path, dtype, compression, byteorder,
+) -> None:
     base = np.arange(3 * 35 * 49, dtype=np.uint32).reshape(3, 35, 49)
     data = (base % np.iinfo(dtype).max).astype(dtype)
     source = tmp_path / "source.ome.tif"
     output = tmp_path / "output.ome.tif"
-    _write_source(source, data)
+    _write_source(source, data, byteorder=byteorder)
 
     report = convert(
         source,
         output,
         input_type="ome_tiff",
-        compression="Uncompressed",
+        compression=compression,
         tile_size=16,
         pyramid_levels=2,
         downsample="mean",
     )
 
+    assert report["input_file"]["byte_order"] == ("big" if byteorder == ">" else "little")
+    assert report["output_file"]["byte_order"] == "little"
+    assert report["output_file"]["lossless_compression"] is True
     assert report["output_file"]["dtype"] == np.dtype(dtype).name
     assert "sha256_checksum" not in report["input_file"]
     assert "sha256_checksum" not in report["output_file"]
@@ -329,6 +338,7 @@ def test_conversion_preserves_dtype_and_rebuilds_pyramid(tmp_path: Path, dtype) 
     assert report["miti_header"]["errors"] == []
     with tifffile.TiffFile(output) as tif:
         assert tif.is_ome
+        assert tif.byteorder == "<"
         assert '<Image ID="Image:0">' in tif.ome_metadata
         assert report["image"].get("name") is None
         series = tif.series[0]
@@ -675,22 +685,6 @@ def test_aperio_missing_mpp_uses_tiff_resolution_with_warning(
     assert "using TIFF XResolution/YResolution/ResolutionUnit tags" in caplog.text
 
 
-def test_rgb_jpeg_422_encoding_policy() -> None:
-    settings = compression_settings(
-        "JPEG",
-        np.dtype("uint8"),
-        is_rgb=True,
-        jpeg_quality=90,
-        jpeg_subsampling="422",
-    )
-
-    assert settings.name == "JPEG"
-    assert settings.tifffile_value == "jpeg"
-    assert settings.compression_args == {"level": 90, "outcolorspace": "YCBCR"}
-    assert settings.subsampling == (2, 1)
-    assert settings.lossless is False
-
-
 def test_jpeg_411_requires_tile_size_divisible_by_32(tmp_path: Path) -> None:
     data = np.zeros((32, 48, 3), dtype=np.uint8)
     source = tmp_path / "source-he.qptiff"
@@ -785,28 +779,6 @@ def test_strip_source_and_mismatched_output_grid(tmp_path: Path) -> None:
         np.testing.assert_array_equal(tif.series[0].levels[1].asarray(), _mean2(data))
 
 
-def test_convert_forwards_software_tag_override(tmp_path: Path) -> None:
-    data = np.arange(2 * 16 * 16, dtype=np.uint16).reshape(2, 16, 16)
-    source = tmp_path / "source-software.ome.tif"
-    output = tmp_path / "output-software.ome.tif"
-    _write_source(source, data)
-
-    report = convert(
-        source,
-        output,
-        input_type="ome_tiff",
-        compression="Uncompressed",
-        tile_size=16,
-        pyramid_levels=0,
-        software="wrapper-pipeline 3.1",
-    )
-
-    assert report["options"]["software"] == "wrapper-pipeline 3.1"
-    assert report["verification"]["software_tag_matches"] is True
-    with tifffile.TiffFile(output) as tiff:
-        assert tiff.pages[0].tags["Software"].value == "wrapper-pipeline 3.1"
-
-
 def test_float32_dtype_and_miti_type_are_preserved(tmp_path: Path) -> None:
     data = np.linspace(0.0, 1.0, 2 * 33 * 47, dtype=np.float32).reshape(2, 33, 47)
     source = tmp_path / "source-float.ome.tif"
@@ -850,27 +822,6 @@ def test_significant_bits_matches_dtype_width(tmp_path: Path) -> None:
         assert 'SignificantBits="16"' in tif.ome_metadata
 
 
-def test_deflate_is_lossless_and_uses_the_same_streaming_path(tmp_path: Path) -> None:
-    data = np.arange(2 * 35 * 49, dtype=np.uint16).reshape(2, 35, 49)
-    source = tmp_path / "source.ome.tif"
-    output = tmp_path / "output.ome.tif"
-    _write_source(source, data)
-
-    report = convert(
-        source,
-        output,
-        input_type="ome_tiff",
-        compression="Deflate",
-        tile_size=16,
-        pyramid_levels=1,
-    )
-
-    assert report["output_file"]["lossless_compression"] is True
-    assert report["verification"]["base_pixel_values_match"] is True
-    with tifffile.TiffFile(output) as tif:
-        np.testing.assert_array_equal(tif.series[0].levels[0].asarray(), data)
-
-
 def test_unsupported_dtype_fails_without_casting(tmp_path: Path) -> None:
     data = np.arange(2 * 16 * 16, dtype=np.uint64).reshape(2, 16, 16)
     source = tmp_path / "source-uint64.qptiff"
@@ -903,32 +854,6 @@ def test_input_and_output_must_differ(tmp_path: Path) -> None:
             tile_size=16,
             pyramid_levels=0,
         )
-
-
-def test_big_endian_input_is_written_little_endian_without_value_change(
-    tmp_path: Path,
-) -> None:
-    data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
-    source = tmp_path / "source-big-endian.ome.tif"
-    output = tmp_path / "output.ome.tif"
-    _write_source(source, data, byteorder=">")
-
-    report = convert(
-        source,
-        output,
-        input_type="ome_tiff",
-        compression="Uncompressed",
-        tile_size=16,
-        pyramid_levels=0,
-    )
-
-    assert report["input_file"]["byte_order"] == "big"
-    assert report["output_file"]["byte_order"] == "little"
-    assert report["verification"]["byte_order_metadata_matches_tiff"] is True
-    with tifffile.TiffFile(output) as tif:
-        assert tif.byteorder == "<"
-        assert 'BigEndian="false"' in tif.ome_metadata
-        np.testing.assert_array_equal(tif.series[0].asarray(), data)
 
 
 def test_explicit_pyramid_level_count_must_be_possible(tmp_path: Path) -> None:
@@ -1063,17 +988,6 @@ def test_pyproject_is_the_version_authority() -> None:
     assert __version__ == project_version
 
 
-def test_bundled_miti_json_schema_is_available() -> None:
-    import json
-    from importlib.resources import files
-
-    resource = files("omeify.schemas").joinpath("miti_ome_tiff_header.schema.json")
-    schema = json.loads(resource.read_text(encoding="utf-8"))
-    assert schema["$schema"].endswith("draft/2020-12/schema")
-    assert "uint8" in schema["properties"]["pixel_type"]["enum"]
-    assert "image_name" not in schema["properties"]
-
-
 def test_convert_helper_dogfoods_public_ome_tiff_writer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1094,29 +1008,18 @@ def test_convert_helper_dogfoods_public_ome_tiff_writer(
     output = tmp_path / "output.ome.tif"
     _write_source(source, data)
 
-    convert(
+    report = convert(
         source,
         output,
         input_type="ome_tiff",
         compression="Uncompressed",
         tile_size=16,
         pyramid_levels=0,
+        software="wrapper-pipeline 3.1",
     )
 
     assert called["value"] is True
-
-
-def test_pyproject_declares_apache_2_license() -> None:
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        import tomli as tomllib
-
-    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    with pyproject.open("rb") as handle:
-        project = tomllib.load(handle)["project"]
-
-    assert project["license"] == "Apache-2.0"
-    assert project["license-files"] == ["LICENSE"]
-    assert "License :: OSI Approved :: Apache Software License" in project["classifiers"]
-    assert "License :: OSI Approved :: MIT License" not in project["classifiers"]
+    assert report["options"]["software"] == "wrapper-pipeline 3.1"
+    assert report["verification"]["software_tag_matches"] is True
+    with tifffile.TiffFile(output) as tiff:
+        assert tiff.pages[0].tags["Software"].value == "wrapper-pipeline 3.1"

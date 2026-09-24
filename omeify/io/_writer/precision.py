@@ -108,10 +108,10 @@ class FloatMantissaSource:
         self._source = source
         self._mantissa_bits = mantissa_bits
 
-    def plane_readers(self, *, cache_mib: int = 64) -> list[_FloatMantissaPlaneReader]:
+    def plane_readers(self) -> list[_FloatMantissaPlaneReader]:
         return [
             _FloatMantissaPlaneReader(reader, self._mantissa_bits)
-            for reader in self._source.plane_readers(cache_mib=cache_mib)
+            for reader in self._source.plane_readers()
         ]
 
 

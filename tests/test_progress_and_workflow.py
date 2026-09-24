@@ -8,10 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import tifffile
 from click.testing import CliRunner
 
-import omeify.conversion as conversion_module
 import omeify.dtype_mutation as dtype_mutation_module
 import omeify.mutation as mutation_module
 import omeify.workflow as workflow_module
@@ -20,7 +20,7 @@ from omeify.cli import _CompactLogHandler, main
 from omeify.dtype_mutation import analyze_dtype_mutation
 from omeify.io._writer.pyramid import iter_downsampled_tiles, iter_tiles
 from omeify.io.ome_tiff_writer import OMETiffWriter
-from omeify.io.tiff import ArrayPlaneReader
+from plane_fixture import ArrayPlaneReader
 from omeify.progress import ProgressLogger
 
 
@@ -244,8 +244,6 @@ def test_channel_logging_shows_discovered_names_and_explicit_renames(caplog) -> 
     assert "[0] 'DAPI' -> 'DNA'" in caplog.text
 
 
-
-
 def test_mutate_uses_shared_writer_through_dtype_transform_adapter(
     tmp_path: Path,
     monkeypatch,
@@ -303,45 +301,35 @@ def test_mutate_uses_shared_writer_through_dtype_transform_adapter(
     assert output.is_file()
 
 
-def test_cli_single_verbose_level_enables_only_omeify_stage_logs(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
+@pytest.mark.parametrize("verbose", [1, 2], ids=["compact", "diagnostic"])
+def test_cli_verbose_levels(tmp_path: Path, monkeypatch, verbose: int) -> None:
     source = tmp_path / "source.tif"
-    output = tmp_path / "output.ome.tif"
+    source.touch()  # Only Click's existence check runs; conversion is replaced below.
     report_path = tmp_path / "report.json"
-    tifffile.imwrite(source, np.zeros((16, 16), dtype=np.uint16), metadata=None)
 
     def fake_convert(*args, **kwargs):
-        del args, kwargs
-        logging.getLogger("omeify.test_cli").info("visible stage log")
+        logger = logging.getLogger("omeify.test_cli")
+        logger.info("visible stage log")
+        logger.debug("debug detail")
         logging.getLogger("unrelated.library").info("dependency chatter")
         return {"status": "ok"}
 
     monkeypatch.setattr("omeify.cli.convert", fake_convert)
-    result = CliRunner().invoke(
-        main,
-        [
-            "convert",
-            str(source),
-            "--output",
-            str(output),
-            "--type",
-            "component",
-            "--pixel-size-x",
-            "0.5",
-            "--pixel-size-y",
-            "0.5",
-            "--output-json",
-            str(report_path),
-            "--verbose",
-        ],
-    )
-
+    result = CliRunner().invoke(main, [
+        "convert", str(source), "--output", str(tmp_path / "output.ome.tif"),
+        "--type", "component", "--pixel-size-x", "0.5", "--pixel-size-y", "0.5",
+        "--output-json", str(report_path), *(["--verbose"] * verbose),
+    ])
     assert result.exit_code == 0, result.output
-    assert result.output == "visible stage log\n"
     assert "dependency chatter" not in result.output
     assert json.loads(report_path.read_text(encoding="utf-8")) == {"status": "ok"}
+    if verbose == 1:
+        assert result.output == "visible stage log\n"
+    else:
+        assert re.search(
+            r"\d{2}:\d{2}:\d{2} INFO omeify\.test_cli: visible stage log", result.output,
+        )
+        assert "DEBUG omeify.test_cli: debug detail" in result.output
 
 
 def test_compact_handler_reuses_one_tty_line_until_progress_finishes() -> None:
@@ -373,51 +361,6 @@ def test_compact_handler_reuses_one_tty_line_until_progress_finishes() -> None:
     assert rendered.count("\r") == 3
     assert "Synthetic stage [##########----------]  50%" in rendered
     assert rendered.rstrip().endswith("100% 00:02")
-
-
-def test_cli_repeated_verbose_level_keeps_full_diagnostic_prefixes(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    source = tmp_path / "source.tif"
-    output = tmp_path / "output.ome.tif"
-    report_path = tmp_path / "report.json"
-    tifffile.imwrite(source, np.zeros((16, 16), dtype=np.uint16), metadata=None)
-
-    def fake_convert(*args, **kwargs):
-        del args, kwargs
-        logger = logging.getLogger("omeify.test_cli")
-        logger.info("visible stage log")
-        logger.debug("debug detail")
-        return {"status": "ok"}
-
-    monkeypatch.setattr("omeify.cli.convert", fake_convert)
-    result = CliRunner().invoke(
-        main,
-        [
-            "convert",
-            str(source),
-            "--output",
-            str(output),
-            "--type",
-            "component",
-            "--pixel-size-x",
-            "0.5",
-            "--pixel-size-y",
-            "0.5",
-            "--output-json",
-            str(report_path),
-            "--verbose",
-            "--verbose",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert re.search(
-        r"\d{2}:\d{2}:\d{2} INFO omeify\.test_cli: visible stage log",
-        result.output,
-    )
-    assert "DEBUG omeify.test_cli: debug detail" in result.output
 
 
 def test_verbose_help_describes_single_and_repeated_levels() -> None:

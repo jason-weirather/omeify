@@ -410,30 +410,7 @@ Source-native axes remain available as `native_axes` and `native_shape` on file
 readers. Generic axes/shape always describe the normalized product. Conversion
 report fields still distinguish source layout from normalized layout.
 
-### Tilework and Cadastre need coordinated migration
-
-The available Tilework 6586040 adapter uses `is_rgb` and calls
-`pixel_size_at_level()` with a fallback based on rounded image dimensions.
-Change it to `image_type == "rgb"` and `reader.levels[level].pixel_size`, and
-**remove that shape-ratio fallback**. Do not let a missing removed method quietly
-select different calibration. Its existing bounded CYX/YXS-to-YXC conversion can
-stay. Constructed Omeify Images can enter the same adapter as file readers; there
-is no reason to create a simulator-specific Tilework branch.
-
-The available Cadastre acfb391 output code creates `OMEImageSeries.from_source`
-from `ArtifactSource` and `VisualizationStackSource`, typed as `PlaneReaderSource`.
-Those providers need the new `ImageSource` descriptor/regional interface and an
-open semantic wrapper; series construction becomes `OMEImageSeries(name, image)`.
-Its existing bounded artifact reads, contour halos, JPEG display policy, and
-scientific postprocessing should not be changed merely to migrate I/O.
-
-Cadastre's tissue workflow and local-DAPI preparation also reopen paths. Migrating
-its writer is not the same as enabling end-to-end file-free input. The latter
-needs a deliberate Image-accepting workflow and lifetime for all stages that
-reread the observation. Keep its CLI opening real files at the boundary.
-
-This patch changes Omeify only. These sibling observations are based on the
-available snapshots, not an assertion that their latest checkouts were modified
-or tested. Migrate their call sites and dependency bounds before upgrading their
-production environments. The same removed APIs may affect ttwhy, Fieldwork,
-CellGate, or notebook helpers; search those callers rather than adding shims here.
+Before upgrading downstream tools, search their call sites for the removed APIs
+in the table above. Migrate callers and dependency bounds together rather than
+adding shims here. Enabling file-free workflows also requires keeping the Image
+open for every stage that rereads it; changing a writer call alone is not enough.

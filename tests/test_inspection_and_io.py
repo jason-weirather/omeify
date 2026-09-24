@@ -514,24 +514,6 @@ def test_float32_precision_trimming_is_applied_to_pyramid_values(
             assert np.all((raw[finite] & np.uint32((1 << 12) - 1)) == 0)
 
 
-def test_generic_rgb_writer_defaults_to_jpeg_90_422(tmp_path: Path, image_factory) -> None:
-    # Assert current storage policy without opening a second metadata input path.
-    from omeify.io._writer.preparation import prepare_image
-    from omeify.io.image_planes import ImagePlaneSource
-
-    image = image_factory(np.zeros((16, 16, 3), np.uint8), kind="rgb",
-                          pixel_size=PixelSize(.5, .5, "µm"))
-    source = ImagePlaneSource(image)
-    writer = OMETiffWriter(tmp_path / "rgb.ome.tif", tile_size=16)
-    prepared = prepare_image(source, source.output_spec(), name=None, downsample=None,
-                             compression_name=writer._settings.compression_name, settings=writer._settings,
-                             lossy_policy="rgb-only")
-    assert prepared.compression.name == "JPEG"
-    assert prepared.compression.compression_args == {"level": 90, "outcolorspace": "YCBCR"}
-    assert prepared.compression.subsampling == (2, 1)
-    assert prepared.tile_size == 16  # Explicit caller override is retained.
-
-
 def test_planar_writer_rejects_lossy_compression(image_factory, tmp_path: Path) -> None:
     output = tmp_path / "lossy-planar.ome.tif"
     data = np.zeros((1, 16, 16), dtype=np.uint8)
@@ -601,7 +583,7 @@ def test_label_writer_and_reader_stay_at_the_virtual_io_boundary(
         labels,
         kind='label',
         channel_names=['Cells'],
-        pixel_size=PixelSize(0.5, 0.5, 'µm'),
+        pixel_size=PixelSize(0.7, 0.8, 'µm'),
     ))
 
     assert report["image"]["image_type"] == "label"
@@ -611,7 +593,7 @@ def test_label_writer_and_reader_stay_at_the_virtual_io_boundary(
     with OMETiffLabelReader(output) as image:
         assert isinstance(image, LabelImage)
         assert image.background_label == 0
-        assert not hasattr(image, "label_count")
+        assert image.pixel_size == PixelSize(0.7, 0.8, "µm")
         np.testing.assert_array_equal(image.asarray(), labels)
         np.testing.assert_array_equal(image.read_region(1, 4, 1, 5), labels[1:4, 1:5])
 
