@@ -289,6 +289,7 @@ Omeify uses explicit subcommands:
 ```text
 omeify convert   Normalize a supported source into OME-TIFF
 omeify mutate    Create an explicitly pixel-mutated OME-TIFF
+omeify crop      Export coordinate/GeoJSON rectangles as named OME-TIFF products
 omeify inspect   Inspect TIFF structure and metadata
 omeify version   Show package and dependency versions
 ```
@@ -497,9 +498,14 @@ Important mutation options:
 --output-json PATH              Write the structured mutation report
 ```
 
+### `omeify crop`
+
+See [cropping and visual region questions](regions.md) for the complete new
+command, naming/grouping, pixel coordinates, clipping, streaming, and Python API.
+
 ### `omeify inspect`
 
-Inspection reads TIFF directories and metadata without materializing the complete raster. It works
+Ordinary inspection reads TIFF directories and metadata without materializing the complete raster. It works
 for any TIFF layout understood by tifffile, not only conversion inputs.
 
 ```bash
@@ -752,6 +758,10 @@ Prose, classifications, and cautions remain advisory.
 > data; no burned-in labels, raster content or tissue quality were examined.
 
 #### Ask a focused image question
+
+The following describes metadata-only questions. Add `--geojson` to explicitly
+select [visual region localization](regions.md#ask-for-visual-geojson), which
+sends a bounded image overview and returns full-resolution pixel GeoJSON instead.
 
 ```bash
 omeify inspect image.ome.tif -i --question "Can you give me a channel list?"

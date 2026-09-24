@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Omeify visual region selection, protocol 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "regions", "message"],
+  "properties": {
+    "status": {"type": "string", "enum": ["located", "unavailable"]},
+    "message": {"type": "string", "maxLength": 2000},
+    "regions": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "bbox", "size_px"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "\\S"},
+          "bbox": {
+            "type": "array", "minItems": 4, "maxItems": 4,
+            "items": {"type": "number", "minimum": 0, "maximum": 1000}
+          },
+          "size_px": {
+            "anyOf": [
+              {"type": "null"},
+              {"type": "array", "minItems": 2, "maxItems": 2,
+               "items": {"type": "integer", "minimum": 1}}
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,7 +9,7 @@ import numpy as np
 
 from .base import Image
 from .channel import Channel
-from .image_metadata import ImageMetadata, integer
+from .image_metadata import ImageLevel, ImageMetadata, integer
 from .image_source import ImageSource
 from .pixel_size import PixelSize
 
@@ -127,3 +127,27 @@ class ChannelSource(BorrowedSource):
         return np.stack([
             self._channels[i].read_region(y0, y1, x0, x1, level=self._level) for i in channels
         ])
+
+
+class CropSource(BorrowedSource):
+    """Offset level-zero regional reads without taking ownership of the parent."""
+
+    def __init__(self, image: Image, y0: int, y1: int, x0: int, x1: int) -> None:
+        y0, y1, x0, x1 = (integer(v, "crop bound") for v in (y0, y1, x0, x1))
+        height, width = image.levels[0].spatial_shape
+        if not (0 <= y0 < y1 <= height and 0 <= x0 < x1 <= width):
+            raise ValueError("Crop must be a nonempty, in-bounds level-zero rectangle")
+        shape = list(image.shape)
+        shape[image.axes.index("Y")] = y1 - y0
+        shape[image.axes.index("X")] = x1 - x0
+        level = ImageLevel(0, image.axes, tuple(shape), image.pixel_size, (1., 1.))
+        metadata = replace(image._metadata, shape=tuple(shape), levels=(level,))
+        super().__init__(metadata, (image,))
+        self._image, self._y0, self._x0 = image, y0, x0
+
+    def _read_region(
+        self, y0: int, y1: int, x0: int, x1: int, *, level: int, channels: tuple[int, ...],
+    ) -> np.ndarray:
+        return self._image.read_region(
+            y0 + self._y0, y1 + self._y0, x0 + self._x0, x1 + self._x0, channels=channels,
+        )

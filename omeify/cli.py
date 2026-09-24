@@ -10,6 +10,7 @@ import click
 
 from omeify import __version__, get_version_info
 from omeify.conversion import RenameChannelsBy, convert
+from omeify.cropping import crop
 from omeify.dtype_mutation import (
     DEFAULT_AUTO_MAX_NORMALIZED_RMSE,
     DEFAULT_SAMPLE_PIXELS_PER_CHANNEL,
@@ -181,7 +182,7 @@ def _pixel_size_override(
 
 @click.group(cls=_SubcommandOnlyGroup, context_settings=_CONTEXT_SETTINGS)
 def main() -> None:
-    """Convert, mutate, inspect, and read standardized TIFF-family images."""
+    """Convert, crop, mutate, inspect, and read standardized TIFF-family images."""
 
 
 @main.command("convert", context_settings=_CONTEXT_SETTINGS)
@@ -602,6 +603,80 @@ def mutate_command(
     _write_or_echo(json.dumps(report, indent=2), output_json)
 
 
+@main.command("crop", context_settings=_CONTEXT_SETTINGS)
+@click.argument("input_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("-o", "--output", "output_base", required=True,
+              type=click.Path(dir_okay=False, path_type=Path),
+              help="Output filename prefix, not a directory.")
+@click.option("--bounds", type=int, nargs=4, metavar="X0 Y0 X1 Y1",
+              help="Half-open integer bounds in level-zero pixels; exclusive with --geojson.")
+@click.option("--geojson", "geojson_path", type=str, metavar="FILE",
+              help="Pixel-coordinate GeoJSON file, or - for stdin; exclusive with --bounds.")
+@click.option("--naming", type=click.Choice(["name", "index"]), default="name", show_default=True,
+              help="Equal names share a file as separate series; unnamed objects use padded indices.")
+@click.option("--clip", is_flag=True, help="Explicitly clip out-of-bounds rectangles to the image.")
+@click.option("--type", "input_type", type=click.Choice(INPUT_TYPES),
+              default="ome_tiff", show_default=True)
+@click.option("--series", type=click.IntRange(min=0), default=0, show_default=True)
+@click.option("--labels", is_flag=True,
+              help="Declare an OME-TIFF label series; use lossless/nearest storage.")
+@click.option("--channel-name-field", type=click.Choice(["name", "biomarker", "auto"]), default=None)
+@click.option("--pixel-size-x", type=click.FloatRange(min=0, min_open=True), default=None)
+@click.option("--pixel-size-y", type=click.FloatRange(min=0, min_open=True), default=None)
+@click.option("--pixel-size-unit", type=str, default=None)
+@click.option("--compression", type=click.Choice(
+    ["LZW", "Deflate", "ZSTD", "JPEG", "Uncompressed"], case_sensitive=False), default=None,
+    help="Default: JPEG for RGB, lossless LZW otherwise. Choose Deflate for exact RGB samples.")
+@click.option("--jpeg-quality", type=click.IntRange(min=1, max=100), default=DEFAULT_JPEG_QUALITY)
+@click.option("--jpeg-subsampling", type=click.Choice(["444", "422", "420", "411"]),
+              default=DEFAULT_JPEG_SUBSAMPLING)
+@click.option("--tile-size", type=click.IntRange(min=16), default=None,
+              help="Default: 512 RGB, 1024 otherwise; must be divisible by 16.")
+@click.option("--pyramid-levels", type=click.IntRange(min=0), default=None)
+@click.option("--workers", type=click.IntRange(min=1), default=None)
+@click.option("--cache-directory", type=click.Path(file_okay=False, path_type=Path), default=None)
+@click.option("--overwrite/--no-overwrite", default=True, show_default=True)
+@click.option("-v", "--verbose", count=True, help="Progress on stderr; repeat for diagnostic logs.")
+def crop_command(
+    input_path: Path, output_base: Path, bounds: tuple[int, ...] | None, geojson_path: str | None,
+    naming: str, clip: bool, input_type: str, series: int, labels: bool,
+    channel_name_field: str | None, pixel_size_x: float | None, pixel_size_y: float | None,
+    pixel_size_unit: str | None, compression: str | None, jpeg_quality: int,
+    jpeg_subsampling: str, tile_size: int | None, pyramid_levels: int | None,
+    workers: int | None, cache_directory: Path | None, overwrite: bool, verbose: int,
+) -> None:
+    """Crop rectangles from INPUT_PATH into PREFIX-name.ome.tiff files.
+
+    GeoJSON uses full-resolution XY pixel coordinates, not geographic coordinates.
+    Polygons are exported as bounding rectangles, without masking. Same-named
+    objects remain individual crops (series) in the same file, not a mosaic.
+    """
+    _configure_logging(verbose)
+    if (bounds is None) == (geojson_path is None):
+        raise click.UsageError("Choose exactly one of --bounds or --geojson")
+    try:
+        if geojson_path == "-":
+            from omeify.regions import MAX_GEOJSON_CHARS, load_geojson
+
+            geojson = load_geojson(click.get_text_stream("stdin").read(MAX_GEOJSON_CHARS + 1))
+        else:
+            geojson = geojson_path
+        report = crop(
+            input_path, output_base, bounds=bounds, geojson=geojson,
+            input_type=input_type, series=series, naming=naming, clip=clip, labels=labels,
+            channel_name_field=channel_name_field,
+            pixel_size=_pixel_size_override(pixel_size_x, pixel_size_y, pixel_size_unit),
+            compression=compression, jpeg_quality=jpeg_quality, jpeg_subsampling=jpeg_subsampling,
+            tile_size=tile_size, pyramid_levels=pyramid_levels, max_workers=workers,
+            cache_directory=cache_directory, overwrite=overwrite,
+        )
+    except Exception as exc:
+        if verbose >= 2:
+            raise
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False))
+
+
 @main.command("inspect", context_settings=_CONTEXT_SETTINGS)
 @click.argument(
     "input_path",
@@ -640,7 +715,7 @@ def mutate_command(
 )
 @click.option(
     "-q", "--question", type=str, default=None, metavar="TEXT",
-    help="Answer a question about metadata and file/layout statistics; requires -i.",
+    help="Answer a metadata question, or locate regions with --geojson; requires -i.",
 )
 @click.option(
     "--intelligence-source", type=str, default=None,
@@ -662,6 +737,21 @@ def mutate_command(
     default=DEFAULT_MAX_OUTPUT_TOKENS, show_default=True,
     help="Maximum generated tokens requested from the selected model; requires -i.",
 )
+@click.option("--geojson", is_flag=True,
+              help="Return visual ROI GeoJSON only; sends a bounded image preview. Requires -i -q.")
+@click.option("--type", "input_type", type=click.Choice(INPUT_TYPES), default="ome_tiff",
+              help="Input profile for --geojson only; default ome_tiff.")
+@click.option("--series", type=click.IntRange(min=0), default=0,
+              help="Source series for --geojson only; default 0.")
+@click.option("--preview-size", type=click.IntRange(min=128, max=2048), default=1536,
+              help="Maximum preview edge in pixels for --geojson; default 1536.")
+@click.option("--preview-channel", type=click.IntRange(min=0), default=None,
+              help="Scalar channel index for --geojson. Default: unique DAPI, otherwise channel 0.")
+@click.option("--preview-range", type=float, nargs=2, metavar="LOW HIGH", default=None,
+              help="Display-only scalar intensity range for --geojson; RGB uses its original colors.")
+@click.option("--roi-size", type=click.IntRange(min=1), nargs=2, metavar="WIDTH HEIGHT", default=None,
+              help="Enforce exact full-resolution ROI dimensions for --geojson.")
+@click.option("-v", "--verbose", count=True, help="Progress on stderr; repeat for diagnostic logs.")
 def inspect_command(
     input_path: Path,
     detail: int,
@@ -674,14 +764,33 @@ def inspect_command(
     intelligence_scopes: tuple[str, ...],
     intelligence_max_chars: int,
     intelligence_max_output_tokens: int,
+    geojson: bool, input_type: str, series: int, preview_size: int,
+    preview_channel: int | None, preview_range: tuple[float, float] | None,
+    roi_size: tuple[int, int] | None, verbose: int,
 ) -> None:
-    """Inspect any TIFF at INPUT_PATH without reading its image pixels.
+    """Inspect TIFF metadata, or explicitly locate visual regions with --geojson.
+
+    Ordinary inspection never reads pixels. --geojson is an explicit opt-in to
+    transmit a bounded image overview to the selected Sheetbend source.
 
     Inspection output is raw diagnostic metadata, not deidentified output. It
     may contain paths, filenames, vendor fields, or other identifying values.
     """
 
+    _configure_logging(verbose)
     ctx = click.get_current_context()
+    visual_options = (
+        "input_type", "series", "preview_size", "preview_channel", "preview_range", "roi_size",
+    )
+    if geojson:
+        if not intelligence or question is None:
+            raise click.UsageError("--geojson requires --intelligence / -i and --question / -q")
+        if any(ctx.get_parameter_source(name) != click.core.ParameterSource.DEFAULT
+               for name in ("detail", "max_text_length", "intelligence_max_chars")):
+            raise click.UsageError("Metadata detail/text/budget options do not apply to --geojson")
+    elif any(ctx.get_parameter_source(name) != click.core.ParameterSource.DEFAULT
+             for name in visual_options):
+        raise click.UsageError("Visual input, preview, and ROI options require --geojson")
     if question is not None:
         if not intelligence:
             raise click.UsageError("--question / -q requires --intelligence / -i")
@@ -704,6 +813,25 @@ def inspect_command(
         or (output.exists() and output.samefile(input_path))
     ):
         raise click.UsageError("--output must differ from INPUT_PATH")
+    if geojson:
+        from omeify.io.source_reader import source_reader
+        from omeify.visual_intelligence import locate_regions
+
+        click.echo("Locating regions through Sheetbend: sending a bounded image preview...", err=True)
+        try:
+            with source_reader(input_path, input_type=input_type, series=series,
+                               channel_name_field=None) as image:
+                result = locate_regions(
+                    image, question, series=series, roi_size=roi_size,
+                    preview_size=preview_size, preview_channel=preview_channel,
+                    preview_range=preview_range, source_name=intelligence_source,
+                    allowed_scopes=intelligence_scopes,
+                    max_output_tokens=intelligence_max_output_tokens,
+                )
+        except Exception as exc:
+            raise click.ClickException(str(exc)) from exc
+        _write_or_echo(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False), output)
+        return
     try:
         inspector = TiffInspector(
             input_path,

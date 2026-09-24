@@ -1,5 +1,6 @@
 from ._version import __version__, get_version_info
 from .conversion import convert
+from .cropping import crop
 from .inspection import TiffInspector
 from .io import (
     AkoyaComponentTiffReader,
@@ -51,6 +52,7 @@ __all__ = [
     "TiffInspector",
     "__version__",
     "convert",
+    "crop",
     "get_version_info",
     "mutate",
 ]

@@ -162,12 +162,13 @@ that validation to run; a missing validator is not treated as a successful check
 ## Command line
 
 Start with a file, identify its source profile, and produce the shared
-representation. The four commands keep different responsibilities explicit:
+representation. The commands keep different responsibilities explicit:
 
 | Command | Responsibility |
 |---|---|
 | `omeify inspect` | Examine TIFF layout and metadata without loading the whole raster. It is not restricted to conversion profiles and does not rewrite the file. |
 | `omeify convert` | Normalize a supported image's layout and metadata, preserve numeric dtype and scale, rebuild pyramids, and verify the output. Lossy compression remains an explicit encoding policy. |
+| `omeify crop` | Export pixel-coordinate or GeoJSON rectangles as named OME-TIFF products; group equal names as separate series. |
 | `omeify mutate` | Use the same writer for an intentional float-to-integer or float32-precision change, with a report of the transformation. |
 | `omeify version` | Report Omeify's version; `--json` also records the image-I/O dependency versions. |
 
@@ -257,6 +258,28 @@ neutral format conversion or a cohort-normalization method. Float32 mantissa
 trimming is a separate explicit option. See the [command-line reference][commands]
 for the mapping rules, precision controls, channel renaming, and every option;
 `omeify COMMAND --help` provides the installed command's help.
+
+### Crop regions, or ask for their coordinates
+
+```bash
+omeify crop slide.ome.tiff -o Scratch/slide --bounds 10000 5000 12048 7048
+
+# Explicit visual mode sends one bounded overview through Sheetbend.
+omeify inspect slide.ome.tiff -i --geojson \
+  -q "Return only the right tissue; name it right." > right.geojson
+omeify crop slide.ome.tiff -o Scratch/slide --geojson right.geojson
+```
+
+Crop's `-o` is a filename prefix: the examples produce `slide-01.ome.tiff` or
+`slide-right.ome.tiff`. Default naming uses object names when present; `--naming
+index` always uses padded indices. Equal names share a file with one series per
+ROI. Polygons become bounding rectangles, not masks. `--roi-size 2048 2048` on
+visual inspection enforces exact full-resolution dimensions around the proposed
+location. The model still estimates that location; it is not a tissue segmenter.
+Ordinary inspection and metadata questions remain metadata-only.
+
+See [cropping and visual region questions](docs/regions.md) for coordinate
+conventions, preview/channel controls, privacy, piping, library use, and limits.
 
 ## Python library
 
@@ -475,7 +498,9 @@ Optional `inspect -i` / `--question` metadata intelligence is advisory and separ
 from image I/O. It requires the intelligence extra and a configured Sheetbend
 source; ordinary conversion and mutation never use model output. Installation,
 privacy scopes, evidence limits, and examples are in the
-[metadata-intelligence reference][intelligence].
+[metadata-intelligence reference][intelligence]. Adding `--geojson` explicitly
+selects [visual region localization](docs/regions.md), which sends a bounded
+image overview instead of a metadata packet. It never crops automatically.
 
 ## License
 

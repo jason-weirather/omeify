@@ -25,6 +25,7 @@ can fail earlier than a later regional read in the former reader implementation.
 | Use that backend | `with MultichannelImage(source) as image:` (or RGB/label wrapper) |
 | Select/reorder/assemble lazy scalar channels | `MultichannelImage.from_channels(channels, ...)` |
 | Override calibration/names without changing pixels | `image.with_metadata(...)` |
+| Borrow a cropped level-zero image | `with image.crop(y0, y1, x0, x1) as roi:` |
 | Read a rectangle | `image.read_region(y0, y1, x0, x1, level=0, channels=...)` |
 | Materialize deliberately | `image.asarray(level=0)` or `channel.asarray(level=0)` |
 | Write one image | `OMETiffWriter(path, ...).write(image, level=0)` |

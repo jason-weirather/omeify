@@ -390,6 +390,81 @@ def _parse_response(
     return result
 
 
+def _request_scopes(allowed_scopes: Collection[str], max_output_tokens: int) -> tuple[str, ...]:
+    """Validate cheap request settings before collection or image rendering."""
+    if (isinstance(max_output_tokens, bool) or not isinstance(max_output_tokens, int)
+            or max_output_tokens < 1):
+        raise ValueError("max_output_tokens must be a positive integer")
+    if allowed_scopes is None or isinstance(allowed_scopes, str):
+        raise TypeError("allowed_scopes must be an ordered collection, not a string or None")
+    if isinstance(allowed_scopes, (set, frozenset)) and len(allowed_scopes) > 1:
+        raise TypeError("Multiple allowed_scopes must preserve preference order")
+    return tuple(allowed_scopes)
+
+
+def _request_text(
+    payload: dict[str, Any], *, system: str, schema: dict[str, Any],
+    registry: Registry | None, source_name: str | None, model_name: str | None,
+    allowed_scopes: Collection[str], max_output_tokens: int, image_png: bytes | None = None,
+) -> tuple[str, dict[str, Any], tuple[str, ...]]:
+    """One source-bound request; only explicit visual callers may attach a bounded PNG."""
+    scopes = _request_scopes(allowed_scopes, max_output_tokens)
+    if image_png is not None and (not isinstance(image_png, bytes) or len(image_png) > 16_777_216):
+        raise ValueError("Visual attachment must be PNG bytes no larger than 16 MiB")
+    source = None
+    try:
+        selected_registry = _load_registry() if registry is None else registry
+        source = selected_registry.source(source_name, allowed_scopes=scopes)
+        with source.connect(
+            model=model_name, requires=({"json_schema", "system_prompt"}
+                                        | ({"vision"} if image_png is not None else set())),
+            application="omeify", tool="inspect",
+        ) as model:
+            kwargs = {}
+            if image_png is not None:
+                from llm import Attachment
+
+                kwargs["attachments"] = [Attachment(type="image/png", content=image_png)]
+            response = model.prompt(
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False),
+                system=system, schema=schema, stream=False,
+                options={"max_tokens": max_output_tokens}, **kwargs,
+            )
+            text = response.text()  # LLM responses are lazy; consume before closing.
+    except IntelligenceError:
+        raise
+    except Exception as exc:
+        # Configuration/selection errors are deliberately actionable. Transport
+        # failures may echo prompts, URLs, credentials, or server response bodies.
+        try:
+            from sheetbend.errors import (
+                ConfigError, CredentialError, DependencyError, SelectionError,
+            )
+        except ImportError:
+            known_errors: tuple[type[Exception], ...] = ()
+        else:
+            known_errors = (ConfigError, CredentialError, DependencyError, SelectionError)
+        if isinstance(exc, known_errors):
+            raise IntelligenceError(str(exc)) from exc
+        detail = str(exc).lower()
+        if "failed to initialize samplers" in detail and "failed to parse grammar" in detail:
+            raise IntelligenceError(
+                "The selected endpoint rejected the structured-output grammar while initializing "
+                "samplers. This is a JSON-Schema/grammar compatibility failure, not a "
+                "context-limit diagnosis. No source/model fallback was attempted."
+            ) from exc
+        status = getattr(exc, "status_code", None)
+        status_text = f", HTTP {status}" if isinstance(status, int) else ""
+        raise IntelligenceError(
+            f"Intelligence request failed ({type(exc).__name__}{status_text}); no source/model "
+            "fallback was attempted. Provider response details were withheld."
+        ) from exc
+    return text, {
+        "name": source.name, "model": model_name or source.default_model,
+        "scope": source.scope, "organization": source.organization,
+    }, scopes
+
+
 def summarize_metadata(
     packet: dict[str, Any],
     *,
@@ -450,69 +525,21 @@ def summarize_metadata(
             f"Metadata packet contains a record longer than {quote_limit} characters; "
             "use collect_metadata() to produce bounded excerpts. No request sent."
         )
-    if allowed_scopes is None or isinstance(allowed_scopes, str):
-        raise TypeError("allowed_scopes must be an ordered collection, not a string or None")
-    if isinstance(allowed_scopes, (set, frozenset)) and len(allowed_scopes) > 1:
-        raise TypeError("Multiple allowed_scopes must preserve preference order")
-    scopes = tuple(allowed_scopes)
-    source = None
-    try:
-        selected_registry = _load_registry() if registry is None else registry
-        source = selected_registry.source(source_name, allowed_scopes=scopes)
-        with source.connect(
-            model=model_name, requires={"json_schema", "system_prompt"},
-            application="omeify", tool="inspect",
-        ) as model:
-            response = model.prompt(
-                json.dumps(
-                    packet if question is None else {"question": question, "metadata": packet},
-                    ensure_ascii=False, separators=(",", ":"),
-                ),
-                system=_SYSTEM_PROMPT if question is None else _QUESTION_SYSTEM_PROMPT,
-                schema=(
-                    metadata_summary_schema if question is None else metadata_question_schema
-                )(record_ids=[record["id"] for record in records]),
-                stream=False,
-                options={"max_tokens": max_output_tokens},
-            )
-            text = response.text()  # LLM responses are lazy; consume before closing.
-    except IntelligenceError:
-        raise
-    except Exception as exc:
-        # Configuration/selection errors are deliberately actionable. Transport
-        # failures may echo prompts, URLs, credentials, or server response bodies.
-        try:
-            from sheetbend.errors import (
-                ConfigError, CredentialError, DependencyError, SelectionError,
-            )
-        except ImportError:
-            known_errors: tuple[type[Exception], ...] = ()
-        else:
-            known_errors = (ConfigError, CredentialError, DependencyError, SelectionError)
-        if isinstance(exc, known_errors):
-            raise IntelligenceError(str(exc)) from exc
-        detail = str(exc).lower()
-        if "failed to initialize samplers" in detail and "failed to parse grammar" in detail:
-            raise IntelligenceError(
-                "The selected endpoint rejected the structured-output grammar while initializing "
-                "samplers. This is a JSON-Schema/grammar compatibility failure, not a "
-                "context-limit diagnosis. No source/model fallback was attempted."
-            ) from exc
-        status = getattr(exc, "status_code", None)
-        status_text = f", HTTP {status}" if isinstance(status, int) else ""
-        raise IntelligenceError(
-            f"Intelligence request failed ({type(exc).__name__}{status_text}); no source/model "
-            "fallback was attempted. Provider response details were withheld."
-        ) from exc
+    text, source_info, scopes = _request_text(
+        packet if question is None else {"question": question, "metadata": packet},
+        system=_SYSTEM_PROMPT if question is None else _QUESTION_SYSTEM_PROMPT,
+        schema=(metadata_summary_schema if question is None else metadata_question_schema)(
+            record_ids=[record["id"] for record in records],
+        ),
+        registry=registry, source_name=source_name, model_name=model_name,
+        allowed_scopes=allowed_scopes, max_output_tokens=max_output_tokens,
+    )
     content = _parse_response(text, records, question=question is not None)
     result = {
         "schema": "omeify.schemas/metadata_intelligence.schema.json",
         "schema_version": "1.1" if question is None else "1.2",
         "prompt_version": _PROMPT_VERSION if question is None else _QUESTION_PROMPT_VERSION,
-        "source": {
-            "name": source.name, "model": model_name or source.default_model,
-            "scope": source.scope, "organization": source.organization,
-        },
+        "source": source_info,
         "allowed_scopes": list(scopes), "coverage": deepcopy(coverage),
         "records": deepcopy(records),
     }

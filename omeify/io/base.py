@@ -160,6 +160,18 @@ class Image:
         self._ensure_open()
         return self._source.read_region(y0, y1, x0, x1, level=level, channels=channels)
 
+    def crop(self, y0: int, y1: int, x0: int, x1: int) -> Image:
+        """Borrow a level-zero rectangle as an unopened image, without copying pixels.
+
+        Bounds are strict half-open integers, matching read_region(). Keep this
+        parent open. The view has one level; writers rebuild its crop-local pyramid.
+        Its local origin is (0, 0); retain the source offset separately when needed.
+        """
+        from .image_views import CropSource
+
+        cls = {"multichannel": MultichannelImage, "rgb": RGBImage, "label": LabelImage}
+        return cls[self.image_type](CropSource(self, y0, y1, x0, x1))
+
     def asarray(self, *, level: int = 0) -> np.ndarray:
         """Explicit whole-level materialization; ordinary metadata access is cheap."""
         height, width = self._metadata.level(level).spatial_shape
