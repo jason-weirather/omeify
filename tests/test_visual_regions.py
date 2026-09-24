@@ -198,8 +198,41 @@ def test_cli_visual_stdout_and_failure_does_not_replace_report(tmp_path, vision_
     assert result.exit_code != 0 and report.read_text() == "keep"
     assert result.stdout == ""
     for flags in [["--geojson"], ["-i", "--geojson"], ["--preview-size", "128"],
-                  [*args[2:], "--intelligence-max-chars", "64000"]]:
+                  [*args[2:], "--intelligence-max-chars", "64000"],
+                  [*args[2:], "--preview-channel", "0", "--channel", "DAPI", "blue"],
+                  [*args[2:], "--channel", "DAPI", "blue", "--preview-range", "0", "10"]]:
         assert runner().invoke(main, ["inspect", str(path), *flags]).exit_code == 2
+
+
+def test_false_color_composite_preview_and_context(image_factory):
+    values = np.zeros((2, 32, 32), dtype=np.float32)
+    values[0, :, :16] = 5
+    values[1, :, 16:] = 9
+    image = image_factory(values, channel_names=("DAPI", "panCK"))
+    preview, context = build_preview(
+        image, max_size=128, composite_channels=((0, "blue"), (1, "#00ff00")),
+    )
+    assert preview.dtype == np.uint8 and preview.shape == (32, 32, 3)
+    assert preview[:, :16, 2].mean() > preview[:, :16, 1].mean()
+    assert preview[:, 16:, 1].mean() > preview[:, 16:, 2].mean()
+    assert context["channel_selection"] == "explicit_composite"
+    assert [item["index"] for item in context["channels"]] == [0, 1]
+    assert context["channels"][0]["color"] == [0, 0, 255]
+
+
+def test_named_false_color_channels_flow_to_visual_request(image_factory, vision_double):
+    image = image_factory(
+        np.arange(3 * 64 * 96, dtype=np.uint16).reshape(3, 64, 96),
+        channel_names=("CD3", "DAPI", "CD20"),
+    )
+    locate_regions(
+        image, "right tissue", preview_size=128, registry=vision_double["registry"],
+        preview_channels=(("DAPI", "blue"), ("CD20", "green")), preview_quantile=0.999,
+    )
+    sent, _ = vision_double["calls"][-1]
+    assert sent["context"]["channel_selection"] == "explicit_composite"
+    assert [item["index"] for item in sent["context"]["channels"]] == [1, 2]
+    assert vision_double["pixels"][-1].shape[-1] == 3
 
 
 def test_rgb_display_and_bounded_channel_context(image_factory):

@@ -747,8 +747,14 @@ def crop_command(
               help="Maximum preview edge in pixels for --geojson; default 1536.")
 @click.option("--preview-channel", type=click.IntRange(min=0), default=None,
               help="Scalar channel index for --geojson. Default: unique DAPI, otherwise channel 0.")
+@click.option("--channel", "preview_channels", nargs=2, metavar="NAME|INDEX COLOR", multiple=True,
+              help=("Repeat to build a false-color scalar preview composite for --geojson. "
+                    "COLOR accepts names, #RRGGBB, or R,G,B."))
 @click.option("--preview-range", type=float, nargs=2, metavar="LOW HIGH", default=None,
-              help="Display-only scalar intensity range for --geojson; RGB uses its original colors.")
+              help="Display-only scalar intensity range for one-channel --geojson previews.")
+@click.option("--preview-quantile", type=click.FloatRange(min=0, max=1, min_open=True),
+              default=0.999, show_default=True,
+              help="Auto-display upper quantile for scalar/composite --geojson previews.")
 @click.option("--roi-size", type=click.IntRange(min=1), nargs=2, metavar="WIDTH HEIGHT", default=None,
               help="Enforce exact full-resolution ROI dimensions for --geojson.")
 @click.option("-v", "--verbose", count=True, help="Progress on stderr; repeat for diagnostic logs.")
@@ -765,7 +771,8 @@ def inspect_command(
     intelligence_max_chars: int,
     intelligence_max_output_tokens: int,
     geojson: bool, input_type: str, series: int, preview_size: int,
-    preview_channel: int | None, preview_range: tuple[float, float] | None,
+    preview_channel: int | None, preview_channels: tuple[tuple[str, str], ...],
+    preview_range: tuple[float, float] | None, preview_quantile: float,
     roi_size: tuple[int, int] | None, verbose: int,
 ) -> None:
     """Inspect TIFF metadata, or explicitly locate visual regions with --geojson.
@@ -780,7 +787,8 @@ def inspect_command(
     _configure_logging(verbose)
     ctx = click.get_current_context()
     visual_options = (
-        "input_type", "series", "preview_size", "preview_channel", "preview_range", "roi_size",
+        "input_type", "series", "preview_size", "preview_channel", "preview_channels",
+        "preview_range", "preview_quantile", "roi_size",
     )
     if geojson:
         if not intelligence or question is None:
@@ -791,6 +799,10 @@ def inspect_command(
     elif any(ctx.get_parameter_source(name) != click.core.ParameterSource.DEFAULT
              for name in visual_options):
         raise click.UsageError("Visual input, preview, and ROI options require --geojson")
+    if preview_channels and preview_channel is not None:
+        raise click.UsageError("Choose either --preview-channel or one or more --channel options")
+    if preview_channels and preview_range is not None:
+        raise click.UsageError("--preview-range applies only to one-channel previews, not --channel composites")
     if question is not None:
         if not intelligence:
             raise click.UsageError("--question / -q requires --intelligence / -i")
@@ -824,7 +836,8 @@ def inspect_command(
                 result = locate_regions(
                     image, question, series=series, roi_size=roi_size,
                     preview_size=preview_size, preview_channel=preview_channel,
-                    preview_range=preview_range, source_name=intelligence_source,
+                    preview_channels=preview_channels, preview_range=preview_range,
+                    preview_quantile=preview_quantile, source_name=intelligence_source,
                     allowed_scopes=intelligence_scopes,
                     max_output_tokens=intelligence_max_output_tokens,
                 )

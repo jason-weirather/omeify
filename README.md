@@ -275,8 +275,12 @@ Crop's `-o` is a filename prefix: the examples produce `slide-01.ome.tiff` or
 index` always uses padded indices. Equal names share a file with one series per
 ROI. Polygons become bounding rectangles, not masks. `--roi-size 2048 2048` on
 visual inspection enforces exact full-resolution dimensions around the proposed
-location. The model still estimates that location; it is not a tissue segmenter.
-Ordinary inspection and metadata questions remain metadata-only.
+location. For mIF previews, `--channel NAME_OR_INDEX COLOR` can be repeated to
+build a false-color composite (for example `--channel DAPI blue --channel panCK
+magenta`), and scalar auto-display now clips at an upper quantile of 0.999 by
+default so a tiny number of bright bins do not wash out the overview. The model
+still estimates the location; it is not a tissue segmenter. Ordinary inspection
+and metadata questions remain metadata-only.
 
 See [cropping and visual region questions](docs/regions.md) for coordinate
 conventions, preview/channel controls, privacy, piping, library use, and limits.

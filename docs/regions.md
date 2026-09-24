@@ -197,11 +197,15 @@ a regional request; this is not a process-wide memory guarantee.
 RGB uses all three samples with no stain normalization or ICC transform.
 Scalar/mIF defaults to a uniquely named DAPI channel (case-insensitive), otherwise
 channel zero. `--preview-channel N` chooses another scalar channel by zero-based
-index. The default grayscale display maps overview percentiles 1 and 99.5, with
-min/max fallback for a collapsed interval. Non-finite samples are omitted and
-reported. `--preview-range LOW HIGH` supplies an explicit display range. Neither
-option changes pixels later exported by `crop`; crops still contain all channels.
-A DAPI overview shows nuclear signal, **not a definitive tissue mask**.
+index. Repeat `--channel NAME_OR_INDEX COLOR` to build a false-color composite
+preview for mIF, for example `--channel DAPI blue --channel panCK green`; colors
+accept common names, `#RRGGBB`, or `R,G,B`. `--preview-range LOW HIGH` supplies
+an explicit display range for one-channel previews only. Otherwise Omeify uses a
+display-only minimum-to-upper-quantile mapping, with `--preview-quantile` defaulting
+to **0.999** so the brightest 0.1% of overview bins do not dominate the preview.
+Non-finite samples are omitted and reported. None of these display controls change
+pixels later exported by `crop`; crops still contain all channels. A DAPI overview
+shows nuclear signal, **not a definitive tissue mask**.
 
 The model returns a compact, schema-constrained selection: names, normalized
 `[x0,y0,x1,y1]` boxes on a **0..1000 scale per axis**, and optional fixed pixel
