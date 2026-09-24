@@ -80,7 +80,7 @@ def test_encoder_options_do_not_mutate_prepared_policy(image_factory) -> None:
     source = ImagePlaneSource(image)
     compression = compression_settings("JPEG", image.dtype, is_rgb=True,
                                        jpeg_quality=90, jpeg_subsampling="444")
-    prepared = PreparedImage(source, source.output_spec(), "mean", compression, (image.shape,))
+    prepared = PreparedImage(source, source.output_spec(), "mean", compression, (image.shape,), 64)
     first = common_write_options(prepared, tile_size=64, max_workers=1)
     first["compressionargs"]["outcolorspace"] = "YCBCR"
     second = common_write_options(prepared, tile_size=64, max_workers=1)
@@ -96,11 +96,12 @@ def test_storage_requires_matching_photometric(image_factory, sampling: str, red
     image = image_factory(_swatches(), kind="rgb", pixel_size=_SIZE)
     spec = ImagePlaneSource(image).output_spec()
     expected = 2 if sampling == "444" else 6
-    page = SimpleNamespace(is_tiled=True, compression=7, samplesperpixel=3,
+    page = SimpleNamespace(is_tiled=True, tilewidth=64, tilelength=64,
+                           compression=7, samplesperpixel=3,
                            photometric=expected, planarconfig=1, subfiletype=int(reduced),
                            tags={"YCbCrSubSampling": SimpleNamespace(value=_SAMPLING[sampling])})
     kwargs = dict(spec=spec, expected_compression=7, expected_subsampling=_SAMPLING[sampling],
-                  reduced=reduced, context="RGB test")
+                  expected_tile_size=64, reduced=reduced, context="RGB test")
     verify_page_layout(page, **kwargs)
     page.photometric = 6 if expected == 2 else 2
     with pytest.raises(ValueError, match="PhotometricInterpretation"):
@@ -113,8 +114,9 @@ def test_storage_checks_subifd_color_policy_not_only_base(image_factory) -> None
     compression = compression_settings("JPEG", image.dtype, is_rgb=True,
                                        jpeg_quality=90, jpeg_subsampling="444")
     prepared = PreparedImage(source, source.output_spec(), "mean", compression,
-                             (image.shape, (97, 161, 3)))
-    sub = SimpleNamespace(is_tiled=True, compression=7, samplesperpixel=3, photometric=6,
+                             (image.shape, (97, 161, 3)), 64)
+    sub = SimpleNamespace(is_tiled=True, tilewidth=64, tilelength=64,
+                          compression=7, samplesperpixel=3, photometric=6,
                           planarconfig=1, subfiletype=1,
                           tags={"YCbCrSubSampling": SimpleNamespace(value=(1, 1))})
     sub.aspage = lambda: sub
@@ -138,8 +140,8 @@ def rgb_output(request, tmp_path: Path, sampling: str):
     pixels = _swatches()
     output = tmp_path / "colors.ome.tif"
     settings = dict(tile_size=64, pyramid_levels=2, max_workers=1)
-    # Exercise actual public defaults at 4:4:4, not an explicitly supplied value.
-    if sampling != "444":
+    # Exercise the 4:2:2 default; 4:4:4 must now be requested explicitly.
+    if sampling != "422":
         settings["jpeg_subsampling"] = sampling
     series = 0
     with RGBImage.from_array(pixels, pixel_size=_SIZE) as image:
@@ -170,7 +172,7 @@ def rgb_output(request, tmp_path: Path, sampling: str):
             else:
                 args = ["convert", str(source), "--output", str(output), "--type", "svs",
                         "--tile-size", "64", "--pyramid-levels", "2", "--workers", "1"]
-                if sampling != "444":
+                if sampling != "422":
                     args += ["--jpeg-subsampling", sampling]
                 result = CliRunner().invoke(main, args)
                 assert result.exit_code == 0, result.output

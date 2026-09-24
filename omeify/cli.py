@@ -22,6 +22,7 @@ from omeify.intelligence import (
     DEFAULT_MAX_METADATA_CHARS,
     DEFAULT_MAX_OUTPUT_TOKENS,
 )
+from omeify.io._writer.configuration import DEFAULT_JPEG_QUALITY, DEFAULT_JPEG_SUBSAMPLING
 from omeify.io.pixel_size import PixelSize
 from omeify.io.source_reader import INPUT_TYPES, PLANAR_INPUT_TYPES
 from omeify.mutation import mutate
@@ -236,27 +237,27 @@ def main() -> None:
     "--compression",
     type=click.Choice(["LZW", "Deflate", "ZSTD", "JPEG", "Uncompressed"], case_sensitive=False),
     default=None,
-    help="Default: JPEG for qptiff_he/svs; LZW for planar inputs.",
+    help="Default: lossy JPEG for RGB (including RGB OME-TIFF); lossless LZW otherwise.",
 )
 @click.option(
     "--jpeg-quality",
     type=click.IntRange(min=1, max=100),
-    default=90,
+    default=DEFAULT_JPEG_QUALITY,
     show_default=True,
-    help="JPEG encoder quality used when --compression JPEG is active.",
+    help="JPEG encoder quality, including automatic RGB JPEG output.",
 )
 @click.option(
     "--jpeg-subsampling",
     type=click.Choice(["444", "422", "420", "411"]),
-    default="444",
+    default=DEFAULT_JPEG_SUBSAMPLING,
     show_default=True,
     help="JPEG chroma subsampling for interleaved RGB output.",
 )
 @click.option(
     "--tile-size",
     type=click.IntRange(min=16),
-    default=1024,
-    show_default=True,
+    default=None,
+    show_default="256 for RGB; 1024 otherwise",
     help="Square output tile size; must be divisible by 16.",
 )
 @click.option(
@@ -309,7 +310,7 @@ def convert_command(
     compression: str | None,
     jpeg_quality: int,
     jpeg_subsampling: str,
-    tile_size: int,
+    tile_size: int | None,
     pyramid_levels: int | None,
     downsample: str,
     workers: int | None,

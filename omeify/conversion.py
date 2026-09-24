@@ -7,6 +7,12 @@ from pathlib import Path
 from typing import Literal
 
 from ._version import get_version_info
+from .io._writer.configuration import (
+    DEFAULT_JPEG_QUALITY,
+    DEFAULT_JPEG_SUBSAMPLING,
+    resolve_compression_name,
+    resolve_tile_size,
+)
 from .io.ome_tiff_writer import JPEGSubsampling, OMETiffWriter
 from .io.pixel_size import PixelSize
 from .io.source_reader import INPUT_TYPES, InputType, source_reader
@@ -27,12 +33,6 @@ LOGGER = logging.getLogger(__name__)
 DownsampleMethod = Literal["mean", "nearest"]
 
 
-def _default_compression(input_type: InputType) -> str:
-    """Return the fidelity policy for an explicitly selected source profile."""
-
-    return "JPEG" if input_type in {"qptiff_he", "svs"} else "LZW"
-
-
 def convert(
     input_path: str | Path,
     output_path: str | Path,
@@ -44,9 +44,9 @@ def convert(
     rename_channels_by: RenameChannelsBy | None = None,
     pixel_size: PixelSize | None = None,
     compression: str | None = None,
-    jpeg_quality: int = 90,
-    jpeg_subsampling: JPEGSubsampling = "444",
-    tile_size: int = 1024,
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+    jpeg_subsampling: JPEGSubsampling = DEFAULT_JPEG_SUBSAMPLING,
+    tile_size: int | None = None,
     pyramid_levels: int | None = None,
     downsample: DownsampleMethod = "mean",
     max_workers: int | None = None,
@@ -61,6 +61,11 @@ def convert(
     readers live in :mod:`omeify.io`; this function only selects the reader,
     applies explicit channel-renaming policy, and delegates all OME-TIFF
     construction and verification to :class:`OMETiffWriter`.
+
+    Omitted compression and tile size follow the selected image's type, not its
+    file profile: RGB uses lossy JPEG quality 90 / 4:2:2 and 256-pixel tiles;
+    non-RGB uses lossless LZW and 1024-pixel tiles. This includes RGB OME-TIFF
+    inputs. Supply a lossless codec explicitly to preserve RGB sample values.
 
     ``rename_channels`` uses native Python key types: strings in ``name`` mode
     and zero-based integers in ``index`` mode. The CLI converts JSON string keys
@@ -126,7 +131,8 @@ def convert(
             output_channel_names,
             rename_mode=normalized_rename_mode,
         )
-        effective_compression = compression or _default_compression(input_type)
+        effective_compression = resolve_compression_name(reader.image_type, compression)
+        effective_tile_size = resolve_tile_size(reader.image_type, tile_size)
         LOGGER.info(
             "Convert fidelity boundary: source samples enter the writer with dtype %s and "
             "without an intensity rescale or explicit numeric cast",
@@ -143,7 +149,7 @@ def convert(
         LOGGER.info(
             "Using the shared OME-TIFF writer directly on the source reader "
             "(tile=%s, downsample=%s)",
-            tile_size,
+            effective_tile_size,
             downsample,
         )
         writer = OMETiffWriter(
@@ -151,7 +157,7 @@ def convert(
             compression=effective_compression,
             jpeg_quality=jpeg_quality,
             jpeg_subsampling=jpeg_subsampling,
-            tile_size=tile_size,
+            tile_size=effective_tile_size,
             pyramid_levels=pyramid_levels,
             downsample=downsample,
             max_workers=max_workers,

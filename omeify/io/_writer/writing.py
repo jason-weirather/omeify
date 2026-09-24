@@ -46,7 +46,7 @@ def write_output(
                 )
             common_options = common_write_options(
                 item,
-                tile_size=settings.tile_size,
+                tile_size=item.tile_size,
                 max_workers=settings.max_workers,
             )
             base_progress = _base_progress_label(
@@ -61,7 +61,7 @@ def write_output(
                     item.level_shapes[0],
                     axes=item.spec.output_axes,
                     plane_count=item.spec.plane_count,
-                    tile_size=settings.tile_size,
+                    tile_size=item.tile_size,
                     progress_label=base_progress,
                 ),
                 shape=item.level_shapes[0],
@@ -93,7 +93,7 @@ def write_output(
                             level_shape,
                             axes=item.spec.output_axes,
                             plane_count=item.spec.plane_count,
-                            tile_size=settings.tile_size,
+                            tile_size=item.tile_size,
                             progress_label=_level_progress_label(
                                 item,
                                 level_index=level_index,

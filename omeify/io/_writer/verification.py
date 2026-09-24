@@ -356,6 +356,7 @@ def verify_storage(
             spec=spec,
             expected_compression=expected_compression,
             expected_subsampling=compression.subsampling,
+            expected_tile_size=prepared.tile_size,
             reduced=False,
             context=f"{prepared.display_name} plane {plane_index}",
         )
@@ -371,6 +372,7 @@ def verify_storage(
                 spec=spec,
                 expected_compression=expected_compression,
                 expected_subsampling=compression.subsampling,
+                expected_tile_size=prepared.tile_size,
                 reduced=True,
                 context=(
                     f"{prepared.display_name} plane {plane_index} "
@@ -398,11 +400,14 @@ def verify_page_layout(
     spec: OMEImageSpec,
     expected_compression: int,
     expected_subsampling: tuple[int, int] | None,
+    expected_tile_size: int,
     reduced: bool,
     context: str,
 ) -> None:
     if not page.is_tiled:
         raise ValueError(f"{context} is not tiled")
+    if (int(page.tilelength), int(page.tilewidth)) != (expected_tile_size, expected_tile_size):
+        raise ValueError(f"{context} does not use the requested {expected_tile_size}-pixel tiles")
     if int(page.compression) != expected_compression:
         raise ValueError(f"{context} does not use the requested TIFF compression")
     if int(page.samplesperpixel) != spec.samples_per_pixel:

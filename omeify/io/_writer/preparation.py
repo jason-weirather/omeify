@@ -19,7 +19,9 @@ from .configuration import (
     LossyCompressionPolicy,
     WriterSettings,
     compression_settings,
+    resolve_compression_name,
     resolve_downsample,
+    resolve_tile_size,
     validate_jpeg_alignment,
     validate_lossy_compression,
 )
@@ -45,7 +47,7 @@ def prepare_image(
     *,
     name: str | None,
     downsample: DownsampleMethod | None,
-    compression_name: str,
+    compression_name: str | None,
     settings: WriterSettings,
     lossy_policy: LossyCompressionPolicy,
 ) -> PreparedImage:
@@ -61,6 +63,7 @@ def prepare_image(
         settings.float32_mantissa_bits,
     )
     effective_downsample = resolve_downsample(spec.image_type, downsample)
+    tile_size = resolve_tile_size(spec.image_type, settings.tile_size)
     display_name = "image" if name is None else f"series {name!r}"
 
     LOGGER.info(
@@ -79,7 +82,7 @@ def prepare_image(
             reader.clear_cache()
 
     compression = compression_settings(
-        compression_name,
+        resolve_compression_name(spec.image_type, compression_name),
         spec.dtype,
         is_rgb=spec.is_rgb,
         jpeg_quality=settings.jpeg_quality,
@@ -91,14 +94,14 @@ def prepare_image(
         policy=lossy_policy,
     )
     validate_jpeg_alignment(
-        tile_size=settings.tile_size,
+        tile_size=tile_size,
         subsampling=compression.subsampling,
         jpeg_subsampling=settings.jpeg_subsampling,
     )
     level_shapes = auto_level_shapes(
         spec.output_shape,
         axes=spec.output_axes,
-        tile_size=settings.tile_size,
+        tile_size=tile_size,
         pyramid_levels=settings.pyramid_levels,
     )
     LOGGER.info(
@@ -107,8 +110,8 @@ def prepare_image(
         display_name,
         compression.name,
         "lossless" if compression.lossless else "lossy",
-        settings.tile_size,
-        settings.tile_size,
+        tile_size,
+        tile_size,
         settings.max_workers,
         effective_downsample,
         len(level_shapes) - 1,
@@ -128,6 +131,7 @@ def prepare_image(
         downsample=effective_downsample,
         compression=compression,
         level_shapes=level_shapes,
+        tile_size=tile_size,
         float32_mantissa_bits=float32_mantissa_bits,
         name=name,
     )

@@ -12,7 +12,11 @@ from omeify.io._writer import (
     prepare_image,
     validate_ome_xml,
 )
-from omeify.io._writer.configuration import OUTPUT_BYTEORDER
+from omeify.io._writer.configuration import (
+    DEFAULT_JPEG_QUALITY,
+    DEFAULT_JPEG_SUBSAMPLING,
+    OUTPUT_BYTEORDER,
+)
 from omeify.io.image_planes import protect_source_paths
 from omeify.utils.generate_ome_xml import (
     OMEIFY_PROVENANCE_NAMESPACE,
@@ -32,6 +36,11 @@ class OMEMultiSeriesWriter:
     Both writers delegate source validation, pyramid staging, TIFF encoding,
     verification primitives, and atomic installation to the same internal
     writer engine.
+
+    With no compression or tile-size override, each series independently uses
+    JPEG quality 90 / 4:2:2 and 256-pixel tiles for RGB, or lossless LZW and
+    1024-pixel tiles otherwise. Series compression overrides writer compression;
+    explicit writer settings override automatic defaults.
     """
 
     def __init__(
@@ -39,9 +48,9 @@ class OMEMultiSeriesWriter:
         output_path: str | Path,
         *,
         compression: str | None = None,
-        jpeg_quality: int = 90,
-        jpeg_subsampling: JPEGSubsampling = "444",
-        tile_size: int = 1024,
+        jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+        jpeg_subsampling: JPEGSubsampling = DEFAULT_JPEG_SUBSAMPLING,
+        tile_size: int | None = None,
         pyramid_levels: int | None = None,
         max_workers: int | None = None,
         display_uuid: bool = True,
@@ -91,7 +100,10 @@ class OMEMultiSeriesWriter:
                 image._source.output_spec(),
                 name=image.name,
                 downsample=image.downsample,
-                compression_name=image.compression or self._settings.compression_name,
+                compression_name=(
+                    self._settings.compression_name
+                    if image.compression is None else image.compression
+                ),
                 settings=self._settings,
                 lossy_policy="non-label",
             )
@@ -242,6 +254,7 @@ def _series_report(
             else prepared.float32_mantissa_bits + 1
         ),
         "compression": prepared.compression.name,
+        "tile_size": prepared.tile_size,
         "downsample_method": prepared.downsample,
         "level_shapes": [list(shape) for shape in prepared.level_shapes],
         "subresolution_count": len(prepared.level_shapes) - 1,

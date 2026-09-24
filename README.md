@@ -209,7 +209,8 @@ by default. JSON reports may contain source paths and metadata.
 | Akoya Fusion multiplex QPTIFF | `qptiff_fusion` | Planar multiplex | LZW |
 | Indica Labs/HALO mIF TIFF | `indica_mif` | Planar multiplex | LZW |
 | Akoya component TIFF | `component` | Scalar or planar multiplex | LZW |
-| OME-TIFF within the supported image model | `ome_tiff` | Scalar, planar multiplex, or interleaved RGB | LZW |
+| Scalar/planar OME-TIFF | `ome_tiff` | Scalar or planar multiplex | LZW |
+| Interleaved RGB OME-TIFF | `ome_tiff` | Interleaved RGB | JPEG |
 | Akoya H&E QPTIFF | `qptiff_he` | Interleaved RGB | JPEG |
 | Aperio SVS | `svs` | Interleaved RGB | JPEG |
 
@@ -225,12 +226,17 @@ omeify convert source.ome.tif --output normalized.ome.tif \
   --type ome_tiff --no-overwrite
 ```
 
-**Brightfield defaults are lossy.** H&E QPTIFF and SVS profiles use JPEG quality 90
-with 4:4:4 sampling. JPEG 4:4:4 is encoded as true RGB with matching TIFF
-photometric tags, avoiding the 4:4:4 YCbCr double-conversion path in some
-Bio-Formats readers. Explicit 4:2:2, 4:2:0, and 4:1:1 choices use YCbCr with
-matching sampling tags. To avoid adding a lossy encoding step, choose a lossless
-option explicitly, for example:
+**RGB defaults are lossy.** With no storage overrides, RGB uses **JPEG quality 90,
+4:2:2 YCbCr encoding, and 256 × 256 tiles**. This is the same policy for CLI
+conversion, Python `convert()`, ordinary and temporary image writers, and RGB
+series in multi-image output, including RGB OME-TIFF input. Scalar, multiplex,
+and label images retain lossless LZW and 1024 × 1024 tiles. Defaults follow the
+image's declared meaning, not its filename or simply having three channels.
+
+`--compression` / `compression=` and `--tile-size` / `tile_size=` override those
+defaults. Explicit JPEG `444` remains true RGB encoding; `422`, `420`, and `411`
+use YCbCr with matching TIFF tags. To avoid a lossy encoding step, choose a
+lossless option explicitly, for example:
 
 ```bash
 omeify convert slide.svs --output slide.ome.tif \
@@ -338,6 +344,21 @@ point of export and requires usable calibration.
 
 ### Other image origins and products
 
+For an existing `uint8` RGB array such as Mocktome's H&E raster, no storage
+arguments are needed for the RGB defaults:
+
+```python
+from omeify import OMETiffWriter, PixelSize, RGBImage
+
+with RGBImage.from_array(rgb, pixel_size=PixelSize(0.5, 0.5, "µm")) as image:
+    report = OMETiffWriter("he.ome.tif").write(image)
+    # JPEG quality 90 / 4:2:2, 256 × 256 tiles, automatic 2x pyramid.
+```
+
+Supply the array's actual physical pixel size. `compression="Deflate"` selects
+lossless RGB storage; explicit settings in an existing application are never
+overridden by a new default.
+
 Use `RGBImage.from_array(...)` for interleaved RGB and `LabelImage.from_array(...)`
 for categorical integer labels. Reopen labels with `OMETiffLabelReader`: label
 meaning is explicit application knowledge, not something inferred from an integer
@@ -387,7 +408,11 @@ Omeify 0.18.2 makes JPEG color-space selection explicit in the shared writer,
 including CLI conversion, ordinary/temporary library writes, and RGB series in
 multi-image files. Existing files are not changed by upgrading. Re-export from
 the original SVS or the original RGB array, then open the new output in QuPath.
-See the [JPEG policy and regression tests][jpeg-policy] for details.
+Version 0.18.3 changes automatic RGB storage to JPEG 90 / 4:2:2 and 256-pixel
+tiles, including library writes and RGB OME-TIFF conversions that previously
+defaulted to LZW. Choose lossless compression explicitly for reference rasters
+or exact-value workflows. See the [JPEG policy and regression tests][jpeg-policy]
+for details.
 
 QuPath, Bio-Formats, and other tools do not have to reproduce Omeify's Python
 classes to use the output. The [OME-TIFF specification][ome-tiff-spec] describes

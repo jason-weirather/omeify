@@ -15,7 +15,11 @@ from omeify.io._writer import (
     prepare_image,
     validate_ome_xml,
 )
-from omeify.io._writer.configuration import OUTPUT_BYTEORDER
+from omeify.io._writer.configuration import (
+    DEFAULT_JPEG_QUALITY,
+    DEFAULT_JPEG_SUBSAMPLING,
+    OUTPUT_BYTEORDER,
+)
 from omeify.io._writer.single_verification import verify_single_output
 from omeify.io.base import Image
 from omeify.io.image_planes import ImagePlaneSource, protect_source_paths
@@ -36,6 +40,11 @@ class OMETiffWriter:
     ``image_type`` is a semantic input flag, not a private TIFF tag. RGB is
     encoded as one logical OME channel with three interleaved samples. Label
     images are one integer YX raster and use nearest-neighbor pyramids.
+
+    Automatic storage (``compression=None``, ``tile_size=None``) is lossy JPEG
+    quality 90 / 4:2:2 with 256-pixel tiles for RGB, and lossless LZW with
+    1024-pixel tiles for scalar/multichannel/label images. Explicit settings win.
+    Choose a lossless codec explicitly when exact RGB sample values are needed.
     """
 
     def __init__(
@@ -43,9 +52,9 @@ class OMETiffWriter:
         output_path: str | Path,
         *,
         compression: str | None = None,
-        jpeg_quality: int = 90,
-        jpeg_subsampling: JPEGSubsampling = "444",
-        tile_size: int = 1024,
+        jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+        jpeg_subsampling: JPEGSubsampling = DEFAULT_JPEG_SUBSAMPLING,
+        tile_size: int | None = None,
         pyramid_levels: int | None = None,
         downsample: DownsampleMethod | None = None,
         max_workers: int | None = None,
@@ -167,7 +176,7 @@ class OMETiffWriter:
                 "icc_profile_present": spec.icc_profile is not None,
             },
             "pyramid": {
-                "tile_size": self._settings.tile_size,
+                "tile_size": prepared.tile_size,
                 "axes": spec.output_axes,
                 "downsample_method": prepared.downsample,
                 "level_shapes": [

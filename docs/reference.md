@@ -69,7 +69,7 @@ Planar output uses one grayscale top-level IFD per physical plane,
 |---|---|---|---|
 | Akoya H&E QPTIFF | `qptiff_he` | `YXS` interleaved RGB | JPEG |
 | Aperio SVS | `svs` | `YXS` interleaved RGB | JPEG |
-| Interleaved RGB OME-TIFF | `ome_tiff` | `YXS` interleaved RGB | LZW |
+| Interleaved RGB OME-TIFF | `ome_tiff` | `YXS` interleaved RGB | JPEG |
 
 RGB output is restricted to interleaved `uint8` data with three contiguous samples. The OME model
 uses `SizeC=3`, one logical `Channel` with `SamplesPerPixel=3`, `Interleaved=true`, and one physical
@@ -146,25 +146,64 @@ Automatic pyramid construction continues until the image fits within one output 
 `--pyramid-levels` or the corresponding writer argument to request an exact number of reduced
 levels. RGB downsampling is applied independently to all three samples while preserving `YXS`.
 
+When `tile_size` is omitted or `None`, the shared writer chooses **256 × 256 for
+RGB** and **1024 × 1024 for scalar, multiplex, and label images**. This applies
+to the base and every reduced level, independently for each multi-series image.
+An explicit `--tile-size N` / `tile_size=N` overrides automatic selection; in
+multi-series output it applies to all series. Lossless RGB still defaults to
+256-pixel tiles. Automatic RGB pyramids therefore continue until both dimensions
+fit in 256 pixels; explicit pyramid-level counts remain authoritative.
+
+256 is a viewer-oriented choice, **not an OME-TIFF requirement**. Smaller tiles
+limit the unrelated pixels decoded for small region requests, at the cost of
+more tile records and codec calls; they do not guarantee smaller files or faster
+whole-slide scans. The [OME-TIFF specification][ome-pyramid-spec] recommends
+tiling large planes without mandating 256; [QuPath 0.7's writer][qupath-tile-source]
+uses 512 as its internal default. The pyramid's resolution steps remain 2x;
+storage tile size is not a downsampling factor.
+
+[ome-pyramid-spec]: https://docs.openmicroscopy.org/ome-model/6.2.2/ome-tiff/specification.html#sub-resolutions
+[qupath-tile-source]: https://github.com/qupath/qupath/blob/v0.7.0/qupath-extension-bioformats/src/main/java/qupath/lib/images/writers/ome/OMEPyramidWriter.java
+
 ### Compression policy
 
-Planar conversion profiles default to lossless LZW. Akoya H&E QPTIFF and Aperio SVS default to
-JPEG because lossless whole-slide RGB files can be exceptionally large. Normalizing an existing
-OME-TIFF defaults to LZW so the operation does not introduce a new lossy encoding step.
+Omitted compression (Python `compression=None`) is resolved by the shared
+writer from each image's declared type: **JPEG for RGB, lossless LZW otherwise**.
+This policy applies to CLI conversion, Python `convert()`, `OMETiffWriter`,
+`TemporaryOMETiffWriter`, and every `OMEMultiSeriesWriter` series. It includes
+RGB OME-TIFF input, not just SVS and H&E QPTIFF. Three scalar channels are not RGB.
 
-The brightfield JPEG defaults are:
+The RGB JPEG defaults are:
 
 - quality `90`
-- 4:4:4 sampling, represented to tifffile as `(1, 1)`
-- true RGB JPEG components (`compressionargs={"outcolorspace": "RGB", ...}`)
-  with TIFF `PhotometricInterpretation=RGB` (`2`)
+- 4:2:2 chroma sampling, represented to tifffile as `(2, 1)`
+- explicit YCbCr JPEG components (`compressionargs={"outcolorspace": "YCBCR", ...}`)
+  with TIFF `PhotometricInterpretation=YCbCr` (`6`) and matching sampling tags
 
-Available JPEG sampling choices are `444`, `422`, `420`, and `411`. `444` keeps
-all three RGB components at full resolution. The explicitly subsampled choices
-use `outcolorspace="YCBCR"`, TIFF `PhotometricInterpretation=YCbCr` (`6`), and
-matching `YCbCrSubSampling` tags. No sampling request is silently changed.
-The TIFF tile size must satisfy the selected JPEG sampling alignment. Lossless LZW, Deflate, ZSTD, and uncompressed output remain
-available for RGB.
+4:2:2 preserves the spatial sampling of luma while halving each chroma
+component's horizontal sampling. The logical decoded image remains RGB `YXS`
+with unchanged dimensions and calibration. JPEG is lossy and does not preserve
+exact input samples, including when re-encoding a previously compressed scan.
+
+**Changed in 0.18.3:** generic RGB library writes and RGB OME-TIFF conversions
+previously defaulted to LZW; they now use the RGB policy above. Request `LZW`,
+`Deflate`, `ZSTD`, or `Uncompressed` explicitly for exact RGB values. Existing
+explicit compression, quality, sampling, and tile settings are never replaced.
+Label images remain lossless, and scalar JPEG is never chosen automatically.
+
+Available JPEG sampling choices are `444`, `422`, `420`, and `411`. Explicit
+`444` keeps all three RGB components at full resolution using true RGB JPEG
+and TIFF `PhotometricInterpretation=RGB` (`2`), retaining the color fix. All
+subsampled choices use explicit YCbCr with matching TIFF tags. No sampling
+request is silently changed. The tile size must satisfy JPEG sampling alignment.
+
+For multi-series output, precedence is **per-series compression override, then
+writer compression override, then automatic image-type default**. An explicit
+lossy codec for a label series is rejected, not silently replaced. Global report
+`options.compression` and `options.tile_size` retain `None` when automatic; each
+`series` entry reports its actual compression, tile size, and pyramid shapes.
+Single-image/conversion reports record the resolved tile size in `pyramid` and
+the effective codec/quality/sampling in `options`.
 
 The ordinary single-image writer permits JPEG only for `uint8` RGB. The multi-series writer also
 permits JPEG for explicitly selected non-label `uint8` visualization series. Label series always
@@ -205,7 +244,7 @@ Run the focused color regressions (small synthetic RGB swatches, all four
 sampling choices, public conversion/CLI/single/temporary/multi-series routes):
 
 ```bash
-python -m pytest -q tests/test_rgb_jpeg.py
+python -m pytest -q tests/test_rgb_jpeg.py tests/test_rgb_defaults.py
 ```
 
 The end-to-end writes require the normal `imagecodecs` and `ome-schema`
@@ -363,10 +402,10 @@ Common conversion options:
 ```text
 -o, --output FILE          Required destination OME-TIFF file
 --series N                 Source TIFF series; default 0
---compression NAME         LZW, Deflate, ZSTD, JPEG, or Uncompressed
+--compression NAME         JPEG for RGB, LZW otherwise; explicit overrides supported
 --jpeg-quality N           JPEG quality from 1 through 100; default 90
---jpeg-subsampling MODE    444, 422, 420, or 411; default 444
---tile-size N              Square TIFF tile size; default 1024
+--jpeg-subsampling MODE    444, 422, 420, or 411; default 422
+--tile-size N              Square tiles; default 256 for RGB, 1024 otherwise
 --pyramid-levels N         Exact reduced-level count; automatic when omitted
 --downsample METHOD        mean or nearest
 --cache-directory PATH     Temporary pyramid scratch location
@@ -1219,7 +1258,7 @@ Before a temporary output replaces the destination, omeify checks:
 - channel and `SamplesPerPixel` organization
 - `TiffData` physical-plane mapping
 - output axes, full-resolution shape, and top-level IFD count
-- tiled storage, compression, SubIFDs, and reduced-resolution flags
+- exact resolved tile dimensions, compression, SubIFDs, and reduced-resolution flags
 - rebuilt pyramid dimensions and linked pyramid annotations
 - re-read OME physical pixel sizes against the intended X/Y calibration, with explicit units
 - re-read TIFF resolution/unit tags on every base and SubIFD plane against the intended calibration

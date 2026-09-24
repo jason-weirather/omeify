@@ -514,7 +514,7 @@ def test_float32_precision_trimming_is_applied_to_pyramid_values(
             assert np.all((raw[finite] & np.uint32((1 << 12) - 1)) == 0)
 
 
-def test_generic_rgb_writer_defaults_to_lossless_lzw(tmp_path: Path, image_factory) -> None:
+def test_generic_rgb_writer_defaults_to_jpeg_90_422(tmp_path: Path, image_factory) -> None:
     # Assert current storage policy without opening a second metadata input path.
     from omeify.io._writer.preparation import prepare_image
     from omeify.io.image_planes import ImagePlaneSource
@@ -526,7 +526,10 @@ def test_generic_rgb_writer_defaults_to_lossless_lzw(tmp_path: Path, image_facto
     prepared = prepare_image(source, source.output_spec(), name=None, downsample=None,
                              compression_name=writer._settings.compression_name, settings=writer._settings,
                              lossy_policy="rgb-only")
-    assert prepared.compression.name == "LZW"
+    assert prepared.compression.name == "JPEG"
+    assert prepared.compression.compression_args == {"level": 90, "outcolorspace": "YCBCR"}
+    assert prepared.compression.subsampling == (2, 1)
+    assert prepared.tile_size == 16  # Explicit caller override is retained.
 
 
 def test_planar_writer_rejects_lossy_compression(image_factory, tmp_path: Path) -> None:

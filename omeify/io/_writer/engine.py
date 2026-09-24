@@ -143,7 +143,7 @@ class WriterEngine:
             build_pyramid(
                 item,
                 temp_root / f"image-{index}",
-                tile_size=self.settings.tile_size,
+                tile_size=item.tile_size,
             )
             for index, item in enumerate(prepared)
         )

@@ -26,6 +26,7 @@ class PreparedImage:
     downsample: DownsampleMethod
     compression: CompressionSettings
     level_shapes: tuple[tuple[int, ...], ...]
+    tile_size: int
     float32_mantissa_bits: int | None = None
     name: str | None = None
 

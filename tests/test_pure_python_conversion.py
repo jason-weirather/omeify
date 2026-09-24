@@ -16,7 +16,6 @@ from omeify import (
     TiffInspector,
     convert,
 )
-from omeify.conversion import _default_compression
 from omeify.io._writer.configuration import compression_settings
 from omeify.io._writer.pyramid import mean_downsample_2x
 
@@ -676,29 +675,19 @@ def test_aperio_missing_mpp_uses_tiff_resolution_with_warning(
     assert "using TIFF XResolution/YResolution/ResolutionUnit tags" in caplog.text
 
 
-def test_conversion_compression_defaults_are_profile_specific() -> None:
-    assert _default_compression("qptiff_he") == "JPEG"
-    assert _default_compression("svs") == "JPEG"
-    assert _default_compression("ome_tiff") == "LZW"
-    assert _default_compression("qptiff_mif") == "LZW"
-    assert _default_compression("qptiff_fusion") == "LZW"
-    assert _default_compression("component") == "LZW"
-    assert _default_compression("indica_mif") == "LZW"
-
-
-def test_brightfield_profiles_default_to_conservative_jpeg_policy() -> None:
+def test_rgb_jpeg_422_encoding_policy() -> None:
     settings = compression_settings(
         "JPEG",
         np.dtype("uint8"),
         is_rgb=True,
         jpeg_quality=90,
-        jpeg_subsampling="444",
+        jpeg_subsampling="422",
     )
 
     assert settings.name == "JPEG"
     assert settings.tifffile_value == "jpeg"
-    assert settings.compression_args == {"level": 90, "outcolorspace": "RGB"}
-    assert settings.subsampling == (1, 1)
+    assert settings.compression_args == {"level": 90, "outcolorspace": "YCBCR"}
+    assert settings.subsampling == (2, 1)
     assert settings.lossless is False
 
 
@@ -740,7 +729,7 @@ def test_he_default_jpeg_when_imagecodecs_is_available(tmp_path: Path) -> None:
 
     assert report["options"]["compression"] == "JPEG"
     assert report["options"]["jpeg_quality"] == 90
-    assert report["options"]["jpeg_subsampling"] == "444"
+    assert report["options"]["jpeg_subsampling"] == "422"
     assert report["output_file"]["lossless_compression"] is False
     assert report["verification"]["output_pixels_decodable"] is True
     assert report["verification"]["compression_matches_requested"] is True

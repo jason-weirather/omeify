@@ -15,6 +15,11 @@ DownsampleMethod = Literal["mean", "nearest"]
 JPEGSubsampling = Literal["444", "422", "420", "411"]
 LossyCompressionPolicy = Literal["rgb-only", "non-label"]
 
+DEFAULT_JPEG_QUALITY = 90
+DEFAULT_JPEG_SUBSAMPLING: JPEGSubsampling = "422"
+DEFAULT_RGB_TILE_SIZE = 256
+DEFAULT_SCALAR_TILE_SIZE = 1024
+
 OUTPUT_BYTEORDER: Literal["<", ">"] = "<"
 JPEG_SUBSAMPLING_FACTORS: dict[JPEGSubsampling, tuple[int, int]] = {
     "444": (1, 1),
@@ -48,10 +53,10 @@ class WriterSettings:
     """Shared construction settings used by both public OME-TIFF writers."""
 
     output_path: Path
-    compression_name: str
+    compression_name: str | None
     jpeg_quality: int
     jpeg_subsampling: JPEGSubsampling
-    tile_size: int
+    tile_size: int | None
     pyramid_levels: int | None
     max_workers: int
     display_uuid: bool
@@ -68,7 +73,7 @@ class WriterSettings:
         compression: str | None,
         jpeg_quality: int,
         jpeg_subsampling: JPEGSubsampling,
-        tile_size: int,
+        tile_size: int | None,
         pyramid_levels: int | None,
         max_workers: int | None,
         display_uuid: bool,
@@ -79,9 +84,7 @@ class WriterSettings:
     ) -> WriterSettings:
         """Validate public writer options into one authoritative record."""
 
-        compression_name = "LZW" if compression is None else compression
-        if not isinstance(compression_name, str) or not compression_name.strip():
-            raise ValueError("compression must be a non-empty string or None")
+        compression_name = normalize_compression_name(compression)
         if isinstance(jpeg_quality, bool) or not isinstance(jpeg_quality, int):
             raise TypeError("jpeg_quality must be an integer")
         if not 1 <= jpeg_quality <= 100:
@@ -89,7 +92,7 @@ class WriterSettings:
         if jpeg_subsampling not in JPEG_SUBSAMPLING_FACTORS:
             choices = ", ".join(JPEG_SUBSAMPLING_FACTORS)
             raise ValueError(f"jpeg_subsampling must be one of: {choices}")
-        normalized_tile_size = validate_tile_size(tile_size)
+        normalized_tile_size = None if tile_size is None else validate_tile_size(tile_size)
         normalized_pyramid_levels = validate_pyramid_levels(pyramid_levels)
         normalized_workers = validate_max_workers(max_workers)
         if not isinstance(display_uuid, bool):
@@ -101,7 +104,7 @@ class WriterSettings:
         )
         return cls(
             output_path=Path(output_path),
-            compression_name=compression_name.strip(),
+            compression_name=compression_name,
             jpeg_quality=jpeg_quality,
             jpeg_subsampling=jpeg_subsampling,
             tile_size=normalized_tile_size,
@@ -115,6 +118,33 @@ class WriterSettings:
                 None if cache_directory is None else Path(cache_directory)
             ),
         )
+
+
+def normalize_compression_name(value: str | None) -> str | None:
+    """Keep automatic compression unresolved until an image type is known."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("compression must be a non-empty string or None")
+    return value.strip()
+
+
+def resolve_compression_name(image_type: ImageType, value: str | None) -> str:
+    """Use JPEG for RGB and lossless LZW otherwise, unless explicitly overridden."""
+
+    normalized = normalize_compression_name(value)
+    if normalized is not None:
+        return normalized
+    return "JPEG" if image_type == "rgb" else "LZW"
+
+
+def resolve_tile_size(image_type: ImageType, value: int | None) -> int:
+    """Resolve per-image tiling without changing a supplied tile size."""
+
+    if value is not None:
+        return validate_tile_size(value)
+    return DEFAULT_RGB_TILE_SIZE if image_type == "rgb" else DEFAULT_SCALAR_TILE_SIZE
 
 
 def normalize_software_tag(software: str | None) -> str:
@@ -190,7 +220,7 @@ def compression_settings(
             # photometric="rgb" describes the INPUT to tifffile, not necessarily
             # the JPEG stream. Its default output is YCbCr, even at 4:4:4, which
             # can trigger a second color conversion in Bio-Formats. Encode true
-            # RGB at 4:4:4; only explicitly subsampled output uses YCbCr. tifffile
+            # RGB at 4:4:4; subsampled output (default 4:2:2) uses YCbCr. tifffile
             # uses outcolorspace for both the encoder and the TIFF photometric.
             args["outcolorspace"] = "RGB" if jpeg_subsampling == "444" else "YCBCR"
         return CompressionSettings(
