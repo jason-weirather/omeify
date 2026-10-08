@@ -144,6 +144,15 @@ mode, and source XY offsets. A crop's local `(0,0)` maps to that source offset. 
 filename or arbitrary source annotation properties are copied into this metadata.
 Retain the original GeoJSON for polygon geometry and other annotation properties.
 
+**Privacy when sharing crops:** ROI names are retained in OME series names and
+in the embedded crop record. `--shatter by_name` also uses those names in output
+filenames; `--shatter by_index` avoids those names in filenames but does not
+remove them from embedded metadata. An ROI labeled with a patient or specimen
+identifier can therefore remain in a cropped TIFF. Rename sensitive ROIs in
+the GeoJSON before exporting, and review channel names and image pixels
+separately. See
+[metadata handling by operation](../README.md#metadata-handling-by-operation).
+
 ## Crop 0.20 migration
 
 The new default is deliberately **one requested file**, replacing name-based
