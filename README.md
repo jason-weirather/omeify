@@ -19,9 +19,7 @@ file format.
 Metadata minimization is an important step when preparing an image for
 deidentification review, but **it does not deidentify or certify the image**.
 Retained channel names and image pixels (including burned-in labels) still
-require independent review before sharing. See
-[metadata handling by operation](#metadata-handling-by-operation) for what
-each command adds or exposes.
+require independent review before sharing.
 
 The file is the common ground. Convert once and use an OME-aware application such
 as **QuPath**, read the result with **tifffile**, or build on Omeify's own regional
@@ -64,11 +62,11 @@ rules for describing it do not depend on which supported input supplied it.
 | Aspect | Omeify's output contract |
 |---|---|
 | Container | A self-contained, little-endian BigTIFF with OME 2016-06 XML. No external OME companion file is needed to locate the written pixels. |
-| Image layout | Two-dimensional scalar `YX`, planar multiplex `CYX`, or interleaved `uint8` RGB `YXS`. Scalar channels are distinct from the three samples of one logical RGB channel. |
-| Numeric fidelity | `convert` preserves the base image's numeric dtype and scale. Lossless encoding preserves base sample values; JPEG re-encodes them. Deliberate dtype or float-precision changes belong to `mutate` or an explicitly configured library operation. |
+| Image layout | Single-plane images (`YX`), multiplex channel stacks (`CYX`), or interleaved RGB (`YXS`). RGB has three color samples per pixel, not three fluorescence channels. |
+| Numeric fidelity | `convert` preserves the base image's dtype and intensity scale. **Only RGB is restricted to `uint8`**; scalar and multiplex images support other integer and floating-point types, including `uint16`, `float32`, and `float64`. Lossless encoding preserves base values; JPEG is lossy. Explicit dtype or precision changes belong to `mutate` or a configured library operation. |
 | Calibration | X and Y physical pixel sizes are required for writing and serialized in **µm**. OME sizes and TIFF resolution tags are checked against the intended calibration. An override must be supplied explicitly when source calibration is unavailable. |
 | Pyramids | Tiled reduced resolutions are rebuilt as SubIFDs, not copied from a vendor pyramid. Mean reduction uses a defined 2x policy; explicitly typed label images require nearest-neighbor reduction and lossless storage. |
-| Metadata | A new OME-XML header is generated from the permitted fields below. Arbitrary source descriptions are not copied wholesale. Cropping adds region annotations, as described [below](#metadata-handling-by-operation). |
+| Metadata | A new OME-XML header is built from permitted fields, without copying arbitrary vendor descriptions. Crop outputs also record region names and source-image coordinates. |
 | Installation | OME schema/profile validation and output readback checks precede atomic installation. A failed write or verification does not replace an existing destination with an incomplete TIFF. |
 
 Pyramid construction is automatic until the image fits within one output tile,
@@ -141,24 +139,13 @@ and link companion specimen, reagent, processing, and analysis metadata through
 your study's own data-management system. Minimal means sufficient and deliberate
 at this boundary, not that the experiment's other metadata is unimportant.
 
-### Metadata handling by operation
-
-These distinctions describe what an operation writes into a new OME-TIFF or,
-for `inspect`, what its report exposes. They are **not deidentification grades**.
-JSON reports are separate diagnostic artifacts and may contain source paths and
-other sensitive details.
-
-| Command | Metadata treatment | What to review before sharing |
-|---|---|---|
-| `convert` | Builds a minimized OME-XML header without copying arbitrary source descriptions. | Retained channel names and image pixels, including burned-in labels. |
-| `mutate` | Uses the same minimized header policy while intentionally changing pixel values or precision. | Retained channel names and pixels; the separate mutation report if shared. |
-| `crop` | Builds a minimized header **and** embeds region names, original-image coordinates, and offsets. Region names also appear in OME series names. | ROI names (including filenames with `--shatter by_name`), coordinates, channel names, and pixels. |
-| `inspect` | Does **not** minimize or rewrite the source image; reports its existing metadata. | The inspection report, which may expose original vendor fields, filenames, paths, and identifiers. |
-
-**Metadata minimization is not deidentification or certification.** Omeify does
-not check pixels for burned-in identifiers or determine whether retained names
-are sensitive. Review image content, remaining metadata, and diagnostic
-artifacts under the applicable deidentification and data-sharing process.
+**Before sharing:** `convert` and `mutate` write the minimized OME header
+described above. `crop` does too, but also stores ROI names and source-image
+coordinates in the output TIFF ([crop privacy details](docs/regions.md#privacy-when-sharing-crops)).
+`inspect` reports the original metadata; it does not minimize or rewrite it.
+Review retained names, image pixels (including burned-in labels), and separate
+JSON reports as part of a deidentification process. Omeify does not certify an
+image as deidentified.
 
 ## Installation
 
