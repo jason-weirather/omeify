@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/conversion_report.schema.json",
+  "title": "Conversion report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "ome",
+    "output_file",
+    "image",
+    "pyramid",
+    "verification",
+    "miti_header",
+    "input_file",
+    "options",
+    "conversion_stats",
+    "versions"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.convert/1"
+    },
+    "ome": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/ome"
+    },
+    "output_file": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/output_file"
+    },
+    "image": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/image"
+    },
+    "pyramid": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/pyramid"
+    },
+    "verification": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/verification"
+    },
+    "miti_header": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/miti"
+    },
+    "input_file": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/input_file"
+    },
+    "options": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/conversion_options"
+    },
+    "conversion_stats": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/stats"
+    },
+    "versions": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/versions"
+    }
+  }
+}

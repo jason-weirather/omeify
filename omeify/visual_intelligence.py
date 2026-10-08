@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Collection
-from importlib.resources import files
 from typing import TYPE_CHECKING, Any
 
 from .intelligence import (
@@ -24,6 +23,7 @@ from .io.base import Image
 from .io.image_metadata import integer
 from .preview import DEFAULT_PREVIEW_QUANTILE, DEFAULT_PREVIEW_SIZE, build_preview
 from .regions import pixel_bounds, rectangle_feature
+from .reports import complete_report, load_schema
 
 if TYPE_CHECKING:
     from sheetbend import Registry
@@ -102,36 +102,6 @@ plain-text caveats and may be empty. No Markdown, code fences, or tables.
 """
 
 
-def _answer_schema() -> dict[str, Any]:
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["status", "paragraphs", "cautions"],
-        "properties": {
-            "status": {"enum": ["answered", "partial", "unavailable"]},
-            "paragraphs": {
-                "type": "array",
-                "maxItems": 16,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["text"],
-                    "properties": {"text": {"type": "string", "minLength": 1, "maxLength": 2000}},
-                },
-            },
-            "cautions": {
-                "type": "array",
-                "maxItems": 16,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["text"],
-                    "properties": {"text": {"type": "string", "minLength": 1, "maxLength": 1000}},
-                },
-            },
-        },
-    }
-
 
 def _materialize_answer(text: str) -> dict[str, Any]:
     if not isinstance(text, str) or not text.strip() or len(text) > _MAX_RESPONSE_CHARS:
@@ -144,15 +114,11 @@ def _materialize_answer(text: str) -> dict[str, Any]:
         raise IntelligenceError(
             "Visual response is not one valid JSON object; no repair was tried"
         ) from exc
-    _validate(response, _answer_schema(), "Visual response")
+    _validate(response, load_schema("visual_answer.schema.json")["$defs"]["answer"], "Visual response")
     if response["status"] != "unavailable" and not response["paragraphs"]:
         raise IntelligenceError("A visual answer must include at least one paragraph unless unavailable")
     return response
 
-
-def _schema() -> dict[str, Any]:
-    resource = files("omeify.schemas").joinpath("region_intelligence.schema.json")
-    return json.loads(resource.read_text(encoding="utf-8"))
 
 
 def _size(
@@ -181,7 +147,7 @@ def _materialize(
         raise IntelligenceError(
             "Visual response is not one valid JSON object; no repair was tried"
         ) from exc
-    _validate(response, _schema(), "Visual response")
+    _validate(response, load_schema("region_intelligence.schema.json"), "Visual response")
     if (response["status"] == "located") != bool(response["regions"]):
         raise IntelligenceError("Visual response status and region count disagree")
     features = []
@@ -292,12 +258,12 @@ def answer_visual_question(
     png = imagecodecs.png_encode(pixels)
     text, source_info, scopes = _request_text(
         {"question": question, "context": context},
-        system=_VISUAL_QUESTION_SYSTEM, schema=_model_schema_projection(_answer_schema(), {}),
+        system=_VISUAL_QUESTION_SYSTEM, schema=_model_schema_projection(load_schema("visual_answer.schema.json")["$defs"]["answer"], {}),
         registry=registry, source_name=source_name, model_name=model_name,
         allowed_scopes=scopes, max_output_tokens=max_output_tokens, image_png=png,
     )
     answer = _materialize_answer(text)
-    return {
+    report = {
         "schema": "omeify.visual_answer/1",
         "series": series,
         "image_size": [width, height],
@@ -307,6 +273,7 @@ def answer_visual_question(
         "allowed_scopes": list(scopes),
         "preview": context,
     }
+    return complete_report(report, "visual_answer.schema.json")
 
 
 def locate_regions(
@@ -344,12 +311,12 @@ def locate_regions(
     text, source_info, scopes = _request_text(
         {"question": question, "context": context,
          "roi_size_px": None if roi_size is None else list(roi_size)},
-        system=_SYSTEM, schema=_model_schema_projection(_schema(), {}),
+        system=_SYSTEM, schema=_model_schema_projection(load_schema("region_intelligence.schema.json"), {}),
         registry=registry, source_name=source_name, model_name=model_name,
         allowed_scopes=scopes, max_output_tokens=max_output_tokens, image_png=png,
     )
     features, status, message = _materialize(text, width=width, height=height, roi_size=roi_size)
-    return {
+    report = {
         "type": "FeatureCollection", "features": features,
         "omeify": {
             "schema": "omeify.visual_regions/1", "coordinate_system": "level0_pixels",
@@ -358,3 +325,4 @@ def locate_regions(
             "source": source_info, "allowed_scopes": list(scopes), "preview": context,
         },
     }
+    return complete_report(report, "visual_regions.schema.json")

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/multi_series_report.schema.json",
+  "title": "Multi-series write report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "ome",
+    "miti_header",
+    "output_file",
+    "series",
+    "options",
+    "provenance",
+    "verification"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.multi_series/1"
+    },
+    "ome": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/ome"
+    },
+    "miti_header": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/miti"
+    },
+    "output_file": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/multi_output_file"
+    },
+    "series": {
+      "type": "array",
+      "items": {
+        "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/series"
+      },
+      "minItems": 1
+    },
+    "options": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/multi_options"
+    },
+    "provenance": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "namespace",
+            "value"
+          ],
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "minLength": 1
+            },
+            "value": {
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "verification": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/multi_verification"
+    }
+  }
+}

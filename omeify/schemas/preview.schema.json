@@ -1,0 +1,364 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/preview.schema.json",
+  "title": "Bounded display-preview context",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "width",
+    "height",
+    "base_width",
+    "base_height",
+    "base_pixels_per_preview_pixel_xy",
+    "origin",
+    "x_direction",
+    "y_direction",
+    "source_level",
+    "source_downsample_yx",
+    "resampling",
+    "image_type",
+    "channel_selection",
+    "contrast",
+    "clip_quantile",
+    "nonfinite_source_samples_omitted",
+    "empty_preview_bins",
+    "microns_per_pixel_xy",
+    "field_of_view_um_xy"
+  ],
+  "properties": {
+    "width": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "base_width": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "base_height": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "base_pixels_per_preview_pixel_xy": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "origin": {
+      "const": "top_left"
+    },
+    "x_direction": {
+      "const": "right"
+    },
+    "y_direction": {
+      "const": "down"
+    },
+    "source_level": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_downsample_yx": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "resampling": {
+      "const": "pixel_center_binned_mean"
+    },
+    "image_type": {
+      "enum": [
+        "rgb",
+        "multichannel"
+      ]
+    },
+    "channel_selection": {
+      "enum": [
+        "rgb",
+        "explicit",
+        "unique_dapi",
+        "channel_zero",
+        "explicit_composite"
+      ]
+    },
+    "contrast": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "low",
+            "high"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "explicit",
+                "overview_min_upper_quantile_with_max_fallback"
+              ]
+            },
+            "low": {
+              "type": "number"
+            },
+            "high": {
+              "type": "number"
+            },
+            "upper_quantile": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "explicit"
+                  }
+                }
+              },
+              "then": {
+                "not": {
+                  "required": [
+                    "upper_quantile"
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "upper_quantile"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "clip_quantile": {
+      "anyOf": [
+        {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nonfinite_source_samples_omitted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "empty_preview_bins": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "microns_per_pixel_xy": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "field_of_view_um_xy": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "channel_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "channel_name": {
+      "type": "string"
+    },
+    "channel_name_truncated": {
+      "type": "boolean"
+    },
+    "channels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "name",
+          "name_truncated",
+          "color",
+          "color_spec",
+          "contrast"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "name_truncated": {
+            "type": "boolean"
+          },
+          "color": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "color_spec": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contrast": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mode",
+              "low",
+              "high"
+            ],
+            "properties": {
+              "mode": {
+                "enum": [
+                  "explicit",
+                  "overview_min_upper_quantile_with_max_fallback"
+                ]
+              },
+              "low": {
+                "type": "number"
+              },
+              "high": {
+                "type": "number"
+              },
+              "upper_quantile": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 1
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "const": "explicit"
+                    }
+                  }
+                },
+                "then": {
+                  "not": {
+                    "required": [
+                      "upper_quantile"
+                    ]
+                  }
+                },
+                "else": {
+                  "required": [
+                    "upper_quantile"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "minItems": 1
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "channels"
+      ],
+      "properties": {
+        "channel_selection": {
+          "const": "explicit_composite"
+        },
+        "image_type": {
+          "const": "multichannel"
+        },
+        "contrast": {
+          "const": null
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "channel_index"
+            ]
+          },
+          {
+            "required": [
+              "channel_name"
+            ]
+          },
+          {
+            "required": [
+              "channel_name_truncated"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "channel_index",
+        "channel_name",
+        "channel_name_truncated"
+      ],
+      "not": {
+        "required": [
+          "channels"
+        ]
+      },
+      "properties": {
+        "channel_selection": {
+          "not": {
+            "const": "explicit_composite"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/visual_answer.schema.json",
+  "title": "Visual advisory answer report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "series",
+    "image_size",
+    "question",
+    "source",
+    "allowed_scopes",
+    "preview",
+    "answer"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.visual_answer/1"
+    },
+    "series": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "image_size": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "question": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/metadata_intelligence.schema.json#/$defs/question"
+    },
+    "source": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/metadata_intelligence.schema.json#/properties/source"
+    },
+    "allowed_scopes": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/metadata_intelligence.schema.json#/properties/allowed_scopes"
+    },
+    "preview": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/preview.schema.json"
+    },
+    "answer": {
+      "$ref": "#/$defs/answer"
+    }
+  },
+  "$defs": {
+    "answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "paragraphs",
+        "cautions"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "answered",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "paragraphs": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            }
+          }
+        },
+        "cautions": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "answered",
+                  "partial"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "paragraphs": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

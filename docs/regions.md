@@ -46,7 +46,10 @@ Exactly one of `--bounds` or `--geojson` is required. Without `--shatter`,
 `-o` / `--output` is the **exact destination filename**, not a directory. One or
 many ROIs go into that one file. No extension, index, or model-generated suffix
 is added. Prefer an explicit `.ome.tif` or `.ome.tiff` filename for viewers.
-The crop report goes to stdout; progress goes to stderr.
+Crop prints a short completion line by default; progress goes to stderr.
+Use `--output-json FILE` to save its full report, `--output-json -` for JSON-only
+stdout, or `-vvv` for the diagnostic report. [Current report contracts](reports.md)
+use crop report `omeify.crop/3` and embedded provenance `omeify.crop_provenance/1`.
 
 Supported inputs are a Feature, FeatureCollection, bare Polygon/MultiPolygon,
 polygon GeometryCollection, or a Feature array. `--geojson -` reads stdin.

@@ -28,6 +28,8 @@ def _source_tree_version() -> str | None:
     try:
         with pyproject_path.open("rb") as handle:
             project = tomllib.load(handle)["project"]
+        if not isinstance(project, dict) or project.get("name") != _DISTRIBUTION_NAME:
+            return None
         value = project["version"]
     except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
         return None
@@ -56,6 +58,7 @@ def get_version_info() -> dict[str, Any]:
         "imagecodecs": _distribution_version("imagecodecs"),
         "numpy": _distribution_version("numpy"),
         "click": _distribution_version("click"),
+        "tqdm": _distribution_version("tqdm"),
         "lxml": _distribution_version("lxml"),
         "jsonschema": _distribution_version("jsonschema"),
         "ome-schema": _distribution_version("ome-schema"),

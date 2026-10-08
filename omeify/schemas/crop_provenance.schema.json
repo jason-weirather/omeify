@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/crop_provenance.schema.json",
+  "title": "Embedded crop provenance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "coordinate_system",
+    "shatter",
+    "source_series",
+    "source_size",
+    "crop_mode",
+    "regions"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.crop_provenance/1"
+    },
+    "coordinate_system": {
+      "const": "level0_pixels"
+    },
+    "shatter": {
+      "enum": [
+        null,
+        "by_index",
+        "by_name"
+      ]
+    },
+    "source_series": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_size": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "crop_mode": {
+      "const": "bounding_rectangle"
+    },
+    "regions": {
+      "type": "array",
+      "items": {
+        "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/crop_region"
+      },
+      "minItems": 1
+    }
+  }
+}

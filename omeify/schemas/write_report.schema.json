@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/write_report.schema.json",
+  "title": "Single-image write report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "ome",
+    "output_file",
+    "image",
+    "pyramid",
+    "verification",
+    "miti_header",
+    "options"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.write/1"
+    },
+    "ome": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/ome"
+    },
+    "output_file": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/output_file"
+    },
+    "image": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/image"
+    },
+    "pyramid": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/pyramid"
+    },
+    "verification": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/verification"
+    },
+    "miti_header": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/miti"
+    },
+    "options": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/write_options"
+    }
+  }
+}

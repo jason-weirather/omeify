@@ -1,4 +1,4 @@
-"""Optional, evidence-backed interpretation of microscopy metadata through Sheetbend.
+"""Optional, evidence-backed interpretation of microscopy metadata.
 
 Importing this module does not import Sheetbend or LLM, load configuration, or
 contact an endpoint. ``summarize_metadata`` explicitly summarizes or answers a question.
@@ -174,7 +174,7 @@ _MODEL_SCHEMA_OMIT = frozenset({
     "$schema", "$id", "$defs", "title", "description",
     "pattern", "minLength", "maxLength", "minItems", "maxItems", "uniqueItems",
     "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
-    "minProperties", "maxProperties",
+    "minProperties", "maxProperties", "allOf", "if", "then", "else",
 })
 
 
@@ -537,7 +537,7 @@ def summarize_metadata(
     content = _parse_response(text, records, question=question is not None)
     result = {
         "schema": "omeify.schemas/metadata_intelligence.schema.json",
-        "schema_version": "1.1" if question is None else "1.2",
+        "schema_version": "2.0",
         "prompt_version": _PROMPT_VERSION if question is None else _QUESTION_PROMPT_VERSION,
         "source": source_info,
         "allowed_scopes": list(scopes), "coverage": deepcopy(coverage),

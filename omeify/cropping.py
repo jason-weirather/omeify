@@ -16,6 +16,7 @@ from .io.ome_tiff_reader import OMETiffLabelReader
 from .io.ome_tiff_writer import JPEGSubsampling
 from .io.pixel_size import PixelSize
 from .io.source_reader import InputType, source_reader
+from .path_safety import paths_alias
 from .regions import (
     MAX_GEOJSON_CHARS,
     ShatterMode,
@@ -25,12 +26,37 @@ from .regions import (
     pixel_bounds,
     rectangle_feature,
 )
+from .reports import complete_report
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _same_path(a: Path, b: Path) -> bool:
-    return a.resolve() == b.resolve() or (a.exists() and b.exists() and a.samefile(b))
+def load_crop_document(
+    *, bounds: Sequence[int] | None = None,
+    geojson: Mapping[str, Any] | list[Any] | str | Path | None = None,
+) -> tuple[Any, tuple[Path, ...]]:
+    """Load one bounded crop input and report any auxiliary file it depends on."""
+    if (bounds is None) == (geojson is None):
+        raise ValueError("Choose exactly one of bounds or geojson")
+    protected: list[Path] = []
+    if bounds is not None:
+        if len(bounds) != 4:
+            raise ValueError("bounds must contain X0 Y0 X1 Y1")
+        # Permit negative integer bounds only for explicit clipping.
+        if any(isinstance(v, bool) or not isinstance(v, Integral) for v in bounds):
+            raise TypeError("Explicit bounds must be integers")
+        bounds = tuple(int(v) for v in bounds)
+        if bounds[0] >= bounds[2] or bounds[1] >= bounds[3]:
+            raise ValueError("Explicit bounds must have X0 < X1 and Y0 < Y1")
+        document = rectangle_feature(bounds, name="")
+    elif isinstance(geojson, (str, Path)):
+        path = Path(geojson)
+        with path.open(encoding="utf-8") as handle:
+            document = load_geojson(handle.read(MAX_GEOJSON_CHARS + 1))
+        protected.append(path)
+    else:
+        document = geojson
+    return document, tuple(protected)
 
 
 def crop(
@@ -64,8 +90,6 @@ def crop(
     installs atomically; a multiple-file export is NOT an all-or-nothing transaction.
     Writer defaults remain authoritative, including lossy RGB JPEG 90 / 422 / 512.
     """
-    if (bounds is None) == (geojson is None):
-        raise ValueError("Choose exactly one of bounds or geojson")
     series = integer(series, "series")
     if any(not isinstance(v, bool) for v in (clip, labels, overwrite)):
         raise TypeError("clip, labels, and overwrite must be booleans")
@@ -74,24 +98,8 @@ def crop(
     if pixel_size is not None and not isinstance(pixel_size, PixelSize):
         raise TypeError("pixel_size must be a PixelSize")
     source_path = Path(input_path)
-    protected = [source_path]
-    if bounds is not None:
-        if len(bounds) != 4:
-            raise ValueError("bounds must contain X0 Y0 X1 Y1")
-        # Permit negative integer bounds only for explicit clipping.
-        if any(isinstance(v, bool) or not isinstance(v, Integral) for v in bounds):
-            raise TypeError("Explicit bounds must be integers")
-        bounds = tuple(int(v) for v in bounds)
-        if bounds[0] >= bounds[2] or bounds[1] >= bounds[3]:
-            raise ValueError("Explicit bounds must have X0 < X1 and Y0 < Y1")
-        document = rectangle_feature(bounds, name="")
-    elif isinstance(geojson, (str, Path)):
-        path = Path(geojson)
-        with path.open(encoding="utf-8") as handle:
-            document = load_geojson(handle.read(MAX_GEOJSON_CHARS + 1))
-        protected.append(path)
-    else:
-        document = geojson
+    document, auxiliary = load_crop_document(bounds=bounds, geojson=geojson)
+    protected = [source_path, *auxiliary]
     regions = parse_regions(document)
     outputs = group_outputs(regions, output_path, shatter=shatter)
     index_width = max(2, len(str(len(regions))))
@@ -124,9 +132,9 @@ def crop(
         planned_paths: list[Path] = []
         # Preflight the WHOLE batch, including input aliases and dangling symlinks.
         for path, members in outputs:
-            if any(_same_path(path, p) for p in protected):
+            if any(paths_alias(path, p) for p in protected):
                 raise ValueError("A crop destination would replace the image or GeoJSON input")
-            if any(_same_path(path, p) for p in planned_paths):
+            if any(paths_alias(path, p) for p in planned_paths):
                 raise ValueError("Crop destinations alias each other")
             if path.is_dir():
                 raise IsADirectoryError(path)
@@ -159,13 +167,16 @@ def crop(
                                         or region.bounds[2] > width or region.bounds[3] > height),
                             "source_offset_xy": [x0, y0],
                         })
-                    write_report = writer.write(entries, provenance={
-                        "schema": "omeify.crop/2", "coordinate_system": "level0_pixels",
+                    provenance = complete_report({
+                        "coordinate_system": "level0_pixels",
                         "shatter": shatter,
                         "source_series": series, "source_size": [width, height],
                         "crop_mode": "bounding_rectangle", "regions": roi_records,
-                    })
+                    }, "crop_provenance.schema.json")
+                    write_report = writer.write(entries, provenance=provenance)
                 results.append({"path": str(writer.path), "regions": roi_records,
                                 "write_report": write_report})
-    return {"schema": "omeify.crop/2", "input_path": str(source_path), "source_series": series,
+    report = {"input_path": str(source_path), "source_series": series,
             "output_path": str(output_path), "shatter": shatter, "clip": clip, "outputs": results}
+
+    return complete_report(report, "crop_report.schema.json")

@@ -1,0 +1,1119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/mutation_report.schema.json",
+  "title": "Explicit numeric mutation report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "operation",
+    "ome",
+    "output_file",
+    "image",
+    "pyramid",
+    "verification",
+    "miti_header",
+    "input_file",
+    "options",
+    "mutation_stats",
+    "versions"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.mutate/1"
+    },
+    "operation": {
+      "enum": [
+        "dtype",
+        "float32_precision"
+      ]
+    },
+    "ome": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/ome"
+    },
+    "output_file": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/output_file"
+    },
+    "image": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/image"
+    },
+    "pyramid": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/pyramid"
+    },
+    "verification": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/verification"
+    },
+    "miti_header": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/miti"
+    },
+    "input_file": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/input_file"
+    },
+    "options": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/mutation_options"
+    },
+    "mutation_stats": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/stats"
+    },
+    "versions": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/versions"
+    },
+    "dtype_mutation": {
+      "$ref": "#/$defs/dtype_mutation"
+    },
+    "float_precision_mutation": {
+      "$ref": "#/$defs/float_precision_mutation"
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "dtype_mutation"
+      ],
+      "not": {
+        "required": [
+          "float_precision_mutation"
+        ]
+      },
+      "properties": {
+        "operation": {
+          "const": "dtype"
+        },
+        "options": {
+          "required": [
+            "dtype",
+            "range_mode",
+            "sample_pixels_per_channel",
+            "auto_max_normalized_rmse"
+          ],
+          "properties": {
+            "operation": {
+              "const": "dtype"
+            }
+          }
+        }
+      }
+    },
+    {
+      "required": [
+        "float_precision_mutation"
+      ],
+      "not": {
+        "required": [
+          "dtype_mutation"
+        ]
+      },
+      "properties": {
+        "operation": {
+          "const": "float32_precision"
+        },
+        "options": {
+          "properties": {
+            "operation": {
+              "const": "float32_precision"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "dtype"
+                ]
+              },
+              {
+                "required": [
+                  "range_mode"
+                ]
+              },
+              {
+                "required": [
+                  "sample_pixels_per_channel"
+                ]
+              },
+              {
+                "required": [
+                  "auto_max_normalized_rmse"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "dtype_mutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "source_dtype",
+        "target_dtype",
+        "range_mode",
+        "rounding",
+        "clipping_policy",
+        "automatic_range_policy",
+        "channels"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "1.0"
+        },
+        "source_dtype": {
+          "enum": [
+            "float32",
+            "float64"
+          ]
+        },
+        "target_dtype": {
+          "enum": [
+            "uint8",
+            "uint16"
+          ]
+        },
+        "range_mode": {
+          "enum": [
+            "auto",
+            "preserve",
+            "full"
+          ]
+        },
+        "rounding": {
+          "const": "nearest, ties to even"
+        },
+        "clipping_policy": {
+          "const": "none for finite source values"
+        },
+        "automatic_range_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "near_integer_tolerance",
+            "moderate_near_integer_fraction",
+            "moderate_enrichment_over_uniform_fractional_parts",
+            "strong_near_integer_fraction",
+            "strong_enrichment_over_uniform_fractional_parts",
+            "maximum_unit_rounding_normalized_rmse",
+            "decision"
+          ],
+          "properties": {
+            "near_integer_tolerance": {
+              "type": "number",
+              "minimum": 0
+            },
+            "moderate_near_integer_fraction": {
+              "type": "number",
+              "minimum": 0
+            },
+            "moderate_enrichment_over_uniform_fractional_parts": {
+              "type": "number",
+              "minimum": 0
+            },
+            "strong_near_integer_fraction": {
+              "type": "number",
+              "minimum": 0
+            },
+            "strong_enrichment_over_uniform_fractional_parts": {
+              "type": "number",
+              "minimum": 0
+            },
+            "maximum_unit_rounding_normalized_rmse": {
+              "type": "number",
+              "minimum": 0
+            },
+            "decision": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "channels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "channel_index",
+              "channel_name",
+              "source",
+              "integer_lattice_evidence",
+              "automatic_preserve_assessment",
+              "mapping",
+              "anticipated_loss"
+            ],
+            "properties": {
+              "channel_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "channel_name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "dtype",
+                  "total_pixels",
+                  "finite_pixels",
+                  "nan_pixels",
+                  "positive_infinity_pixels",
+                  "negative_infinity_pixels",
+                  "negative_pixels",
+                  "zero_pixels",
+                  "nonzero_pixels",
+                  "sample_pixels",
+                  "minimum",
+                  "maximum",
+                  "nearest_integer_minimum",
+                  "nearest_integer_maximum",
+                  "sample_stride",
+                  "sample_percentiles",
+                  "sample_nonzero_percentiles",
+                  "smallest_unsigned_dtype_after_unit_rounding",
+                  "sample_nonzero_p0_1_to_p99_9_smallest_unsigned_dtype_after_unit_rounding",
+                  "integer_code_span_bits"
+                ],
+                "properties": {
+                  "dtype": {
+                    "enum": [
+                      "float32",
+                      "float64"
+                    ]
+                  },
+                  "total_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "finite_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "nan_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "positive_infinity_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "negative_infinity_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "negative_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "zero_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "nonzero_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sample_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "minimum": {
+                    "type": "number"
+                  },
+                  "maximum": {
+                    "type": "number"
+                  },
+                  "nearest_integer_minimum": {
+                    "type": "number"
+                  },
+                  "nearest_integer_maximum": {
+                    "type": "number"
+                  },
+                  "sample_stride": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sample_percentiles": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "p0_1",
+                      "p1",
+                      "p50",
+                      "p99",
+                      "p99_9"
+                    ],
+                    "properties": {
+                      "p0_1": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "p1": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "p50": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "p99": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "p99_9": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "sample_nonzero_percentiles": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "p0_1",
+                      "p1",
+                      "p50",
+                      "p99",
+                      "p99_9"
+                    ],
+                    "properties": {
+                      "p0_1": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "p1": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "p50": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "p99": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "p99_9": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "smallest_unsigned_dtype_after_unit_rounding": {
+                    "enum": [
+                      null,
+                      "uint8",
+                      "uint16",
+                      "uint32",
+                      "uint64"
+                    ]
+                  },
+                  "sample_nonzero_p0_1_to_p99_9_smallest_unsigned_dtype_after_unit_rounding": {
+                    "enum": [
+                      null,
+                      "uint8",
+                      "uint16",
+                      "uint32",
+                      "uint64"
+                    ]
+                  },
+                  "integer_code_span_bits": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  }
+                }
+              },
+              "integer_lattice_evidence": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "classification",
+                  "interpretation",
+                  "classification_basis",
+                  "evidence_sample_pixels",
+                  "evidence_near_integer_pixels",
+                  "full_resolution_nonzero_pixels",
+                  "full_resolution_near_integer_pixels",
+                  "sample_pixels_before_background_exclusion",
+                  "background_pixels_excluded_from_sample",
+                  "rounded_code_span",
+                  "near_integer_tolerance",
+                  "uniform_fraction_expectation",
+                  "evidence_near_integer_fraction",
+                  "evidence_near_integer_enrichment",
+                  "full_resolution_near_integer_fraction",
+                  "unit_rounding_mae",
+                  "unit_rounding_rmse",
+                  "unit_rounding_normalized_rmse_of_nonzero_p0_1_to_p99_9_span",
+                  "unit_rounding_maximum_absolute_error",
+                  "sample_nonzero_robust_lower_p0_1",
+                  "sample_nonzero_robust_upper_p99_9",
+                  "sample_nonzero_robust_span",
+                  "fractional_phase_concentration",
+                  "unit_rounding_sample_p99_absolute_error",
+                  "classification_thresholds"
+                ],
+                "properties": {
+                  "classification": {
+                    "enum": [
+                      "inconclusive",
+                      "weak",
+                      "moderate",
+                      "strong"
+                    ]
+                  },
+                  "interpretation": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "classification_basis": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "evidence_sample_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "evidence_near_integer_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "full_resolution_nonzero_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "full_resolution_near_integer_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sample_pixels_before_background_exclusion": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "background_pixels_excluded_from_sample": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "rounded_code_span": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "near_integer_tolerance": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "uniform_fraction_expectation": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "evidence_near_integer_fraction": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "evidence_near_integer_enrichment": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "full_resolution_near_integer_fraction": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "unit_rounding_mae": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "unit_rounding_rmse": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "unit_rounding_normalized_rmse_of_nonzero_p0_1_to_p99_9_span": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "unit_rounding_maximum_absolute_error": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_nonzero_robust_lower_p0_1": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_nonzero_robust_upper_p99_9": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_nonzero_robust_span": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "fractional_phase_concentration": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "unit_rounding_sample_p99_absolute_error": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "classification_thresholds": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "moderate_near_integer_fraction",
+                      "moderate_enrichment",
+                      "strong_near_integer_fraction",
+                      "strong_enrichment"
+                    ],
+                    "properties": {
+                      "moderate_near_integer_fraction": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "moderate_enrichment": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "strong_near_integer_fraction": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "strong_enrichment": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              },
+              "automatic_preserve_assessment": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "nearest_integer_range_fits_target",
+                  "strong_integer_lattice_evidence",
+                  "unit_rounding_normalized_rmse",
+                  "maximum_normalized_rmse",
+                  "unit_rounding_loss_within_limit",
+                  "preserve_source_scale"
+                ],
+                "properties": {
+                  "nearest_integer_range_fits_target": {
+                    "type": "boolean"
+                  },
+                  "strong_integer_lattice_evidence": {
+                    "type": "boolean"
+                  },
+                  "unit_rounding_normalized_rmse": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maximum_normalized_rmse": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "unit_rounding_loss_within_limit": {
+                    "type": "boolean"
+                  },
+                  "preserve_source_scale": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "mapping": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "formula",
+                  "rounding",
+                  "offset_source_units",
+                  "source_lower",
+                  "source_upper",
+                  "quantum_source_units_per_output_code",
+                  "target_dtype",
+                  "target_code_minimum",
+                  "target_code_maximum",
+                  "exact_output_code_minimum_from_source_bounds",
+                  "exact_output_code_maximum_from_source_bounds",
+                  "exact_output_code_span_from_source_bounds",
+                  "exact_output_code_span_bits",
+                  "target_code_span_fraction_used_by_source_bounds",
+                  "reason"
+                ],
+                "properties": {
+                  "name": {
+                    "enum": [
+                      "identity",
+                      "zero_anchored_linear",
+                      "full_range_linear"
+                    ]
+                  },
+                  "formula": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "rounding": {
+                    "const": "nearest, ties to even"
+                  },
+                  "offset_source_units": {
+                    "type": "number"
+                  },
+                  "source_lower": {
+                    "type": "number"
+                  },
+                  "source_upper": {
+                    "type": "number"
+                  },
+                  "quantum_source_units_per_output_code": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "target_dtype": {
+                    "enum": [
+                      "uint8",
+                      "uint16"
+                    ]
+                  },
+                  "target_code_minimum": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "target_code_maximum": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "exact_output_code_minimum_from_source_bounds": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "exact_output_code_maximum_from_source_bounds": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "exact_output_code_span_from_source_bounds": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "exact_output_code_span_bits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "target_code_span_fraction_used_by_source_bounds": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "anticipated_loss": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "basis",
+                  "sample_pixels",
+                  "clipped_finite_pixels",
+                  "theoretical_maximum_absolute_error_source_units",
+                  "sample_mean_signed_error_source_units",
+                  "sample_mean_absolute_error_source_units",
+                  "sample_root_mean_square_error_source_units",
+                  "sample_p99_absolute_error_source_units",
+                  "sample_maximum_absolute_error_source_units",
+                  "sample_normalized_rmse_of_p0_1_to_p99_9_span",
+                  "sample_nonzero_mean_signed_error_source_units",
+                  "sample_nonzero_mean_absolute_error_source_units",
+                  "sample_nonzero_root_mean_square_error_source_units",
+                  "sample_nonzero_p99_absolute_error_source_units",
+                  "sample_changed_fraction",
+                  "sample_exactly_represented_fraction",
+                  "sample_target_minimum_code_fraction",
+                  "sample_target_maximum_code_fraction",
+                  "sample_nonzero_changed_fraction",
+                  "sample_nonzero_exactly_represented_fraction",
+                  "sample_output_code_minimum",
+                  "sample_output_code_maximum",
+                  "sample_output_code_span",
+                  "sample_distinct_output_codes"
+                ],
+                "properties": {
+                  "basis": {
+                    "const": "deterministic spatial sample"
+                  },
+                  "sample_pixels": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "clipped_finite_pixels": {
+                    "const": 0
+                  },
+                  "theoretical_maximum_absolute_error_source_units": {
+                    "type": "number"
+                  },
+                  "sample_mean_signed_error_source_units": {
+                    "type": "number"
+                  },
+                  "sample_mean_absolute_error_source_units": {
+                    "type": "number"
+                  },
+                  "sample_root_mean_square_error_source_units": {
+                    "type": "number"
+                  },
+                  "sample_p99_absolute_error_source_units": {
+                    "type": "number"
+                  },
+                  "sample_maximum_absolute_error_source_units": {
+                    "type": "number"
+                  },
+                  "sample_normalized_rmse_of_p0_1_to_p99_9_span": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_nonzero_mean_signed_error_source_units": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_nonzero_mean_absolute_error_source_units": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_nonzero_root_mean_square_error_source_units": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_nonzero_p99_absolute_error_source_units": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_changed_fraction": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "sample_exactly_represented_fraction": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "sample_target_minimum_code_fraction": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "sample_target_maximum_code_fraction": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "sample_nonzero_changed_fraction": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_nonzero_exactly_represented_fraction": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_output_code_minimum": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_output_code_maximum": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_output_code_span": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sample_distinct_output_codes": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "float_precision_mutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "source_dtype",
+        "target_dtype",
+        "float32_mantissa_bits",
+        "float_significand_precision_bits",
+        "ome_significant_bits",
+        "rounding",
+        "lossy",
+        "storage_dtype_preserved",
+        "float32_exponent_range_preserved",
+        "description"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "1.0"
+        },
+        "source_dtype": {
+          "const": "float32"
+        },
+        "target_dtype": {
+          "const": "float32"
+        },
+        "float32_mantissa_bits": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 22
+        },
+        "float_significand_precision_bits": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 23
+        },
+        "ome_significant_bits": {
+          "type": "integer",
+          "minimum": 9,
+          "maximum": 31
+        },
+        "rounding": {
+          "const": "nearest, ties to even"
+        },
+        "lossy": {
+          "const": true
+        },
+        "storage_dtype_preserved": {
+          "const": true
+        },
+        "float32_exponent_range_preserved": {
+          "const": true
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

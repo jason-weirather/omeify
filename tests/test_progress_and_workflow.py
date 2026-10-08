@@ -16,7 +16,8 @@ import omeify.dtype_mutation as dtype_mutation_module
 import omeify.mutation as mutation_module
 import omeify.workflow as workflow_module
 from omeify import PixelSize
-from omeify.cli import _CompactLogHandler, main
+from omeify.cli import main
+from omeify.cli_logging import CompactLogHandler
 from omeify.dtype_mutation import analyze_dtype_mutation
 from omeify.io._writer.pyramid import iter_downsampled_tiles, iter_tiles
 from omeify.io.ome_tiff_writer import OMETiffWriter
@@ -47,9 +48,9 @@ def test_progress_logger_reports_start_periodic_progress_and_completion(caplog) 
         progress.update(2)
         progress.finish()
 
-    assert "Synthetic stage [--------------------]   0%" in caplog.text
-    assert "Synthetic stage [##########----------]  50%" in caplog.text
-    assert "Synthetic stage [####################] 100% 00:02" in caplog.text
+    assert "Synthetic stage:   0%" in caplog.text
+    assert "Synthetic stage:  50%" in caplog.text
+    assert "Synthetic stage: 100% 00:02" in caplog.text
     assert "ETA 00:01" in caplog.text
 
 
@@ -71,8 +72,8 @@ def test_tile_iterators_emit_progress_without_changing_pixels(caplog) -> None:
     assert len(tiles) == 4
     np.testing.assert_array_equal(tiles[0], data[:16, :16])
     np.testing.assert_array_equal(tiles[-1], data[16:, 16:])
-    assert "Writing test tiles [--------------------]   0%" in caplog.text
-    assert "Writing test tiles [####################] 100%" in caplog.text
+    assert "Writing test tiles:   0%" in caplog.text
+    assert "Writing test tiles: 100%" in caplog.text
 
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="omeify.io._writer"):
@@ -90,7 +91,7 @@ def test_tile_iterators_emit_progress_without_changing_pixels(caplog) -> None:
 
     assert len(downsampled) == 1
     np.testing.assert_array_equal(downsampled[0], data[::2, ::2])
-    assert "Building test pyramid [####################] 100%" in caplog.text
+    assert "Building test pyramid: 100%" in caplog.text
 
 
 def test_writer_logs_pyramid_final_assembly_verification_and_cleanup(
@@ -141,7 +142,7 @@ def test_writer_logs_pyramid_final_assembly_verification_and_cleanup(
     for message in expected_messages:
         assert message in caplog.text
     assert (
-        "Writing final full-resolution base [####################] 100%"
+        "Writing final full-resolution base: 100%"
         in caplog.text
     )
 
@@ -166,7 +167,7 @@ def test_mutation_analysis_logs_scans_and_maps_each_channel_immediately(
         )
 
     assert len(plans) == 2
-    assert "Scanning mutation channel 1/2 'Integer-like' [" in caplog.text
+    assert "Scanning mutation channel 1/2 'Integer-like':" in caplog.text
     assert "Mutation scan 2/2 complete for 'Continuous'" in caplog.text
     assert "Mutation plan 1/2 for channel [0] 'Integer-like'" in caplog.text
     assert "Mapping decision:" in caplog.text
@@ -324,7 +325,8 @@ def test_cli_verbose_levels(tmp_path: Path, monkeypatch, verbose: int) -> None:
     assert "dependency chatter" not in result.output
     assert json.loads(report_path.read_text(encoding="utf-8")) == {"status": "ok"}
     if verbose == 1:
-        assert result.output == "visible stage log\n"
+        assert "visible stage log\n" in result.output
+        assert "Wrote " in result.output
     else:
         assert re.search(
             r"\d{2}:\d{2}:\d{2} INFO omeify\.test_cli: visible stage log", result.output,
@@ -338,7 +340,7 @@ def test_compact_handler_reuses_one_tty_line_until_progress_finishes() -> None:
             return True
 
     stream = TTYBuffer()
-    handler = _CompactLogHandler()
+    handler = CompactLogHandler()
     handler.setStream(stream)
     logger = logging.Logger("omeify.tests.compact-handler", level=logging.INFO)
     logger.propagate = False
@@ -358,9 +360,9 @@ def test_compact_handler_reuses_one_tty_line_until_progress_finishes() -> None:
 
     rendered = stream.getvalue()
     assert rendered.count("\n") == 1
-    assert rendered.count("\r") == 3
-    assert "Synthetic stage [##########----------]  50%" in rendered
-    assert rendered.rstrip().endswith("100% 00:02")
+    assert rendered.count("\r") >= 3
+    assert "Synthetic stage:  50%" in rendered
+    assert "100%" in rendered and "4/4" in rendered
 
 
 def test_verbose_help_describes_single_and_repeated_levels() -> None:
@@ -368,7 +370,7 @@ def test_verbose_help_describes_single_and_repeated_levels() -> None:
     for command in ("convert", "mutate"):
         result = runner.invoke(main, [command, "--help"])
         assert result.exit_code == 0
-        assert "Show compact stages and progress bars" in result.output
-        assert "timestamps, debug details" in result.output
-        assert "1-second" in result.output
+        assert "compact progress" in result.output
+        assert "timestamped diagnostic logs" in " ".join(result.output.split())
+        assert "-vvv" in result.output
         assert "tracebacks" in result.output

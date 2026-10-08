@@ -27,7 +27,6 @@ def verify_single_output(
         "output_byte_order": None,
         "software_tag_matches": False,
         "byte_order_metadata_matches_tiff": False,
-        "significant_bits_matches_dtype": False,
         "significant_bits_matches_spec": False,
         "tiff_data_mapping_matches": False,
         "channel_sample_layout_matches": False,
@@ -47,9 +46,7 @@ def verify_single_output(
         "base_pixel_values_checked": False,
         "base_pixel_values_match": None,
         "planes_checked": 0,
-        "channels_checked": 0,
         "points_per_plane": 0,
-        "points_per_channel": 0,
     }
     spec = prepared.spec
     with tifffile.TiffFile(output_path) as output:
@@ -85,10 +82,6 @@ def verify_single_output(
                 f"the writer specification {spec.significant_bits}"
             )
         verification["significant_bits_matches_spec"] = True
-        # Retain the historical report key for compatibility. The writer spec
-        # defaults to the dtype width and may deliberately declare fewer
-        # significant bits after float mantissa trimming.
-        verification["significant_bits_matches_dtype"] = True
 
         channels = pixels.findall("./ome:Channel", namespaces=namespace)
         channel_samples = [
@@ -175,7 +168,5 @@ def verify_single_output(
         )
         verification["pixel_verification"] = raster.pixel_coverage()
         verification["planes_checked"] = raster.planes_checked
-        verification["channels_checked"] = spec.size_c
         verification["points_per_plane"] = raster.points_per_plane
-        verification["points_per_channel"] = raster.points_per_plane
     return verification

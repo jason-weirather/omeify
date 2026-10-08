@@ -227,7 +227,7 @@ def test_cli_visual_stdout_and_failure_does_not_replace_report(tmp_path, vision_
     result = runner().invoke(main, geojson_args)
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["type"] == "FeatureCollection"
-    assert "Sheetbend" in result.stderr and "PRIVATE-NAME" not in json.dumps(vision_double["calls"][0][0])
+    assert "bounded preview" in result.stderr and "PRIVATE-NAME" not in json.dumps(vision_double["calls"][0][0])
     vision_double["response"] = visual_answer_response()
     visual_args = [
         "inspect", str(path), "-i", "-q", "Does the DAPI look uneven?", "--visual",

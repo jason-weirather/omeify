@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -9,8 +8,10 @@ from typing import Any
 import click
 
 from omeify import __version__, get_version_info
+from omeify.cli_logging import configure_logging
+from omeify.cli_reporting import emit_operation_report, preflight_report
 from omeify.conversion import RenameChannelsBy, convert
-from omeify.cropping import crop
+from omeify.cropping import crop, load_crop_document
 from omeify.dtype_mutation import (
     DEFAULT_AUTO_MAX_NORMALIZED_RMSE,
     DEFAULT_SAMPLE_PIXELS_PER_CHANNEL,
@@ -27,6 +28,9 @@ from omeify.io._writer.configuration import DEFAULT_JPEG_QUALITY, DEFAULT_JPEG_S
 from omeify.io.pixel_size import PixelSize
 from omeify.io.source_reader import INPUT_TYPES, PLANAR_INPUT_TYPES
 from omeify.mutation import mutate
+from omeify.path_safety import atomic_write_text, check_output_path
+from omeify.regions import group_outputs, parse_regions
+from omeify.terminal import escape_terminal
 
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _INDEX_KEY = re.compile(r"0|[1-9][0-9]*")
@@ -64,7 +68,9 @@ def _load_channel_renames(
     try:
         value: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise click.ClickException(f"Unable to read channel rename JSON {path}: {exc}") from exc
+        raise click.ClickException(escape_terminal(
+            f"Unable to read channel rename JSON {path}: {exc}"
+        )) from exc
     if not isinstance(value, dict):
         raise click.ClickException("Channel rename JSON must contain one JSON object")
     if not all(isinstance(item, str) and item.strip() for item in value.values()):
@@ -84,101 +90,28 @@ def _load_channel_renames(
     return {int(key): str(item).strip() for key, item in value.items()}, by
 
 
-class _CompactLogHandler(logging.StreamHandler):
-    """Render ``-v`` as compact stages with in-place TTY progress bars."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setFormatter(logging.Formatter("%(message)s"))
-        self._progress_width = 0
-
-    def _is_tty(self) -> bool:
-        isatty = getattr(self.stream, "isatty", None)
-        if not callable(isatty):
-            return False
-        try:
-            return bool(isatty())
-        except OSError:
-            return False
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            message = self.format(record)
-            if record.levelno >= logging.WARNING:
-                message = f"{record.levelname}: {message}"
-            is_progress = bool(getattr(record, "omeify_progress", False))
-            progress_complete = bool(
-                getattr(record, "omeify_progress_complete", False)
-            )
-
-            if is_progress and self._is_tty():
-                padding = " " * max(0, self._progress_width - len(message))
-                self.stream.write("\r" + message + padding)
-                self.flush()
-                self._progress_width = len(message)
-                if progress_complete:
-                    self.stream.write(self.terminator)
-                    self.flush()
-                    self._progress_width = 0
-                return
-
-            if self._progress_width:
-                self.stream.write(self.terminator)
-                self._progress_width = 0
-            self.stream.write(message + self.terminator)
-            self.flush()
-        except Exception:
-            self.handleError(record)
-
-
-def _configure_logging(verbose: int) -> None:
-    """Configure compact ``-v`` and fully diagnostic ``-vv`` output."""
-
-    level = logging.DEBUG if verbose >= 2 else logging.INFO if verbose == 1 else logging.WARNING
-    root = logging.getLogger()
-    for handler in root.handlers[:]:
-        root.removeHandler(handler)
-        handler.close()
-    root.setLevel(logging.WARNING)
-
-    if verbose == 1:
-        root.addHandler(_CompactLogHandler())
-    else:
-        handler = logging.StreamHandler()
-        if verbose >= 2:
-            handler.setFormatter(
-                logging.Formatter(
-                    "%(asctime)s %(levelname)s %(name)s: %(message)s",
-                    datefmt="%H:%M:%S",
-                )
-            )
-        else:
-            handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-        root.addHandler(handler)
-
-    logging.getLogger("omeify").setLevel(level)
-
-
-def _write_or_echo(rendered: str, output: Path | None) -> None:
+def _write_or_echo(rendered: str, output: Path | None, *, input_path: Path) -> None:
     if output is None:
         click.echo(rendered)
-        return
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(rendered.rstrip("\n") + "\n", encoding="utf-8")
+    else:
+        try:
+            atomic_write_text(output, rendered, protected=(input_path,))
+        except (OSError, ValueError) as exc:
+            raise click.ClickException(escape_terminal(str(exc))) from exc
 
 
 def _render_visual_answer(report: dict[str, Any]) -> str:
     answer = report["answer"]
-    lines = ["Visual question (advisory)", "-" * 26, f"Question: {report['question']}"]
+    lines = ["Visual question (advisory)", "-" * 26, f"Question: {escape_terminal(report['question'])}"]
     status = answer["status"]
     if status != "answered":
         lines.append(f"Status: {status}")
     lines.append("")
-    lines.extend(item["text"] for item in answer["paragraphs"])
+    lines.extend(escape_terminal(item["text"], multiline=True) for item in answer["paragraphs"])
     if answer["cautions"]:
         lines.append("")
         lines.append("Cautions:")
-        lines.extend(f"- {item['text']}" for item in answer["cautions"])
+        lines.extend(f"- {escape_terminal(item['text'])}" for item in answer["cautions"])
     return "\n".join(lines).rstrip()
 
 
@@ -242,7 +175,7 @@ def main() -> None:
 @click.option(
     "--output-json",
     type=click.Path(dir_okay=False, path_type=Path),
-    help="Write the conversion report to this JSON file instead of stdout.",
+    help="Write the complete report to FILE, or - for JSON-only stdout.",
 )
 @click.option(
     "--cache-directory",
@@ -307,10 +240,8 @@ def main() -> None:
     "-v",
     "--verbose",
     count=True,
-    help=(
-        "Show compact stages and progress bars; repeat for timestamps, debug details, "
-        "1-second updates, and tracebacks."
-    ),
+    help=("-v: compact progress; -vv: timestamped diagnostic logs and tracebacks; "
+          "-vvv: also print the complete report unless --output-json is supplied."),
 )
 def convert_command(
     input_path: Path,
@@ -341,16 +272,21 @@ def convert_command(
     Supply the destination file with --output / -o.
     """
 
-    _configure_logging(verbose)
+    configure_logging(verbose)
     rename_channels, rename_mode = _load_channel_renames(
         rename_channels_json,
         rename_channels_by,  # type: ignore[arg-type]
     )
 
-    if output_json is not None:
-        report_path = output_json.resolve()
-        if report_path in {input_path.resolve(), output_path.resolve()}:
-            raise click.UsageError("--output-json must differ from both image paths")
+    inputs = [input_path]
+    if rename_channels_json is not None:
+        inputs.append(rename_channels_json)
+    protected = [*inputs, output_path]
+    try:
+        check_output_path(output_path, protected=inputs, overwrite=overwrite)
+        preflight_report(output_json, protected=protected, overwrite=overwrite)
+    except (OSError, ValueError) as exc:
+        raise click.UsageError(escape_terminal(str(exc))) from exc
 
     if input_type != "qptiff_fusion" and channel_name_field is not None:
         raise click.UsageError("--channel-name-field is only valid with --type qptiff_fusion")
@@ -380,9 +316,12 @@ def convert_command(
     except Exception as exc:
         if verbose >= 2:
             raise
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(escape_terminal(str(exc))) from exc
 
-    _write_or_echo(json.dumps(report, indent=2), output_json)
+    emit_operation_report(
+        report, output_path=output_path, destination=output_json, verbose=verbose,
+        overwrite=overwrite, protected=protected,
+    )
 
 
 @main.command("mutate", context_settings=_CONTEXT_SETTINGS)
@@ -476,7 +415,7 @@ def convert_command(
 @click.option(
     "--output-json",
     type=click.Path(dir_okay=False, path_type=Path),
-    help="Write the mutation report to this JSON file instead of stdout.",
+    help="Write the complete report to FILE, or - for JSON-only stdout.",
 )
 @click.option(
     "--cache-directory",
@@ -528,10 +467,8 @@ def convert_command(
     "-v",
     "--verbose",
     count=True,
-    help=(
-        "Show compact stages and progress bars; repeat for timestamps, debug details, "
-        "1-second updates, and tracebacks."
-    ),
+    help=("-v: compact progress; -vv: timestamped diagnostic logs and tracebacks; "
+          "-vvv: also print the complete report unless --output-json is supplied."),
 )
 def mutate_command(
     input_path: Path,
@@ -565,7 +502,7 @@ def mutate_command(
     Supply the destination file with --output / -o.
     """
 
-    _configure_logging(verbose)
+    configure_logging(verbose)
     if (dtype is None) == (float32_mantissa_bits is None):
         raise click.UsageError(
             "Choose exactly one mutation: --dtype or --float32-mantissa-bits."
@@ -578,10 +515,15 @@ def mutate_command(
         rename_channels_json,
         rename_channels_by,  # type: ignore[arg-type]
     )
-    if output_json is not None:
-        report_path = output_json.resolve()
-        if report_path in {input_path.resolve(), output_path.resolve()}:
-            raise click.UsageError("--output-json must differ from both image paths")
+    inputs = [input_path]
+    if rename_channels_json is not None:
+        inputs.append(rename_channels_json)
+    protected = [*inputs, output_path]
+    try:
+        check_output_path(output_path, protected=inputs, overwrite=overwrite)
+        preflight_report(output_json, protected=protected, overwrite=overwrite)
+    except (OSError, ValueError) as exc:
+        raise click.UsageError(escape_terminal(str(exc))) from exc
     if input_type != "qptiff_fusion" and channel_name_field is not None:
         raise click.UsageError("--channel-name-field is only valid with --type qptiff_fusion")
 
@@ -613,9 +555,12 @@ def mutate_command(
     except Exception as exc:
         if verbose >= 2:
             raise
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(escape_terminal(str(exc))) from exc
 
-    _write_or_echo(json.dumps(report, indent=2), output_json)
+    emit_operation_report(
+        report, output_path=output_path, destination=output_json, verbose=verbose,
+        overwrite=overwrite, protected=protected,
+    )
 
 
 @main.command("crop", context_settings=_CONTEXT_SETTINGS)
@@ -627,6 +572,8 @@ def mutate_command(
               help="Half-open integer bounds in level-zero pixels; exclusive with --geojson.")
 @click.option("--geojson", "geojson_path", type=str, metavar="FILE",
               help="Pixel-coordinate GeoJSON file, or - for stdin; exclusive with --bounds.")
+@click.option("--output-json", type=click.Path(dir_okay=False, path_type=Path),
+              help="Write the complete report to FILE, or - for JSON-only stdout.")
 @click.option("--shatter", type=click.Choice(["by_index", "by_name"]), default=None,
               help=("Split into files by input index or by name (equal names share a file). "
                     "Default: all ROIs in one file, in input order."))
@@ -652,7 +599,8 @@ def mutate_command(
 @click.option("--workers", type=click.IntRange(min=1), default=None)
 @click.option("--cache-directory", type=click.Path(file_okay=False, path_type=Path), default=None)
 @click.option("--overwrite/--no-overwrite", default=True, show_default=True)
-@click.option("-v", "--verbose", count=True, help="Progress on stderr; repeat for diagnostic logs.")
+@click.option("-v", "--verbose", count=True,
+              help="-v: compact progress; -vv: diagnostic logs; -vvv: full operation report.")
 def crop_command(
     input_path: Path, output_path: Path, bounds: tuple[int, ...] | None, geojson_path: str | None,
     shatter: str | None, clip: bool, input_type: str, series: int, labels: bool,
@@ -660,6 +608,7 @@ def crop_command(
     pixel_size_unit: str | None, compression: str | None, jpeg_quality: int,
     jpeg_subsampling: str, tile_size: int | None, pyramid_levels: int | None,
     workers: int | None, cache_directory: Path | None, overwrite: bool, verbose: int,
+    output_json: Path | None,
 ) -> None:
     """Crop rectangles from INPUT_PATH into one ordered, multi-image OME-TIFF.
 
@@ -671,7 +620,7 @@ def crop_command(
     GeoJSON uses full-resolution XY pixel coordinates, not geographic coordinates.
     Polygons are exported as bounding rectangles, without masking.
     """
-    _configure_logging(verbose)
+    configure_logging(verbose)
     if (bounds is None) == (geojson_path is None):
         raise click.UsageError("Choose exactly one of --bounds or --geojson")
     try:
@@ -681,8 +630,15 @@ def crop_command(
             geojson = load_geojson(click.get_text_stream("stdin").read(MAX_GEOJSON_CHARS + 1))
         else:
             geojson = geojson_path
+        document, auxiliary = load_crop_document(bounds=bounds, geojson=geojson)
+        outputs = group_outputs(parse_regions(document), output_path, shatter=shatter)
+        image_paths = [path for path, _ in outputs]
+        protected = [input_path, *auxiliary, *image_paths]
+        for path in image_paths:
+            check_output_path(path, protected=(input_path, *auxiliary), overwrite=overwrite)
+        preflight_report(output_json, protected=protected, overwrite=overwrite)
         report = crop(
-            input_path, output_path, bounds=bounds, geojson=geojson,
+            input_path, output_path, geojson=document,
             input_type=input_type, series=series, shatter=shatter, clip=clip, labels=labels,
             channel_name_field=channel_name_field,
             pixel_size=_pixel_size_override(pixel_size_x, pixel_size_y, pixel_size_unit),
@@ -693,8 +649,11 @@ def crop_command(
     except Exception as exc:
         if verbose >= 2:
             raise
-        raise click.ClickException(str(exc)) from exc
-    click.echo(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False))
+        raise click.ClickException(escape_terminal(str(exc))) from exc
+    emit_operation_report(
+        report, output_path=output_path, destination=output_json, verbose=verbose,
+        overwrite=overwrite, protected=protected,
+    )
 
 
 @main.command("inspect", context_settings=_CONTEXT_SETTINGS)
@@ -731,7 +690,7 @@ def crop_command(
 )
 @click.option(
     "-i", "--intelligence", is_flag=True,
-    help="Summarize metadata or answer --question using Sheetbend; requires omeify[intelligence].",
+    help="Summarize metadata or answer --question using the configured model; requires omeify[intelligence].",
 )
 @click.option(
     "-q", "--question", type=str, default=None, metavar="TEXT",
@@ -800,13 +759,13 @@ def inspect_command(
     """Inspect TIFF metadata, answer visual questions, or locate visual regions.
 
     Ordinary inspection never reads pixels. --visual and --geojson are explicit
-    opt-ins to transmit a bounded image overview to the selected Sheetbend source.
+    opt-ins to transmit a bounded image overview to the configured model source.
 
     Inspection output is raw diagnostic metadata, not deidentified output. It
     may contain paths, filenames, vendor fields, or other identifying values.
     """
 
-    _configure_logging(verbose)
+    configure_logging(verbose)
     ctx = click.get_current_context()
     visual_options = (
         "input_type", "series", "preview_size", "preview_channel", "preview_channels",
@@ -848,16 +807,16 @@ def inspect_command(
         )
     ):
         raise click.UsageError("--intelligence-* options require --intelligence / -i")
-    if output is not None and (
-        output.resolve() == input_path.resolve()
-        or (output.exists() and output.samefile(input_path))
-    ):
-        raise click.UsageError("--output must differ from INPUT_PATH")
+    if output is not None:
+        try:
+            check_output_path(output, protected=(input_path,))
+        except (OSError, ValueError) as exc:
+            raise click.UsageError(escape_terminal(str(exc))) from exc
     if visual:
         from omeify.io.source_reader import source_reader
         from omeify.visual_intelligence import answer_visual_question
 
-        click.echo("Answering visual question through Sheetbend: sending a bounded image preview...", err=True)
+        click.echo("Sending bounded preview for visual analysis...", err=True)
         try:
             with source_reader(input_path, input_type=input_type, series=series,
                                channel_name_field=None) as image:
@@ -870,16 +829,16 @@ def inspect_command(
                     max_output_tokens=intelligence_max_output_tokens,
                 )
         except Exception as exc:
-            raise click.ClickException(str(exc)) from exc
+            raise click.ClickException(escape_terminal(str(exc))) from exc
         rendered = (json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False)
                     if as_json else _render_visual_answer(result))
-        _write_or_echo(rendered, output)
+        _write_or_echo(rendered, output, input_path=input_path)
         return
     if geojson:
         from omeify.io.source_reader import source_reader
         from omeify.visual_intelligence import locate_regions
 
-        click.echo("Locating regions through Sheetbend: sending a bounded image preview...", err=True)
+        click.echo("Sending bounded preview for region localization...", err=True)
         try:
             with source_reader(input_path, input_type=input_type, series=series,
                                channel_name_field=None) as image:
@@ -892,8 +851,9 @@ def inspect_command(
                     max_output_tokens=intelligence_max_output_tokens,
                 )
         except Exception as exc:
-            raise click.ClickException(str(exc)) from exc
-        _write_or_echo(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False), output)
+            raise click.ClickException(escape_terminal(str(exc))) from exc
+        _write_or_echo(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False),
+                       output, input_path=input_path)
         return
     try:
         inspector = TiffInspector(
@@ -903,8 +863,8 @@ def inspect_command(
         )
         if intelligence:
             click.echo(
-                "Answering image question through Sheetbend..." if question is not None
-                else "Summarizing embedded metadata through Sheetbend...",
+                "Answering metadata question..." if question is not None
+                else "Summarizing embedded metadata...",
                 err=True,
             )
             inspector.summarize_metadata(
@@ -915,8 +875,8 @@ def inspect_command(
             )
         rendered = inspector.to_json() if as_json else inspector.render_text()
     except Exception as exc:
-        raise click.ClickException(str(exc)) from exc
-    _write_or_echo(rendered, output)
+        raise click.ClickException(escape_terminal(str(exc))) from exc
+    _write_or_echo(rendered, output, input_path=input_path)
 
 
 @main.command("version", context_settings=_CONTEXT_SETTINGS)

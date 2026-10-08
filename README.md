@@ -137,8 +137,9 @@ sharing; inspection deliberately reveals information that conversion may omit.
 ## Installation
 
 Omeify requires **Python 3.10 or newer** for its ordinary image-I/O features.
-These examples use the **0.18 library API**. From the corresponding repository
-checkout:
+The 0.21 compatibility checkpoint keeps this baseline while applying the current
+hardening and report cleanup. See [Python 3.10 environments](docs/python310.md)
+for the NumPy 1.x test lane and publication sequence. From the corresponding checkout:
 
 ```bash
 python -m pip install .
@@ -174,8 +175,12 @@ representation. The commands keep different responsibilities explicit:
 
 `convert` and `mutate` require a destination file via **`--output` / `-o`**.
 The input remains positional; a second positional output path is not accepted.
-`--output-json` separately selects a report file. `inspect` still prints to
-stdout by default and accepts an optional `--output` / `-o` for its report.
+`convert`, `mutate`, and `crop` print a short completion line by default.
+Use `--output-json FILE` to retain their complete reports or `--output-json -`
+for JSON-only stdout. `-v` shows compact progress, `-vv` diagnostic logs, and
+`-vvv` the full report unless a report destination was selected.
+[Report contracts and migration](docs/reports.md) describe the precise policy.
+`inspect` still prints to stdout by default and accepts `--output` / `-o`.
 
 ### Inspect, convert, and retain the report
 
@@ -215,7 +220,10 @@ by default. JSON reports may contain source paths and metadata.
 | Akoya H&E QPTIFF | `qptiff_he` | Interleaved RGB | JPEG |
 | Aperio SVS | `svs` | Interleaved RGB | JPEG |
 
-Only the selected series is converted; `--series 0` is the default. These are
+Only the selected series is converted; `--series 0` is the default. RGB inputs
+must have actual RGB samples or a supported JPEG decoding path that yields RGB.
+Raw YCbCr/CIELAB samples are rejected, including on advertised reduced levels,
+rather than silently relabeled. These are
 explicit profiles, not a promise to convert every TIFF or every vendor variant.
 [Calibration rules and source-specific options][supported-inputs] describe what
 must be present or supplied.
@@ -264,7 +272,7 @@ for the mapping rules, precision controls, channel renaming, and every option;
 ```bash
 omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff --bounds 10000 5000 12048 7048
 
-# Explicit visual mode sends one bounded overview through Sheetbend.
+# Explicit visual mode sends one bounded overview to the configured model.
 omeify inspect slide.ome.tiff -i --geojson \
   -q "Return only the right tissue; name it right." > right.geojson
 omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff --geojson right.geojson
@@ -498,10 +506,11 @@ array dtype or TIFF layout is a writable product. Omeify does not perform
 segmentation, registration, stain normalization, object measurement, or
 experimental quality assurance.
 
-The **0.18 library API is a breaking consolidation**; earlier writer and metadata
-interfaces are not kept as forwarding aliases. Check the
-[migration table][migration] when upgrading an existing application. This
-README describes the current contract, not a 1.0 compatibility commitment.
+The current Image/writer API retains the 0.18 consolidation; earlier interfaces
+are not kept as forwarding aliases. The [migration table][migration] covers those
+older library changes. The [0.21 report migration](docs/reports.md#migration-from-020)
+covers this checkpoint's field/schema and CLI-output changes. This README describes
+the current contract, not a 1.0 compatibility commitment.
 
 [The detailed reference][reference] retains source-profile details, the complete
 CLI walkthrough, Python recipes, writer architecture, and exact validation and

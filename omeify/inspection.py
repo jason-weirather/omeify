@@ -9,14 +9,11 @@ import textwrap
 from collections.abc import Collection
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
-from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import tifffile
-from jsonschema import Draft202012Validator
 from lxml import etree
 
 from omeify.intelligence import (
@@ -24,13 +21,15 @@ from omeify.intelligence import (
     DEFAULT_MAX_METADATA_CHARS,
     DEFAULT_MAX_OUTPUT_TOKENS,
 )
+from omeify.reports import report_validator
+from omeify.terminal import escape_terminal
 from omeify.utils.miti_header_validator import validate_miti_ome_tiff_header
 
 if TYPE_CHECKING:
     from sheetbend import Registry
 
 _INSPECTION_SCHEMA_RESOURCE = "omeify.schemas/tiff_inspection.schema.json"
-_INSPECTION_SCHEMA_VERSION = "1.4"
+_INSPECTION_SCHEMA_VERSION = "2.0"
 _DEFAULT_DETAIL = 1
 _DEFAULT_MAX_TEXT_LENGTH = 240
 _MAX_XML_CHILDREN = 100
@@ -635,27 +634,6 @@ def _format_name(tiff: tifffile.TiffFile, flags: list[str]) -> str:
     return "TIFF"
 
 
-@lru_cache(maxsize=1)
-def _inspection_validator() -> Draft202012Validator:
-    resource = files("omeify.schemas").joinpath("tiff_inspection.schema.json")
-    schema = json.loads(resource.read_text(encoding="utf-8"))
-    Draft202012Validator.check_schema(schema)
-    # Resolve the optional report schema from package resources, never the web.
-    from referencing import Registry, Resource
-
-    intelligence = json.loads(
-        files("omeify.schemas").joinpath("metadata_intelligence.schema.json")
-        .read_text(encoding="utf-8")
-    )
-    calibration = json.loads(
-        files("omeify.schemas").joinpath("calibration.schema.json").read_text(encoding="utf-8")
-    )
-    registry = Registry().with_resources(
-        (item["$id"], Resource.from_contents(item)) for item in (intelligence, calibration)
-    )
-    return Draft202012Validator(schema, registry=registry)
-
-
 @dataclass
 class _TreeNode:
     label: str
@@ -695,21 +673,11 @@ def _format_physical_size(physical: dict[str, Any] | None) -> str | None:
     return ", ".join(values)
 
 
-def _terminal_text(value: str) -> str:
-    """Keep scientific Unicode and line breaks, but render terminal controls visibly."""
-
-    return "".join(
-        char if char.isprintable() or char == "\n"
-        else char.encode("unicode_escape").decode("ascii")
-        for char in value
-    )
-
-
 def _render_tree(root: _TreeNode) -> str:
-    lines = [_terminal_text(root.label)]
+    lines = [escape_terminal(root.label, multiline=True)]
 
     def visit(node: _TreeNode, prefix: str, is_last: bool) -> None:
-        label_lines = _terminal_text(node.label).split("\n")
+        label_lines = escape_terminal(node.label, multiline=True).split("\n")
         lines.append(prefix + ("└── " if is_last else "├── ") + label_lines[0])
         child_prefix = prefix + ("    " if is_last else "│   ")
         lines.extend(child_prefix + line for line in label_lines[1:])
@@ -803,10 +771,7 @@ def _intelligence_tree(report: dict[str, Any], max_text_length: int | None) -> _
     def display(value: str) -> str:
         # Make terminal escapes, control codes and bidi controls visible. Leave
         # scientific Unicode (including µm) intact. JSON retains original values.
-        return "".join(
-            char if char.isprintable() else char.encode("unicode_escape").decode("ascii")
-            for char in value
-        )
+        return escape_terminal(value)
 
     def node(text: str) -> _TreeNode:
         return _TreeNode(textwrap.fill(display(text), width=96, break_long_words=False))
@@ -823,7 +788,7 @@ def _intelligence_tree(report: dict[str, Any], max_text_length: int | None) -> _
             record = catalog[record_id]
             origin = record["locations"][0]
             repeats = f" ({record['occurrences']} occurrences)" if record["occurrences"] > 1 else ""
-            kind = "Computed evidence" if record.get("origin") == "computed" else "Evidence"
+            kind = "Computed evidence" if record["origin"] == "computed" else "Evidence"
             parent.children.append(node(f"{kind} {record_id}: {origin}{repeats}"))
 
     summary = report["summary"]
@@ -900,7 +865,7 @@ def _question_block(report: dict[str, Any]) -> str:
     def wrap(value: str, *, prefix: str = "", continuation: str | None = None) -> str:
         # Escape ANSI, CR, backspace, bidi and other controls. Allow intentional
         # line breaks, but never let a question or model response control the terminal.
-        safe = _terminal_text(value)
+        safe = escape_terminal(value, multiline=True)
         return "\n".join(
             textwrap.fill(
                 line, width=width, initial_indent=prefix,
@@ -1113,7 +1078,7 @@ class TiffInspector:
         max_metadata_chars: int = DEFAULT_MAX_METADATA_CHARS,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> dict[str, Any]:
-        """Explicitly summarize metadata or answer a question through Sheetbend.
+        """Explicitly summarize metadata or answer a question using the configured model.
 
         A supplied ``question`` replaces the broad intelligence summary with a
         focused answer and adds allowlisted file/layout statistics to the same
@@ -1163,7 +1128,7 @@ class TiffInspector:
         """Return JSON Schema validation errors for the generated report."""
 
         errors = sorted(
-            _inspection_validator().iter_errors(self.report),
+            report_validator("tiff_inspection.schema.json").iter_errors(self.report),
             key=lambda item: tuple(str(part) for part in item.path),
         )
         rendered: list[str] = []

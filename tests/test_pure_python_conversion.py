@@ -320,7 +320,7 @@ def test_conversion_preserves_dtype_and_rebuilds_pyramid(
     assert report["verification"]["bigtiff"] is True
     assert report["verification"]["output_byte_order"] == "little"
     assert report["verification"]["byte_order_metadata_matches_tiff"] is True
-    assert report["verification"]["significant_bits_matches_dtype"] is True
+    assert report["verification"]["significant_bits_matches_spec"] is True
     assert report["verification"]["tiff_data_mapping_matches"] is True
     assert report["verification"]["pyramid_annotation_linked"] is True
     assert report["verification"]["dtype_matches_source"] is True
@@ -332,8 +332,8 @@ def test_conversion_preserves_dtype_and_rebuilds_pyramid(
     assert report["verification"]["all_levels_tiled"] is True
     assert report["verification"]["base_pixel_values_checked"] is True
     assert report["verification"]["base_pixel_values_match"] is True
-    assert report["verification"]["channels_checked"] == data.shape[0]
-    assert report["verification"]["points_per_channel"] == 3
+    assert report["verification"]["planes_checked"] == data.shape[0]
+    assert report["verification"]["points_per_plane"] == 3
     assert report["miti_header"]["is_valid"] is True
     assert report["miti_header"]["errors"] == []
     with tifffile.TiffFile(output) as tif:
@@ -463,7 +463,6 @@ def test_akoya_he_qptiff_writes_one_interleaved_rgb_ifd(tmp_path: Path) -> None:
     assert report["verification"]["jpeg_subsampling_matches_requested"] is None
     assert report["verification"]["base_pixel_values_match"] is True
     assert report["verification"]["planes_checked"] == 1
-    assert report["verification"]["channels_checked"] == 3
     assert report["miti_header"]["is_valid"] is True
 
     with tifffile.TiffFile(output) as tif:
@@ -801,7 +800,7 @@ def test_float32_dtype_and_miti_type_are_preserved(tmp_path: Path) -> None:
         np.testing.assert_array_equal(tif.series[0].levels[0].asarray(), data)
 
 
-def test_significant_bits_matches_dtype_width(tmp_path: Path) -> None:
+def test_significant_bits_matches_spec_width(tmp_path: Path) -> None:
     data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
     source = tmp_path / "source-12bit.ome.tif"
     output = tmp_path / "output.ome.tif"
@@ -817,7 +816,7 @@ def test_significant_bits_matches_dtype_width(tmp_path: Path) -> None:
     )
 
     assert report["image"]["significant_bits"] == 16
-    assert report["verification"]["significant_bits_matches_dtype"] is True
+    assert report["verification"]["significant_bits_matches_spec"] is True
     with tifffile.TiffFile(output) as tif:
         assert 'SignificantBits="16"' in tif.ome_metadata
 
@@ -955,6 +954,8 @@ def test_cli_svs_type_routes_to_rgb_converter(tmp_path: Path) -> None:
             str(source),
             "-o",
             str(output),
+            "--output-json",
+            "-",
             "--type",
             "svs",
             "--compression",

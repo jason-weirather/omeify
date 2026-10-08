@@ -14,7 +14,8 @@ see [Images and sources](image_sources.md).
 
 ## Installation
 
-Omeify requires Python 3.10 or newer.
+Omeify requires Python 3.10 or newer. The [3.10 compatibility checkpoint](python310.md)
+documents an additional NumPy 1.x test lane and downstream-environment precautions.
 
 From a repository checkout:
 
@@ -44,8 +45,10 @@ ruff check .
 ```
 
 The package is licensed under Apache-2.0. The authoritative package version is the static
-`[project].version` value in `pyproject.toml`. Installed code reads distribution metadata; direct
-source-tree imports fall back to the neighboring `pyproject.toml`.
+`[project].version` value in `pyproject.toml`. Source/editable imports first read the
+expected neighboring file after confirming `[project].name == "omeify"`. A wheel
+uses installed distribution metadata when that source file is absent; `0+unknown`
+means neither authoritative source was available.
 
 ## Supported inputs
 
@@ -310,6 +313,13 @@ substitute for it. That option remains an optional report destination, separate
 from the OME-TIFF. `inspect` retains its optional `--output` / `-o` report file
 and defaults to stdout. Python `convert()` and `mutate()` signatures are unchanged.
 
+Image-writing commands now default to a short completion line. `-v` enables compact
+progress (tqdm on a terminal), `-vv` line-oriented diagnostics, and `-vvv` a full
+report unless `--output-json` is supplied. All three commands, including crop,
+accept `--output-json FILE` or `--output-json -` for a single JSON stdout document.
+`--no-overwrite` protects explicitly named reports too. See [report contracts and
+failure semantics](reports.md) for path protection, schema identifiers, and migration.
+
 ### `omeify convert`
 
 Akoya mIF QPTIFF:
@@ -411,9 +421,10 @@ Common conversion options:
 --cache-directory PATH     Temporary pyramid scratch location
 --workers N                Parallel TIFF compression workers
 --omit-uuid                Omit the optional OME root UUID
---output-json PATH         Write the structured conversion report
+--output-json FILE|-        Write the complete report, or JSON-only stdout
 -v                         Compact stages and progress
 -vv                        Timestamped debug logging and tracebacks
+-vvv                       Also print the full report unless --output-json is supplied
 ```
 
 ### `omeify mutate`
@@ -685,7 +696,7 @@ omeify inspect image.tif -i --intelligence-max-chars 64000
 ```
 
 The generated-response allowance defaults to **8,192 tokens** and is passed to the selected
-model through Sheetbend. It is independent of the metadata character budget and can be raised
+configured model. It is independent of the metadata character budget and can be raised
 per request when the endpoint has sufficient context capacity:
 
 ```bash
@@ -712,13 +723,13 @@ record budget, but does not remove the independent scan limits.
 The authoritative contracts are packaged JSON Schemas:
 
 ```text
-omeify/schemas/tiff_inspection.schema.json          inspection schema 1.4
-omeify/schemas/metadata_intelligence.schema.json    summaries 1.1; questions 1.2
+omeify/schemas/tiff_inspection.schema.json          inspection schema 2.0
+omeify/schemas/metadata_intelligence.schema.json    current summary/question schema 2.0
 ```
 
 The packaged schema defines both the final `summary` and the model's smaller
-`model_response` selection contract. **Prompt protocol 2.0 selects records instead
-of asking the model to transcribe their values and quotations.** Each finding
+`model_response` selection contract. **The active summary protocol selects records
+instead of asking the model to transcribe values and quotations.** Each finding
 contains `record_id`, `category`, `label`, and `interpretation`; the overview and
 cautions contain `text` and `record_ids`. Every reference in the model-facing
 schema is restricted to an enum of the IDs actually supplied in this request.
@@ -743,9 +754,10 @@ its interesting content. XML entity spellings are decoded by the collector, and
 that extracted text is preserved exactly. JSON contains the complete supplied
 value; `--max-text-length` still bounds its pretty-print preview.
 
-Broad summary reports use intelligence schema **1.1**, with `prompt_version` **2.1** identifying
-record selection plus calibration guidance. Schema 1.0 reports with prompt 1.0/2.0 still validate;
-records without an `origin` field retain their original meaning as source metadata.
+Broad summaries use intelligence schema **2.0**, with `prompt_version` **2.1**
+identifying record selection plus calibration guidance. Each record has an explicit
+`origin`; computed-record coverage counts are explicit even when zero. Retired
+report/prompt combinations no longer validate, and absent origins are not guessed.
 A failed request, invalid JSON, unknown reference, or violated local constraint
 is an error, not an empty “all clear” summary. Diagnostics identify the response
 field/index without echoing source values or model prose. The CLI exits nonzero
@@ -811,9 +823,10 @@ statistics are considered; scan and budget omissions remain visible in coverage.
 has its own 4,096-character limit and is outside the serialized-record character budget, but
 still consumes endpoint context. No images, tools, shell commands, or new dependencies are added.
 
-Question results use intelligence schema **1.2**, prompt **3.0**, and the mutually exclusive
-`question` / `answer` alternative to `summary`. Broad summaries still emit schema 1.1 / prompt
-2.1; older summary reports continue to validate. The enclosing inspection schema remains 1.4.
+Questions use intelligence schema **2.0**, prompt **3.0**, and the mutually exclusive
+`question` / `answer` alternative to `summary`. Broad summaries use the same report
+schema with prompt **2.1**. The enclosing inspection schema is **2.0**. See
+[report migration](reports.md#migration-from-020) for the current-only policy.
 
 ### `omeify version`
 
@@ -1217,3 +1230,9 @@ TIFF segments continue to read as zeros.
 - Mutation supports planar floating-point input to `uint8` or `uint16`, or float32-to-float32 precision trimming through retained mantissa bits.
 - Metadata minimization does not detect identifying text embedded in pixels.
 - `inspect` reports source metadata and must be reviewed before sharing.
+
+## Current report definitions
+
+The [report reference](reports.md) inventories packaged contracts, field removals,
+verbosity behavior, and per-artifact failure semantics. Numeric report arrays use
+explicit axes plus shape, not duplicated layout-specific aliases.

@@ -1,0 +1,6 @@
+# Python 3.10 / NumPy 1.x image-I/O lane, tested separately in CI.
+# This is not a complete CellGate/TensorFlow/application environment lock.
+# Pass with pip -c; requirements remain in pyproject.toml.
+numpy==1.26.4
+tifffile==2024.8.30
+imagecodecs==2024.6.1

@@ -9,6 +9,35 @@ import numpy as np
 import tifffile
 
 
+def validate_rgb_page(page: tifffile.TiffPage, *, context: str = "TIFF page") -> None:
+    """Require an interleaved representation whose decoder yields RGB samples.
+
+    TIFF sample count alone does not establish color meaning. Tifffile converts
+    YCbCr to RGB on its JPEG decode path, not on its raw/Deflate/LZW paths.
+    No general color conversion or ICC transform is performed here. This check
+    reads directory metadata only and is also applied to advertised SubIFDs.
+    """
+    samples = int(page.samplesperpixel)
+    planar = int(page.planarconfig)
+    photometric = int(page.photometric)
+    compression = int(page.compression)
+    details = (
+        f"{context} (IFD {page.index}): SamplesPerPixel={samples}, "
+        f"PlanarConfiguration={planar}, PhotometricInterpretation={photometric}, "
+        f"Compression={compression}"
+    )
+    if samples != 3 or planar != 1 or page.extrasamples:
+        raise ValueError(f"RGB input requires three contiguous samples without extras; {details}")
+    # These codecs use tifffile's explicit JPEG colorspace/outcolorspace path.
+    jpeg_ycbcr = photometric == 6 and compression in {7, 34892, 33007}
+    if photometric != 2 and not jpeg_ycbcr:
+        raise ValueError(
+            f"Unsupported RGB photometric/codec combination; {details}. "
+            "Only RGB samples or JPEG-decoded YCbCr are supported; "
+            "raw YCbCr, CIELAB, and other color spaces are not relabeled as RGB."
+        )
+
+
 @runtime_checkable
 class PlaneReader(Protocol):
     """Minimal random-access contract consumed by :class:`OMETiffWriter`."""
@@ -41,6 +70,8 @@ class TiffPlaneReader:
         cache_mib: int = 64,
     ) -> None:
         self.samples_per_pixel = int(page.samplesperpixel)
+        if self.samples_per_pixel == 3:
+            validate_rgb_page(page)
         if self.samples_per_pixel not in {1, 3}:
             raise ValueError(
                 "omeify supports one grayscale sample or three interleaved RGB samples "
@@ -48,11 +79,6 @@ class TiffPlaneReader:
             )
         if int(getattr(page, "imagedepth", 1)) != 1:
             raise ValueError("TiffPlaneReader requires a two-dimensional TIFF plane")
-        if self.samples_per_pixel > 1 and int(page.planarconfig) != 1:
-            raise ValueError(
-                "RGB input must use contiguous samples (PlanarConfiguration=1); "
-                f"found PlanarConfiguration={int(page.planarconfig)}."
-            )
 
         self.page = page
         self.filehandle = page.parent.filehandle

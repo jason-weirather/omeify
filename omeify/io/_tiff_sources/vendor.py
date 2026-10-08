@@ -301,17 +301,6 @@ class VendorSource(TiffSource):
         dtype = np.dtype(page.dtype).newbyteorder("=")
         if dtype.name not in _SUPPORTED_RGB_DTYPES:
             raise TypeError(f"RGB input requires uint8 pixels, found {dtype}")
-        if int(page.samplesperpixel) != 3:
-            raise ValueError(
-                f"RGB input requires SamplesPerPixel=3, found {int(page.samplesperpixel)}"
-            )
-        if int(page.planarconfig) != 1:
-            raise ValueError("RGB input must use contiguous samples (PlanarConfiguration=1)")
-        if int(page.photometric) not in {2, 6}:
-            raise ValueError(
-                "RGB input requires RGB or YCbCr photometric interpretation; "
-                f"found {int(page.photometric)}"
-            )
         axes = str(self._level0.axes)
         shape = tuple(int(item) for item in self._level0.shape)
         expected = (int(page.imagelength), int(page.imagewidth), 3)

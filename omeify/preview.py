@@ -11,6 +11,7 @@ import numpy as np
 from .io.base import Image
 from .io.image_metadata import integer
 from .progress import ProgressLogger
+from .reports import validate_report
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_PREVIEW_SIZE = 1536
@@ -332,4 +333,5 @@ def build_preview(
         **physical_context,
         **channel_fields,
     }
+    validate_report(context, "preview.schema.json")
     return pixels, context

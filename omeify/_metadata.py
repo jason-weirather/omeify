@@ -358,7 +358,7 @@ def collect_metadata(
                         coverage["scan_limited"] = True
                         break
                     records[key] = {
-                        "id": f"m{len(records) + 1}", "locations": [origin],
+                        "id": f"m{len(records) + 1}", "origin": "metadata", "locations": [origin],
                         "value": text, "truncated": truncated, "occurrences": 1,
                     }
             except Exception:
@@ -432,9 +432,8 @@ def collect_metadata(
         records_truncated=sum(record["truncated"] for record in selected),
         metadata_chars=used,
     )
-    if calibration is not None or inspection is not None:
-        coverage["computed_records_available"] = len(computed)
-        coverage["computed_records_included"] = computed_included
+    coverage["computed_records_available"] = len(computed)
+    coverage["computed_records_included"] = computed_included
     if len(coverage["warnings"]) > 20:
         coverage["warnings"] = coverage["warnings"][:20] + ["Further directory warnings omitted."]
     return {"records": selected, "coverage": coverage}

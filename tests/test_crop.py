@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import tifffile
 from click.testing import CliRunner
+from report_fixture import multi_report_fixture
 
 from omeify import ImageLevel, MultichannelImage, OMETiffReader, PixelSize, crop
 from omeify.cli import main
@@ -45,7 +46,7 @@ def writer_spy(monkeypatch):
                           "pixels": [s.image.asarray() for s in entries],
                           "names": [s.name for s in entries],
                           "sizes": [s.image.pixel_size for s in entries]})
-            return {"test_double": True}
+            return multi_report_fixture(self.path, entries, provenance)
 
     monkeypatch.setattr("omeify.cropping.OMEMultiSeriesWriter", Writer)
     return calls
@@ -157,7 +158,7 @@ def test_grouped_exports_use_real_lazy_crops(input_file, tmp_path, writer_spy, s
         feature["properties"]["index"] = 10 - i
     output = tmp_path / "out.he.ome.tiff"
     report = crop(path, output_path=output, geojson=collection(*features), shatter=shatter)
-    assert report["schema"] == "omeify.crop/2" and report["shatter"] == shatter
+    assert report["schema"] == "omeify.crop/3" and report["shatter"] == shatter
     assert report["output_path"] == str(output) and "naming" not in report
     assert len(writer_spy) == len(report["outputs"]) == len(groups)
     if shatter is None:
@@ -166,7 +167,7 @@ def test_grouped_exports_use_real_lazy_crops(input_file, tmp_path, writer_spy, s
         assert call["names"] == [f"{i + 1:02d} - {names[i] or 'ROI'}" for i in indices]
         assert call["sizes"] == [PixelSize(.5, .7, "µm")] * len(indices)
         assert call["options"]["compression"] is None and call["options"]["tile_size"] is None
-        assert call["provenance"]["schema"] == "omeify.crop/2"
+        assert call["provenance"]["schema"] == "omeify.crop_provenance/1"
         assert call["provenance"]["shatter"] == shatter
         assert call["provenance"]["regions"] == result["regions"]
         for series, i in enumerate(indices):
@@ -220,7 +221,7 @@ def test_whole_batch_preflight_and_inputs_are_protected(input_file, tmp_path, wr
 def test_cli_stdin_and_coordinate_guard(input_file, tmp_path, writer_spy, shatter, filenames):
     path, _ = input_file
     doc = collection(*[rectangle_feature([1, 2, 10, 11], name=n) for n in ("right", "left", "right")])
-    args = ["crop", str(path), "-o", str(tmp_path / "out.ome.tiff"), "--geojson", "-"]
+    args = ["crop", str(path), "-o", str(tmp_path / "out.ome.tiff"), "--geojson", "-", "--output-json", "-"]
     if shatter is not None:
         args += ["--shatter", shatter]
     result = CliRunner().invoke(main, args, input=json.dumps(doc))

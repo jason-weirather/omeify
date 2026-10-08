@@ -9,36 +9,23 @@ LOGGER = logging.getLogger(__name__)
 
 
 class OMESchemaValidator:
-    """Validate OME-XML against a local OME 2016-06 schema.
+    """Validate OME-XML using the declared local XSD dependency or an explicit path.
 
-    No network request is made.  The ``ome-schema`` package is preferred; a
-    schema bundled beside tifffile is used as a fallback when available.
+    Construction fails if the XSD cannot be loaded. Validation never downloads a
+    schema or reports a missing validator as a skipped/successful check.
     """
 
     def __init__(self, schema_location: str | Path | None = None) -> None:
-        self.schema_lxml: etree.XMLSchema | None = None
-        self.schema_location: str | None = None
-
         if schema_location is None:
             try:
                 from omeschema import get_ome_schema_path
-
-                schema_location = get_ome_schema_path()
-            except (ImportError, ModuleNotFoundError, AttributeError):
-                schema_location = None
-
-        if schema_location is None:
-            try:
-                import tifffile
-
-                candidate = Path(tifffile.__file__).resolve().parent / "ome.xsd"
-                if candidate.exists():
-                    schema_location = candidate
-            except (ImportError, OSError):
-                schema_location = None
-
-        if schema_location is not None:
-            self.set_schema_lxml(schema_location)
+            except ImportError as exc:
+                raise RuntimeError(
+                    "OME-XML validation requires the ome-schema dependency; "
+                    "install omeify's declared dependencies or supply schema_location."
+                ) from exc
+            schema_location = get_ome_schema_path()
+        self.set_schema_lxml(schema_location)
 
     def set_schema_lxml(self, schema_location: str | Path) -> None:
         location = Path(schema_location)
@@ -49,12 +36,7 @@ class OMESchemaValidator:
         self.schema_lxml = etree.XMLSchema(tree)
         self.schema_location = str(location)
 
-    def validate(self, xml_string: str) -> bool | None:
-        if self.schema_lxml is None:
-            LOGGER.warning(
-                "OME-XML validation skipped because no local OME schema was available."
-            )
-            return None
+    def validate(self, xml_string: str) -> bool:
         generated = etree.fromstring(xml_string.encode("utf-8"))
         valid = bool(self.schema_lxml.validate(generated))
         if not valid:

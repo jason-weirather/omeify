@@ -15,13 +15,11 @@ from omeify import (
     OMETiffReader,
     OMETiffWriter,
     PixelSize,
-    RGBImage,
     TiffInspector,
 )
 from omeify.cli import main
 from omeify.io._writer.precision import round_float32_mantissa
 from omeify.io.tiff import TiffPlaneReader
-from omeify.utils.ome_schema_validator import OMESchemaValidator
 
 
 def _write_generic_tiff(path: Path) -> np.ndarray:
@@ -302,7 +300,7 @@ def test_cli_inspect_text_json_and_output_file(tmp_path: Path) -> None:
     )
     assert output_result.exit_code == 0, output_result.output
     assert output_result.output == ""
-    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "1.4"
+    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "2.0"
 
 
 def test_ome_tiff_reader_reads_interleaved_rgb_regions(tmp_path: Path) -> None:
@@ -541,9 +539,9 @@ def test_writer_fails_closed_when_ome_schema_validation_is_unavailable(
 ) -> None:
     output = tmp_path / "schema-unavailable.ome.tif"
     data = np.zeros((1, 16, 16), dtype=np.uint16)
-    monkeypatch.setattr(OMESchemaValidator, "validate", lambda self, xml: None)
+    monkeypatch.setitem(__import__("sys").modules, "omeschema", None)
 
-    with pytest.raises(RuntimeError, match="schema validation could not be performed"):
+    with pytest.raises(RuntimeError, match="requires the ome-schema dependency"):
         OMETiffWriter(
             output,
             compression='Uncompressed',

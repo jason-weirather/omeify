@@ -28,7 +28,6 @@ from omeify.io.image_planes import ImagePlaneSource
 from omeify.io.tiff import TiffPlaneReader
 from omeify.utils.generate_ome_xml import generate_multi_series_ome_xml, generate_ome_xml
 from omeify.utils.miti_header_validator import validate_miti_ome_tiff_header
-from omeify.utils.ome_schema_validator import OMESchemaValidator
 
 OME = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
 DTYPES = ("uint8", "uint16", "uint32", "int8", "int16", "int32", "float32", "float64")
@@ -542,8 +541,7 @@ def test_ordinary_inspection_escapes_controls_without_altering_json(tmp_path):
 
 
 def _require_xsd():
-    if OMESchemaValidator().schema_lxml is None:
-        pytest.skip("public workflow requires the real local ome-schema XSD")
+    pytest.importorskip("omeschema", reason="public workflow requires the real local XSD")
 
 
 @pytest.mark.parametrize("workflow", ["convert", "mutate"])

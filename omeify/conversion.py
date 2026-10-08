@@ -17,6 +17,7 @@ from .io.ome_tiff_writer import JPEGSubsampling, OMETiffWriter
 from .io.pixel_size import PixelSize
 from .io.source_reader import INPUT_TYPES, InputType, source_reader
 from .provenance import readable_runtime
+from .reports import complete_report
 from .workflow import (
     ChannelRenameMapping,
     RenameChannelsBy,
@@ -182,18 +183,12 @@ def convert(
     output_report = dict(write_report["output_file"])
     image_report = dict(write_report["image"])
     pyramid_report = dict(write_report["pyramid"])
-    if write_report["output_file"]["axes"] == "CYX":  # type: ignore[index]
-        pyramid_report["level_shapes_cyx"] = pyramid_report["level_shapes"]
-    elif write_report["output_file"]["axes"] == "YXS":  # type: ignore[index]
-        pyramid_report["level_shapes_yxs"] = pyramid_report["level_shapes"]
-
     options = dict(write_report["options"])
     options.update(
         {
-            "deidentify_ome": True,
             "input_type": input_type,
             "series": int(series),
-            "rename_channels": dict(normalized_renames),
+            "rename_channels": {str(key): value for key, value in normalized_renames.items()},
             "rename_channels_by": normalized_rename_mode,
             "channel_name_field": channel_name_field,
             "pixel_size_override": None if pixel_size is None else list(pixel_size.to_tuple()),
@@ -220,11 +215,6 @@ def convert(
                 if int(input_report["size_bytes"])
                 else None
             ),
-            "compression_ratio": (
-                output_size / int(input_report["size_bytes"])
-                if int(input_report["size_bytes"])
-                else None
-            ),
         },
         "versions": get_version_info(),
     }
@@ -234,4 +224,4 @@ def convert(
         f"{output_size:,}",
         readable_runtime(stop_epoch - start_epoch),
     )
-    return report
+    return complete_report(report, "conversion_report.schema.json")

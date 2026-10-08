@@ -5,8 +5,6 @@ import math
 import time
 from collections.abc import Callable
 
-_BAR_WIDTH = 20
-
 
 def _format_duration(seconds: float | None) -> str:
     if seconds is None or not math.isfinite(seconds) or seconds < 0:
@@ -37,12 +35,6 @@ def _format_quantity(value: float, unit: str) -> str:
     else:
         rendered = f"{numeric:.1f}"
     return f"{rendered} {unit}"
-
-
-def _progress_bar(fraction: float) -> str:
-    bounded = min(1.0, max(0.0, float(fraction)))
-    filled = min(_BAR_WIDTH, int(bounded * _BAR_WIDTH))
-    return "#" * filled + "-" * (_BAR_WIDTH - filled)
 
 
 class ProgressLogger:
@@ -81,6 +73,7 @@ class ProgressLogger:
         self._last_log = self._started
         self._completed = 0
         self._finished = False
+        self._stage = object()
         if self._enabled:
             if self._debug:
                 self._logger.info(
@@ -126,9 +119,8 @@ class ProgressLogger:
         if self._debug:
             rate_text = "unknown" if rate is None else f"{_format_quantity(rate, self.unit)}/s"
             self._logger.info(
-                "%s: [%s] %5.1f%% (%s of %s, %s, elapsed %s, ETA %s)",
+                "%s: %5.1f%% (%s of %s, %s, elapsed %s, ETA %s)",
                 self.label,
-                _progress_bar(fraction),
                 100.0 * fraction,
                 _format_quantity(self._completed, self.unit),
                 _format_quantity(self.total, self.unit),
@@ -143,14 +135,16 @@ class ProgressLogger:
                 else ("" if eta is None else f" ETA {_format_duration(eta)}")
             )
             self._logger.info(
-                "%s [%s] %3.0f%%%s",
+                "%s: %3.0f%%%s",
                 self.label,
-                _progress_bar(fraction),
                 100.0 * fraction,
                 suffix,
                 extra={
-                    "omeify_progress": True,
-                    "omeify_progress_complete": fraction >= 1.0,
+                    "omeify_progress": {
+                        "stage": self._stage, "label": self.label, "total": self.total,
+                        "unit": self.unit, "completed": self._completed,
+                        "complete": fraction >= 1.0,
+                    },
                 },
             )
         self._last_log = now

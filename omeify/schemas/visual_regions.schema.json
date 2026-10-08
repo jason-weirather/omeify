@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/visual_regions.schema.json",
+  "title": "Visual pixel-coordinate regions",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "features",
+    "omeify"
+  ],
+  "properties": {
+    "type": {
+      "const": "FeatureCollection"
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "properties",
+          "geometry"
+        ],
+        "properties": {
+          "type": {
+            "const": "Feature"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "objectType",
+              "approximate",
+              "source",
+              "normalized_bbox",
+              "requested_size_px",
+              "edge_shift_xy"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "objectType": {
+                "const": "annotation"
+              },
+              "approximate": {
+                "const": true
+              },
+              "source": {
+                "const": "omeify_visual_localization"
+              },
+              "normalized_bbox": {
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000
+                },
+                "minItems": 4,
+                "maxItems": 4
+              },
+              "requested_size_px": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "edge_shift_xy": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          },
+          "geometry": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "coordinates"
+            ],
+            "properties": {
+              "type": {
+                "const": "Polygon"
+              },
+              "coordinates": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  "minItems": 5,
+                  "maxItems": 5
+                },
+                "minItems": 1,
+                "maxItems": 1
+              }
+            }
+          }
+        }
+      },
+      "minItems": 0,
+      "maxItems": 64
+    },
+    "omeify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "series",
+        "image_size",
+        "question",
+        "source",
+        "allowed_scopes",
+        "preview",
+        "schema",
+        "coordinate_system",
+        "status",
+        "message",
+        "advisory"
+      ],
+      "properties": {
+        "series": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "image_size": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "question": {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/metadata_intelligence.schema.json#/$defs/question"
+        },
+        "source": {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/metadata_intelligence.schema.json#/properties/source"
+        },
+        "allowed_scopes": {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/metadata_intelligence.schema.json#/properties/allowed_scopes"
+        },
+        "preview": {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/preview.schema.json"
+        },
+        "schema": {
+          "const": "omeify.visual_regions/1"
+        },
+        "coordinate_system": {
+          "const": "level0_pixels"
+        },
+        "status": {
+          "enum": [
+            "located",
+            "unavailable"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "advisory": {
+          "const": true
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "omeify": {
+            "properties": {
+              "status": {
+                "const": "located"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "features": {
+            "minItems": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "features": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ]
+}

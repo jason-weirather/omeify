@@ -18,6 +18,7 @@ from omeify.io._writer.configuration import (
     OUTPUT_BYTEORDER,
 )
 from omeify.io.image_planes import protect_source_paths
+from omeify.reports import complete_report
 from omeify.utils.generate_ome_xml import (
     OMEIFY_PROVENANCE_NAMESPACE,
     generate_multi_series_ome_xml,
@@ -131,7 +132,7 @@ class OMEMultiSeriesWriter:
             ),
         )
 
-        return {
+        report = {
             "ome": {
                 "xml_string": omexml,
                 "schema_location": metadata.validator.schema_location,
@@ -166,6 +167,7 @@ class OMEMultiSeriesWriter:
             ),
             "verification": result.verification,
             "options": {
+                "metadata_minimization": True,
                 "compression": self._settings.compression_name,
                 "jpeg_quality": self._settings.jpeg_quality,
                 "jpeg_subsampling": self._settings.jpeg_subsampling,
@@ -177,6 +179,7 @@ class OMEMultiSeriesWriter:
                 "max_workers": self._settings.max_workers,
             },
         }
+        return complete_report(report, "multi_series_report.schema.json")
 
     @staticmethod
     def _normalize_series(

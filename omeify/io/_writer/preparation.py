@@ -175,12 +175,7 @@ def validate_ome_xml(
     LOGGER.info("Generating and validating %s OME-XML", context)
     validator = OMESchemaValidator()
     xml_is_valid = validator.validate(omexml)
-    if xml_is_valid is None:
-        raise RuntimeError(
-            "OME-XML schema validation could not be performed because no local "
-            "OME 2016-06 schema was available"
-        )
-    if not xml_is_valid:
+    if xml_is_valid is not True:
         raise ValueError("Generated OME-XML failed OME 2016-06 schema validation")
     miti_header = validate_miti_ome_tiff_header(omexml)
     if not miti_header.is_valid:

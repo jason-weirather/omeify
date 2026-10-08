@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/crop_report.schema.json",
+  "title": "Crop export report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "input_path",
+    "source_series",
+    "output_path",
+    "shatter",
+    "clip",
+    "outputs"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.crop/3"
+    },
+    "input_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_series": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "output_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "shatter": {
+      "enum": [
+        null,
+        "by_index",
+        "by_name"
+      ]
+    },
+    "clip": {
+      "type": "boolean"
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "regions",
+          "write_report"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/crop_region"
+            },
+            "minItems": 1
+          },
+          "write_report": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/multi_series_report.schema.json"
+          }
+        }
+      },
+      "minItems": 1
+    }
+  }
+}

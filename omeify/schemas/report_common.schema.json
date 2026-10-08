@@ -1,0 +1,1812 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json",
+  "title": "Shared current operation-report structures",
+  "$defs": {
+    "shape": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "minItems": 2,
+      "maxItems": 3
+    },
+    "pixel_size": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "ome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "xml_string",
+        "schema_location",
+        "xml_is_valid",
+        "uuid"
+      ],
+      "properties": {
+        "xml_string": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schema_location": {
+          "type": "string",
+          "minLength": 1
+        },
+        "xml_is_valid": {
+          "const": true
+        },
+        "uuid": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "miti": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/tiff_inspection.schema.json#/$defs/mitiAssessment"
+    },
+    "source_channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "id",
+        "name",
+        "source_id",
+        "id_is_generated",
+        "source_metadata"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id_is_generated": {
+          "type": "boolean"
+        },
+        "source_metadata": {
+          "type": "object"
+        }
+      }
+    },
+    "input_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size_bytes",
+        "type_description",
+        "dtype",
+        "shape",
+        "normalized_shape",
+        "source_axes",
+        "output_axes",
+        "byte_order",
+        "pixel_size",
+        "channels"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type_description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dtype": {
+          "enum": [
+            "uint8",
+            "uint16",
+            "uint32",
+            "int8",
+            "int16",
+            "int32",
+            "float32",
+            "float64"
+          ]
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2
+        },
+        "normalized_shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2,
+          "maxItems": 3
+        },
+        "source_axes": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_axes": {
+          "enum": [
+            "YX",
+            "CYX",
+            "YXS"
+          ]
+        },
+        "byte_order": {
+          "enum": [
+            "little",
+            "big"
+          ]
+        },
+        "pixel_size": {
+          "anyOf": [
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "minLength": 1
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "channels": {
+          "type": "array",
+          "items": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/source_channel"
+          },
+          "minItems": 1
+        },
+        "source_miti_header": {
+          "anyOf": [
+            {
+              "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/miti"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "output_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size_bytes",
+        "type_description",
+        "dtype",
+        "shape",
+        "axes",
+        "byte_order",
+        "lossless_compression"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "type_description": {
+          "const": "Pyramidal OME-TIFF"
+        },
+        "dtype": {
+          "enum": [
+            "uint8",
+            "uint16",
+            "uint32",
+            "int8",
+            "int16",
+            "int32",
+            "float32",
+            "float64"
+          ]
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2,
+          "maxItems": 3
+        },
+        "axes": {
+          "enum": [
+            "YX",
+            "CYX",
+            "YXS"
+          ]
+        },
+        "byte_order": {
+          "const": "little"
+        },
+        "lossless_compression": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "axes": {
+                "const": "YX"
+              }
+            },
+            "required": [
+              "axes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "shape": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "axes": {
+                "const": "CYX"
+              }
+            },
+            "required": [
+              "axes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "shape": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "axes": {
+                "const": "YXS"
+              }
+            },
+            "required": [
+              "axes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "shape": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "const": 3
+                  }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          }
+        }
+      ]
+    },
+    "multi_output_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size_bytes",
+        "type_description",
+        "series_count",
+        "top_level_ifd_count",
+        "byte_order",
+        "lossless_compression"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "type_description": {
+          "const": "Multi-series pyramidal OME-TIFF"
+        },
+        "series_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "top_level_ifd_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "byte_order": {
+          "const": "little"
+        },
+        "lossless_compression": {
+          "type": "boolean"
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image_type",
+        "channel_names",
+        "size_c",
+        "logical_channel_count",
+        "samples_per_pixel",
+        "interleaved",
+        "pixel_size",
+        "significant_bits",
+        "float32_mantissa_bits",
+        "float_precision_bits",
+        "icc_profile_present"
+      ],
+      "properties": {
+        "image_type": {
+          "enum": [
+            "multichannel",
+            "rgb",
+            "label"
+          ]
+        },
+        "channel_names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "size_c": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "logical_channel_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "samples_per_pixel": {
+          "enum": [
+            1,
+            3
+          ]
+        },
+        "interleaved": {
+          "type": "boolean"
+        },
+        "pixel_size": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "significant_bits": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "float32_mantissa_bits": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 22
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "float_precision_bits": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 23
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "icc_profile_present": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "image_type": {
+                "const": "rgb"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "size_c": {
+                "const": 3
+              },
+              "logical_channel_count": {
+                "const": 1
+              },
+              "samples_per_pixel": {
+                "const": 3
+              },
+              "interleaved": {
+                "const": true
+              },
+              "channel_names": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "maxItems": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "samples_per_pixel": {
+                "const": 1
+              },
+              "interleaved": {
+                "const": false
+              },
+              "icc_profile_present": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    "pyramid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tile_size",
+        "axes",
+        "downsample_method",
+        "level_shapes",
+        "subresolution_count"
+      ],
+      "properties": {
+        "tile_size": {
+          "type": "integer",
+          "minimum": 16,
+          "multipleOf": 16
+        },
+        "axes": {
+          "enum": [
+            "YX",
+            "CYX",
+            "YXS"
+          ]
+        },
+        "downsample_method": {
+          "enum": [
+            "mean",
+            "nearest"
+          ]
+        },
+        "level_shapes": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 2,
+            "maxItems": 3
+          },
+          "minItems": 1
+        },
+        "subresolution_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "write_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metadata_minimization",
+        "compression",
+        "jpeg_quality",
+        "jpeg_subsampling",
+        "display_uuid",
+        "software",
+        "float32_mantissa_bits",
+        "max_workers"
+      ],
+      "properties": {
+        "metadata_minimization": {
+          "const": true
+        },
+        "compression": {
+          "enum": [
+            "LZW",
+            "Deflate",
+            "ZSTD",
+            "JPEG",
+            "Uncompressed"
+          ]
+        },
+        "jpeg_quality": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jpeg_subsampling": {
+          "anyOf": [
+            {
+              "enum": [
+                "444",
+                "422",
+                "420",
+                "411"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display_uuid": {
+          "type": "boolean"
+        },
+        "software": {
+          "type": "string",
+          "minLength": 1
+        },
+        "float32_mantissa_bits": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 22
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_workers": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_time",
+        "stop_time",
+        "run_time",
+        "output_to_input_size_ratio"
+      ],
+      "properties": {
+        "start_time": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stop_time": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_time": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_to_input_size_ratio": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "versions": {
+      "type": "object",
+      "required": [
+        "omeify",
+        "python"
+      ],
+      "properties": {
+        "omeify": {
+          "type": "string",
+          "minLength": 1
+        },
+        "python": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "pixel_verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "mode",
+        "sampling",
+        "all_pixels_checked",
+        "plane_levels_checked",
+        "base_points_decoded",
+        "lossless_base_points_compared",
+        "pyramid_points_decoded",
+        "lossless_pyramid_points_compared",
+        "base_comparison",
+        "pyramid_comparison",
+        "pyramid_reference",
+        "source_reader_independent"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0"
+        },
+        "mode": {
+          "const": "sampled"
+        },
+        "sampling": {
+          "const": "top_left_center_bottom_right_per_plane_per_level"
+        },
+        "all_pixels_checked": {
+          "const": false
+        },
+        "plane_levels_checked": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "base_points_decoded": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lossless_base_points_compared": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pyramid_points_decoded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lossless_pyramid_points_compared": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "base_comparison": {
+          "const": "bitwise_after_byte_order_normalization"
+        },
+        "pyramid_comparison": {
+          "const": "nearest_bitwise_or_mean_numeric_equal_nan"
+        },
+        "pyramid_reference": {
+          "const": "preceding_decoded_output_level_for_lossless_series"
+        },
+        "source_reader_independent": {
+          "const": false
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ome_tiff_recognized",
+        "bigtiff",
+        "software_tag_matches",
+        "tiff_data_mapping_matches",
+        "top_level_ifd_count_matches",
+        "output_pixels_decodable",
+        "ome_physical_sizes_match_specs",
+        "tiff_calibration_matches_specs",
+        "pyramid_calibration_matches_specs",
+        "output_byte_order",
+        "base_pixel_values_checked",
+        "base_pixel_values_match",
+        "planes_checked",
+        "points_per_plane",
+        "calibration_ifds_checked",
+        "calibration_relative_tolerance",
+        "pixel_verification",
+        "byte_order_metadata_matches_tiff",
+        "significant_bits_matches_spec",
+        "channel_sample_layout_matches",
+        "pyramid_annotation_linked",
+        "dtype_matches_source",
+        "axes_match",
+        "pyramid_level_shapes_match",
+        "samples_per_pixel_match",
+        "photometric_matches",
+        "compression_matches_requested",
+        "subifd_layout_matches",
+        "all_levels_tiled",
+        "jpeg_subsampling_matches_requested",
+        "icc_profile_preserved"
+      ],
+      "properties": {
+        "ome_tiff_recognized": {
+          "const": true
+        },
+        "bigtiff": {
+          "const": true
+        },
+        "software_tag_matches": {
+          "const": true
+        },
+        "tiff_data_mapping_matches": {
+          "const": true
+        },
+        "top_level_ifd_count_matches": {
+          "const": true
+        },
+        "output_pixels_decodable": {
+          "const": true
+        },
+        "ome_physical_sizes_match_specs": {
+          "const": true
+        },
+        "tiff_calibration_matches_specs": {
+          "const": true
+        },
+        "pyramid_calibration_matches_specs": {
+          "const": true
+        },
+        "output_byte_order": {
+          "const": "little"
+        },
+        "base_pixel_values_checked": {
+          "type": "boolean"
+        },
+        "base_pixel_values_match": {
+          "enum": [
+            true,
+            null
+          ]
+        },
+        "planes_checked": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "points_per_plane": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "calibration_ifds_checked": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "calibration_relative_tolerance": {
+          "type": "number",
+          "minimum": 0
+        },
+        "pixel_verification": {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/pixel_verification"
+        },
+        "byte_order_metadata_matches_tiff": {
+          "const": true
+        },
+        "significant_bits_matches_spec": {
+          "const": true
+        },
+        "channel_sample_layout_matches": {
+          "const": true
+        },
+        "pyramid_annotation_linked": {
+          "const": true
+        },
+        "dtype_matches_source": {
+          "const": true
+        },
+        "axes_match": {
+          "const": true
+        },
+        "pyramid_level_shapes_match": {
+          "const": true
+        },
+        "samples_per_pixel_match": {
+          "const": true
+        },
+        "photometric_matches": {
+          "const": true
+        },
+        "compression_matches_requested": {
+          "const": true
+        },
+        "subifd_layout_matches": {
+          "const": true
+        },
+        "all_levels_tiled": {
+          "const": true
+        },
+        "jpeg_subsampling_matches_requested": {
+          "enum": [
+            true,
+            null
+          ]
+        },
+        "icc_profile_preserved": {
+          "enum": [
+            true,
+            null
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "base_pixel_values_checked": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "base_pixel_values_match": {
+                "const": true
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "base_pixel_values_match": {
+                "const": null
+              }
+            }
+          }
+        }
+      ]
+    },
+    "multi_verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ome_tiff_recognized",
+        "bigtiff",
+        "software_tag_matches",
+        "tiff_data_mapping_matches",
+        "top_level_ifd_count_matches",
+        "output_pixels_decodable",
+        "ome_physical_sizes_match_specs",
+        "tiff_calibration_matches_specs",
+        "pyramid_calibration_matches_specs",
+        "output_byte_order",
+        "base_pixel_values_checked",
+        "base_pixel_values_match",
+        "planes_checked",
+        "points_per_plane",
+        "calibration_ifds_checked",
+        "calibration_relative_tolerance",
+        "pixel_verification",
+        "image_count_matches",
+        "series_names_match",
+        "metadata_matches_specs",
+        "pyramid_annotations_linked",
+        "series_layouts_match",
+        "storage_matches_requested",
+        "provenance_annotation_linked",
+        "series_checked"
+      ],
+      "properties": {
+        "ome_tiff_recognized": {
+          "$ref": "#/$defs/verification/properties/ome_tiff_recognized"
+        },
+        "bigtiff": {
+          "$ref": "#/$defs/verification/properties/bigtiff"
+        },
+        "software_tag_matches": {
+          "$ref": "#/$defs/verification/properties/software_tag_matches"
+        },
+        "tiff_data_mapping_matches": {
+          "$ref": "#/$defs/verification/properties/tiff_data_mapping_matches"
+        },
+        "top_level_ifd_count_matches": {
+          "$ref": "#/$defs/verification/properties/top_level_ifd_count_matches"
+        },
+        "output_pixels_decodable": {
+          "$ref": "#/$defs/verification/properties/output_pixels_decodable"
+        },
+        "ome_physical_sizes_match_specs": {
+          "$ref": "#/$defs/verification/properties/ome_physical_sizes_match_specs"
+        },
+        "tiff_calibration_matches_specs": {
+          "$ref": "#/$defs/verification/properties/tiff_calibration_matches_specs"
+        },
+        "pyramid_calibration_matches_specs": {
+          "$ref": "#/$defs/verification/properties/pyramid_calibration_matches_specs"
+        },
+        "output_byte_order": {
+          "$ref": "#/$defs/verification/properties/output_byte_order"
+        },
+        "base_pixel_values_checked": {
+          "$ref": "#/$defs/verification/properties/base_pixel_values_checked"
+        },
+        "base_pixel_values_match": {
+          "$ref": "#/$defs/verification/properties/base_pixel_values_match"
+        },
+        "planes_checked": {
+          "$ref": "#/$defs/verification/properties/planes_checked"
+        },
+        "points_per_plane": {
+          "$ref": "#/$defs/verification/properties/points_per_plane"
+        },
+        "calibration_ifds_checked": {
+          "$ref": "#/$defs/verification/properties/calibration_ifds_checked"
+        },
+        "calibration_relative_tolerance": {
+          "$ref": "#/$defs/verification/properties/calibration_relative_tolerance"
+        },
+        "pixel_verification": {
+          "$ref": "#/$defs/verification/properties/pixel_verification"
+        },
+        "image_count_matches": {
+          "const": true
+        },
+        "series_names_match": {
+          "const": true
+        },
+        "metadata_matches_specs": {
+          "const": true
+        },
+        "pyramid_annotations_linked": {
+          "const": true
+        },
+        "series_layouts_match": {
+          "const": true
+        },
+        "storage_matches_requested": {
+          "const": true
+        },
+        "provenance_annotation_linked": {
+          "enum": [
+            true,
+            null
+          ]
+        },
+        "series_checked": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "base_pixel_values_checked": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "base_pixel_values_match": {
+                "const": true
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "base_pixel_values_match": {
+                "const": null
+              }
+            }
+          }
+        }
+      ]
+    },
+    "series": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image_type",
+        "channel_names",
+        "size_c",
+        "logical_channel_count",
+        "samples_per_pixel",
+        "pixel_size",
+        "significant_bits",
+        "float32_mantissa_bits",
+        "float_precision_bits",
+        "index",
+        "name",
+        "dtype",
+        "shape",
+        "axes",
+        "compression",
+        "tile_size",
+        "downsample_method",
+        "level_shapes",
+        "subresolution_count"
+      ],
+      "properties": {
+        "image_type": {
+          "$ref": "#/$defs/image/properties/image_type"
+        },
+        "channel_names": {
+          "$ref": "#/$defs/image/properties/channel_names"
+        },
+        "size_c": {
+          "$ref": "#/$defs/image/properties/size_c"
+        },
+        "logical_channel_count": {
+          "$ref": "#/$defs/image/properties/logical_channel_count"
+        },
+        "samples_per_pixel": {
+          "$ref": "#/$defs/image/properties/samples_per_pixel"
+        },
+        "pixel_size": {
+          "$ref": "#/$defs/image/properties/pixel_size"
+        },
+        "significant_bits": {
+          "$ref": "#/$defs/image/properties/significant_bits"
+        },
+        "float32_mantissa_bits": {
+          "$ref": "#/$defs/image/properties/float32_mantissa_bits"
+        },
+        "float_precision_bits": {
+          "$ref": "#/$defs/image/properties/float_precision_bits"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dtype": {
+          "enum": [
+            "uint8",
+            "uint16",
+            "uint32",
+            "int8",
+            "int16",
+            "int32",
+            "float32",
+            "float64"
+          ]
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2,
+          "maxItems": 3
+        },
+        "axes": {
+          "enum": [
+            "YX",
+            "CYX",
+            "YXS"
+          ]
+        },
+        "compression": {
+          "enum": [
+            "LZW",
+            "Deflate",
+            "ZSTD",
+            "JPEG",
+            "Uncompressed"
+          ]
+        },
+        "tile_size": {
+          "type": "integer",
+          "minimum": 16,
+          "multipleOf": 16
+        },
+        "downsample_method": {
+          "enum": [
+            "mean",
+            "nearest"
+          ]
+        },
+        "level_shapes": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 2,
+            "maxItems": 3
+          },
+          "minItems": 1
+        },
+        "subresolution_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "axes": {
+                "const": "YX"
+              }
+            },
+            "required": [
+              "axes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "shape": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "axes": {
+                "const": "CYX"
+              }
+            },
+            "required": [
+              "axes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "shape": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "axes": {
+                "const": "YXS"
+              }
+            },
+            "required": [
+              "axes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "shape": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "const": 3
+                  }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "image_type": {
+                "const": "rgb"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "dtype": {
+                "const": "uint8"
+              },
+              "axes": {
+                "const": "YXS"
+              },
+              "size_c": {
+                "const": 3
+              },
+              "logical_channel_count": {
+                "const": 1
+              },
+              "samples_per_pixel": {
+                "const": 3
+              },
+              "channel_names": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "maxItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "image_type": {
+                "const": "label"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "axes": {
+                "const": "YX"
+              },
+              "downsample_method": {
+                "const": "nearest"
+              },
+              "samples_per_pixel": {
+                "const": 1
+              },
+              "compression": {
+                "not": {
+                  "const": "JPEG"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "multi_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metadata_minimization",
+        "compression",
+        "jpeg_quality",
+        "jpeg_subsampling",
+        "display_uuid",
+        "software",
+        "float32_mantissa_bits",
+        "max_workers",
+        "tile_size",
+        "pyramid_levels"
+      ],
+      "properties": {
+        "metadata_minimization": {
+          "$ref": "#/$defs/write_options/properties/metadata_minimization"
+        },
+        "compression": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jpeg_quality": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "jpeg_subsampling": {
+          "enum": [
+            "444",
+            "422",
+            "420",
+            "411"
+          ]
+        },
+        "display_uuid": {
+          "$ref": "#/$defs/write_options/properties/display_uuid"
+        },
+        "software": {
+          "$ref": "#/$defs/write_options/properties/software"
+        },
+        "float32_mantissa_bits": {
+          "$ref": "#/$defs/write_options/properties/float32_mantissa_bits"
+        },
+        "max_workers": {
+          "$ref": "#/$defs/write_options/properties/max_workers"
+        },
+        "tile_size": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 16,
+              "multipleOf": 16
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pyramid_levels": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "conversion_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metadata_minimization",
+        "compression",
+        "jpeg_quality",
+        "jpeg_subsampling",
+        "display_uuid",
+        "software",
+        "float32_mantissa_bits",
+        "max_workers",
+        "input_type",
+        "series",
+        "rename_channels",
+        "rename_channels_by",
+        "channel_name_field",
+        "pixel_size_override"
+      ],
+      "properties": {
+        "metadata_minimization": {
+          "$ref": "#/$defs/write_options/properties/metadata_minimization"
+        },
+        "compression": {
+          "$ref": "#/$defs/write_options/properties/compression"
+        },
+        "jpeg_quality": {
+          "$ref": "#/$defs/write_options/properties/jpeg_quality"
+        },
+        "jpeg_subsampling": {
+          "$ref": "#/$defs/write_options/properties/jpeg_subsampling"
+        },
+        "display_uuid": {
+          "$ref": "#/$defs/write_options/properties/display_uuid"
+        },
+        "software": {
+          "$ref": "#/$defs/write_options/properties/software"
+        },
+        "float32_mantissa_bits": {
+          "$ref": "#/$defs/write_options/properties/float32_mantissa_bits"
+        },
+        "max_workers": {
+          "$ref": "#/$defs/write_options/properties/max_workers"
+        },
+        "input_type": {
+          "enum": [
+            "qptiff_mif",
+            "qptiff_fusion",
+            "indica_mif",
+            "component",
+            "ome_tiff",
+            "qptiff_he",
+            "svs"
+          ]
+        },
+        "series": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rename_channels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rename_channels_by": {
+          "enum": [
+            null,
+            "name",
+            "index"
+          ]
+        },
+        "channel_name_field": {
+          "enum": [
+            null,
+            "name",
+            "biomarker",
+            "auto"
+          ]
+        },
+        "pixel_size_override": {
+          "anyOf": [
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "minLength": 1
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "mutation_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metadata_minimization",
+        "compression",
+        "jpeg_quality",
+        "jpeg_subsampling",
+        "display_uuid",
+        "software",
+        "float32_mantissa_bits",
+        "max_workers",
+        "input_type",
+        "series",
+        "rename_channels",
+        "rename_channels_by",
+        "channel_name_field",
+        "pixel_size_override",
+        "operation"
+      ],
+      "properties": {
+        "metadata_minimization": {
+          "const": true
+        },
+        "compression": {
+          "enum": [
+            "LZW",
+            "Deflate",
+            "ZSTD",
+            "JPEG",
+            "Uncompressed"
+          ]
+        },
+        "jpeg_quality": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jpeg_subsampling": {
+          "anyOf": [
+            {
+              "enum": [
+                "444",
+                "422",
+                "420",
+                "411"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display_uuid": {
+          "type": "boolean"
+        },
+        "software": {
+          "type": "string",
+          "minLength": 1
+        },
+        "float32_mantissa_bits": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 22
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_workers": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_type": {
+          "$ref": "#/$defs/conversion_options/properties/input_type"
+        },
+        "series": {
+          "$ref": "#/$defs/conversion_options/properties/series"
+        },
+        "rename_channels": {
+          "$ref": "#/$defs/conversion_options/properties/rename_channels"
+        },
+        "rename_channels_by": {
+          "$ref": "#/$defs/conversion_options/properties/rename_channels_by"
+        },
+        "channel_name_field": {
+          "$ref": "#/$defs/conversion_options/properties/channel_name_field"
+        },
+        "pixel_size_override": {
+          "$ref": "#/$defs/conversion_options/properties/pixel_size_override"
+        },
+        "operation": {
+          "enum": [
+            "dtype",
+            "float32_precision"
+          ]
+        },
+        "dtype": {
+          "enum": [
+            "uint8",
+            "uint16"
+          ]
+        },
+        "range_mode": {
+          "enum": [
+            "auto",
+            "preserve",
+            "full"
+          ]
+        },
+        "sample_pixels_per_channel": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "auto_max_normalized_rmse": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "crop_region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_index",
+        "name",
+        "output_series",
+        "output_name",
+        "bounds",
+        "requested_bounds",
+        "clipped",
+        "source_offset_xy"
+      ],
+      "properties": {
+        "input_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_series": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bounds": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "requested_bounds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "clipped": {
+          "type": "boolean"
+        },
+        "source_offset_xy": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    }
+  }
+}

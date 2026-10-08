@@ -199,7 +199,7 @@ def test_all_public_routes_write_rgb_with_no_storage_options(tmp_path, route) ->
                     report = convert(source, output, input_type=profile)
                 else:
                     result = CliRunner().invoke(main, ["convert", str(source), "--type", profile,
-                                                       "-o", str(output)])
+                                                       "-o", str(output), "--output-json", "-"])
                     assert result.exit_code == 0, result.output
                     report = json.loads(result.output)
         assert report["options"]["jpeg_quality"] == 90

@@ -14,7 +14,7 @@ from omeify.inspection import TiffInspector
 from ..image_metadata import ImageLevel, ImageMetadata, integer
 from ..image_source import ImageSource
 from ..pixel_size import PixelSize, consistent_tiff_resolution_pixel_size
-from ..tiff import TiffPlaneReader
+from ..tiff import TiffPlaneReader, validate_rgb_page
 
 
 LOGGER = logging.getLogger(__name__)
@@ -104,7 +104,12 @@ class TiffSource(ImageSource):
                 raise ValueError("TIFF level has no Y/X geometry")
             # Channel axis letters may be vendor-defined (I/Q), so check physical planes.
             height, width = int(layout["Y"]), int(layout["X"])
-            for page in pages:
+            for plane_index, page in enumerate(pages):
+                if axes == "YXS":
+                    validate_rgb_page(
+                        page, context=f"TIFF series {self.series_index}, level {index}, "
+                        f"plane {plane_index}",
+                    )
                 if (int(page.imagelength), int(page.imagewidth)) != (height, width):
                     raise ValueError("Pyramid channel geometry differs from the advertised raster")
                 if np.dtype(page.dtype).newbyteorder("=") != base_dtype:

@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
 from contextlib import ExitStack
-from .io.base import MultichannelImage
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -24,10 +23,12 @@ from .dtype_mutation import (
 )
 from .io._writer.configuration import normalize_float32_mantissa_bits
 from .io._writer.precision import float32_significant_bits
+from .io.base import MultichannelImage
 from .io.ome_tiff_writer import DownsampleMethod, OMETiffWriter
 from .io.pixel_size import PixelSize
 from .io.source_reader import PLANAR_INPUT_TYPES, PlanarInputType, source_reader
 from .provenance import readable_runtime
+from .reports import complete_report
 from .workflow import (
     ChannelRenameMapping,
     RenameChannelsBy,
@@ -323,7 +324,7 @@ def mutate(
             "input_type": input_type,
             "series": int(series),
             "channel_name_field": channel_name_field,
-            "rename_channels": dict(normalized_renames),
+            "rename_channels": {str(key): value for key, value in normalized_renames.items()},
             "rename_channels_by": normalized_rename_mode,
             "pixel_size_override": (
                 None if pixel_size is None else list(pixel_size.to_tuple())
@@ -376,4 +377,4 @@ def mutate(
         f"{output_size:,}",
         readable_runtime(stop_epoch - start_epoch),
     )
-    return report
+    return complete_report(report, "mutation_report.schema.json")

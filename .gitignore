@@ -22,7 +22,6 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-it.
 *.manifest
 *.spec
 pip-log.txt
@@ -55,17 +54,7 @@ target/
 .ipynb_checkpoints
 profile_default/
 ipython_config.py
-code is
-in version control.
-dependencies or dependencies
-don't work, or not
-poetry.lock in version control.
-reproducibility, and is more
-https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-in version control.
-recommended to not include it
 .pdm.toml
-github.com/pdm-project/pdm
 __pypackages__/
 celerybeat-schedule
 celerybeat.pid
@@ -87,7 +76,3 @@ dmypy.json
 .pyre/
 .pytype/
 cython_debug/
-JetBrains.gitignore that can
-https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-more nuclear
-entire idea folder.

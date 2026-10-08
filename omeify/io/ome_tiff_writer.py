@@ -22,6 +22,7 @@ from omeify.io._writer.configuration import (
 from omeify.io._writer.single_verification import verify_single_output
 from omeify.io.base import Image
 from omeify.io.image_planes import ImagePlaneSource, protect_source_paths
+from omeify.reports import complete_report
 from omeify.utils.generate_ome_xml import generate_ome_xml
 
 LOGGER = logging.getLogger(__name__)
@@ -128,7 +129,7 @@ class OMETiffWriter:
             ),
         )
         compression = prepared.compression
-        return {
+        report = {
             "ome": {
                 "xml_string": omexml,
                 "schema_location": metadata.validator.schema_location,
@@ -142,7 +143,6 @@ class OMETiffWriter:
                 "type_description": "Pyramidal OME-TIFF",
                 "dtype": spec.dtype.name,
                 "shape": list(spec.output_shape),
-                "shape_cyx": list(spec.shape_cyx),
                 "axes": spec.output_axes,
                 "byte_order": result.verification["output_byte_order"],
                 "lossless_compression": compression.lossless,
@@ -175,6 +175,7 @@ class OMETiffWriter:
             },
             "verification": result.verification,
             "options": {
+                "metadata_minimization": True,
                 "compression": compression.name,
                 "jpeg_quality": (
                     self._settings.jpeg_quality if compression.name == "JPEG" else None
@@ -190,6 +191,7 @@ class OMETiffWriter:
                 "max_workers": self._settings.max_workers,
             },
         }
+        return complete_report(report, "write_report.schema.json")
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(path={str(self.path)!r})"

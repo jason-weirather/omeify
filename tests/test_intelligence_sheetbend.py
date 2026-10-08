@@ -37,13 +37,14 @@ def registry_with(*scopes, default=None):
 def packet():
     records = [{
         "id": "m1", "locations": ["IFD[0]/DateTime"], "value": "2025:04:04 12:00:00",
-        "truncated": False, "occurrences": 1,
+        "truncated": False, "occurrences": 1, "origin": "metadata",
     }]
     return {
         "records": records,
         "coverage": {
             "ifds_scanned": 1, "tags_scanned": 1, "records_available": 1,
             "records_included": 1, "records_truncated": 0,
+            "computed_records_available": 0, "computed_records_included": 0,
             "metadata_chars": len(json.dumps(records, ensure_ascii=False, separators=(",", ":"))),
             "max_metadata_chars": 16000, "scan_limited": False,
             "omitted": {

@@ -1,12 +1,13 @@
-# Images and sources: Omeify 0.18
+# Images and sources
 
 Omeify has one library input model: an **Image** backed by an **ImageSource**.
 File readers, array images, and procedural images use the same lifecycle,
 regional reads, logical channels, and writer bridge. Omeify does not import
 Mocktome or contain simulator-specific dispatch.
 
-This is a deliberate breaking library cleanup. Conversion/mutation policies
-and report structure are unchanged. Independently, the CLI now requires
+The Image API established in 0.18 remains the current interface. Conversion and
+mutation numeric policies are unchanged. The [0.21 report cleanup](reports.md)
+changes serialized report fields and CLI presentation, not this image model. The CLI requires
 `--output` / `-o` for the destination of `convert` and `mutate`; their Python
 call signatures are unchanged. There are no deprecated forwarding APIs. File opening
 now validates the complete advertised level description; inconsistent metadata

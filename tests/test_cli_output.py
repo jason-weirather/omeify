@@ -44,7 +44,7 @@ def test_output_option_forwards_paths_and_keeps_report_separate(
     assert workflow.call_args.args == (source, output)
     assert all(isinstance(path, Path) for path in workflow.call_args.args)
     assert workflow.call_args.kwargs["overwrite"] is False
-    assert result.output == ""
+    assert result.stdout == f"Wrote {output}\n"
     assert json.loads(report.read_text(encoding="utf-8")) == {"status": "ok"}
 
 

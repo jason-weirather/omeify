@@ -147,13 +147,13 @@ def test_cli_question_replaces_summary_and_keeps_stdout_clean(image_path, model_
     args = ["inspect", str(image_path), "-i", flag, "can u gib me a channel list"]
     result = runner.invoke(main, args + (["--json"] if as_json else []))
     assert result.exit_code == 0, result.stderr
-    assert "Answering image question through Sheetbend" in result.stderr
+    assert "Answering metadata question" in result.stderr
     assert "Sheetbend..." not in result.stdout
     if as_json:
         report = json.loads(result.stdout)
         assert report["intelligence"]["question"] == "can u gib me a channel list"
         assert "summary" not in report["intelligence"]
-        assert report["intelligence"]["schema_version"] == "1.2"
+        assert report["intelligence"]["schema_version"] == "2.0"
         assert report["intelligence"]["prompt_version"] == "3.0"
     else:
         plain = TiffInspector(image_path).render_text()
