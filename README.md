@@ -8,10 +8,18 @@ controlled metadata. It also provides a Python library for reading images and
 writing new products under the same rules.
 
 Microscopy TIFFs can arrive with different channel layouts, calibration
-conventions, pyramid structures, and vendor descriptions. Omeify's purpose is to
-resolve those differences at the file boundary, rather than make every downstream
-application interpret them again. Its destination is a documented, narrower
-profile of **OME-TIFF**, not a new private file format.
+conventions, pyramid structures, and vendor descriptions. Those descriptions
+may also contain information that should remain private, including patient
+identifiers, specimen labels, user names, and file paths. Omeify resolves
+these differences at the file boundary and **minimizes metadata** by building
+a controlled OME-XML header rather than copying arbitrary source descriptions.
+The result is a documented, narrower profile of **OME-TIFF**, not a new private
+file format.
+
+Metadata minimization is an important step when preparing an image for
+deidentification review, but **it does not deidentify or certify the image**.
+Retained channel names, caller-supplied provenance, and image pixels (including
+burned-in labels) still require independent review before sharing.
 
 The file is the common ground. Convert once and use an OME-aware application such
 as **QuPath**, read the result with **tifffile**, or build on Omeify's own regional
@@ -34,8 +42,10 @@ Omeify claims to have invented.
 Use **tifffile directly** for general TIFF manipulation or a straightforward array
 write where you want to choose and maintain the file's structure and metadata.
 Use **Omeify** when you want to delegate a recurring microscopy-image contract:
-explicit source interpretation, a controlled output header, calibration checks,
-appropriate pyramids, bounded writing, and verification before installation.
+explicit source interpretation, a newly constructed, metadata-minimized OME-XML
+header, calibration checks, appropriate pyramids, bounded writing, and verification
+before installation. This limits incidental source metadata carried into the output
+without replacing the remaining deidentification review.
 
 The value is not a shorter spelling of `imwrite()`. It is that a supported vendor
 file, a NumPy image, and a calibrated external image provider can all be written
@@ -129,10 +139,12 @@ and link companion specimen, reagent, processing, and analysis metadata through
 your study's own data-management system. Minimal means sufficient and deliberate
 at this boundary, not that the experiment's other metadata is unimportant.
 
-**Metadata minimization is not deidentification.** Omeify does not inspect pixels
-for burned-in identifiers. Permitted channel names, caller-supplied provenance,
-and diagnostic reports can also contain sensitive values. Review them before
-sharing; inspection deliberately reveals information that conversion may omit.
+**Metadata minimization is not deidentification or certification.** Omeify does
+not inspect pixels for burned-in identifiers. Permitted channel names,
+caller-supplied provenance, and diagnostic reports can also contain sensitive
+values. Review the image and accompanying artifacts under the applicable
+deidentification and data-sharing process before release. `inspect` deliberately
+reveals information that conversion may omit.
 
 ## Installation
 
