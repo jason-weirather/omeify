@@ -34,52 +34,47 @@ the consumer supporting the selected image type and encoding.
 
 ## Why use omeify instead of tifffile directly?
 
-Omeify **builds on [tifffile]**, rather than replacing it. Tifffile already reads
-and writes OME-TIFF, supports tiled and pyramidal data, exposes metadata, and
-provides regional access. Those capabilities are the foundation, not something
-Omeify claims to have invented.
+Omeify uses [tifffile] under the hood. Tifffile already reads and writes
+OME-TIFF, supports tiled images and pyramids, and provides access to metadata
+and image regions.
 
-Use **tifffile directly** for general TIFF manipulation or a straightforward array
-write where you want to choose and maintain the file's structure and metadata.
-Use **Omeify** when you want to delegate a recurring microscopy-image contract:
-explicit source interpretation, a newly constructed, metadata-minimized OME-XML
-header, calibration checks, appropriate pyramids, bounded writing, and verification
-before installation. This limits incidental source metadata carried into the output
-without replacing the remaining deidentification review.
+Use **tifffile directly** when you want full control over a TIFF's structure
+and metadata. Use **Omeify** when you want supported microscopy images to follow
+consistent rules for channels, calibration, metadata minimization, pyramids,
+and **safe writing**. Omeify verifies the output before replacing an existing file.
+This reduces unwanted source metadata, but does not replace deidentification review.
 
-The value is not a shorter spelling of `imwrite()`. It is that a supported vendor
-file, a NumPy image, and a calibrated external image provider can all be written
-through the same policy, without each application constructing its own OME-XML or
-TIFF-plane mapping. A valid OME-TIFF written by another tool need not follow
-Omeify's narrower profile; conversion can normalize it when that profile is useful.
+The same rules apply to supported vendor files, NumPy arrays, and calibrated
+image providers, so each application doesn't have to build its own OME-XML or
+TIFF-plane mapping. The result remains a standard OME-TIFF, even when the input
+was written by another tool.
 
 ## The OME-TIFF home base
 
-**For a successful write, these are the construction rules you can rely on.**
-Image content and selected storage options still vary; the representation and the
-rules for describing it do not depend on which supported input supplied it.
+**Every OME-TIFF that Omeify writes follows these rules.** Pixel types,
+compression, and content can vary, but the file structure and metadata remain
+predictable.
 
 | Aspect | Omeify's output contract |
 |---|---|
-| Container | A self-contained, little-endian BigTIFF with OME 2016-06 XML. No external OME companion file is needed to locate the written pixels. |
-| Image layout | Single-plane images (`YX`), multiplex channel stacks (`CYX`), or interleaved RGB (`YXS`). RGB has three color samples per pixel, not three fluorescence channels. |
-| Numeric fidelity | `convert` preserves the base image's dtype and intensity scale. **Only RGB is restricted to `uint8`**; scalar and multiplex images support other integer and floating-point types, including `uint16`, `float32`, and `float64`. Lossless encoding preserves base values; JPEG is lossy. Explicit dtype or precision changes belong to `mutate` or a configured library operation. |
-| Calibration | X and Y physical pixel sizes are required for writing and serialized in **µm**. OME sizes and TIFF resolution tags are checked against the intended calibration. An override must be supplied explicitly when source calibration is unavailable. |
-| Pyramids | Tiled reduced resolutions are rebuilt as SubIFDs, not copied from a vendor pyramid. Mean reduction uses a defined 2x policy; explicitly typed label images require nearest-neighbor reduction and lossless storage. |
-| Metadata | A new OME-XML header is built from permitted fields, without copying arbitrary vendor descriptions. Crop outputs also record region names and source-image coordinates. |
-| Installation | OME schema/profile validation and output readback checks precede atomic installation. A failed write or verification does not replace an existing destination with an incomplete TIFF. |
+| Container | Self-contained, little-endian BigTIFF with OME 2016-06 XML. No separate OME metadata file is needed. |
+| Image layout | Grayscale (`YX`), multiplex channel stacks (`CYX`), or interleaved RGB (`YXS`). RGB has three color samples per pixel, not three fluorescence channels. |
+| Pixel types | Grayscale and multiplex images support 8-, 16-, and 32-bit signed or unsigned integers (including `uint32`), plus 32- and 64-bit floats. RGB uses `uint8` only. |
+| Pixel values | `convert` preserves the original dtype and intensity scale. Lossless compression preserves full-resolution pixel values; JPEG is lossy. Use `mutate` for intentional changes to pixel type or precision. |
+| Calibration | Each output requires X and Y pixel sizes, stored in **µm** and checked against TIFF resolution tags. Supply the pixel size explicitly if the source lacks it. |
+| Pyramids | Reduced-resolution images are rebuilt as tiled SubIFDs rather than copied from the source. Intensity images use a defined 2× mean reduction by default; declared label images use lossless, nearest-neighbor reduction. |
+| Metadata | Writes a new OME-XML header without copying arbitrary vendor descriptions. `crop` also records ROI names and source-image coordinates. |
+| Safe writing | Writes and checks a temporary file before replacing the destination. OME metadata, TIFF structure, and representative pixels are verified; a failed write or check leaves any existing destination untouched. |
 
-Pyramid construction is automatic until the image fits within one output tile,
-unless an exact reduced-level count is requested. A small image or a request for
-zero reduced levels can produce a base-only file. Source pyramids are not extra
-channels. See the [input and output reference][reference] for physical plane
-layout, supported dtypes, compression defaults, calibration precedence, and scratch
-requirements.
+By default, Omeify builds reduced-resolution levels until the image fits in one
+tile. You can request an exact number of levels, including zero; small images may
+need none. Pyramid levels are not extra channels. See the [detailed reference][reference]
+for supported pixel types, storage options, calibration, and temporary-disk needs.
 
-These are **format and construction guarantees**, not certification of the
-experiment. Raster verification is sampled, not an exhaustive full-slide
-comparison. Correctly encoding a supplied pixel size cannot prove the microscope
-was calibrated correctly. See [reproducibility and verification](#reproducibility-and-verification).
+These are **file-construction guarantees**, not a judgment of scientific quality.
+Pixel checks sample representative locations rather than every pixel. Correctly
+writing a pixel size cannot prove that the microscope was calibrated correctly.
+See [reproducibility and verification](#reproducibility-and-verification).
 
 ## Metadata minimization and MITI alignment
 
@@ -90,11 +85,11 @@ minimum-information policy is guided by:
 multiplexed tissue images.** *Nature Methods.* 2022;19:262-267.
 doi:10.1038/s41592-022-01415-4.](https://doi.org/10.1038/s41592-022-01415-4)
 
-The 2022 MITI publication describes a broader dataset-level metadata standard and specifies
-OME-TIFF for raster image data. Omeify applies that minimum-information philosophy narrowly to the OME-TIFF file boundary:
-retain the information required to interpret the raster, make every additional field deliberate,
-and leave biospecimen, reagent, acquisition, instrument, processing, and analysis records to
-companion metadata systems rather than synthesizing them inside the image header.
+MITI covers metadata for the wider imaging study and specifies OME-TIFF for the
+image data. Omeify applies its minimum-information approach to the file itself:
+keep what is needed to interpret the pixels, make other fields deliberate, and
+leave biospecimen, reagent, instrument, acquisition, processing, and analysis records
+in the study's accompanying metadata rather than inventing them in the image header.
 
 Only a small set of source information is eligible to cross that boundary automatically:
 
@@ -133,11 +128,10 @@ needed to interpret the generated file mechanically.
 | ICC profile | Preserved for RGB when supplied | Retains source color-management information when it is relevant to pixel interpretation. |
 | Multi-image annotations | Added only when a Python application explicitly requests them, or when `crop` records its regions | Describe intentional output context without copying arbitrary scanner metadata. |
 
-A passing Omeify header assessment means this **image-header profile** passed,
-not that an entire dataset satisfies MITI. Retain original acquisition records
-and link companion specimen, reagent, processing, and analysis metadata through
-your study's own data-management system. Minimal means sufficient and deliberate
-at this boundary, not that the experiment's other metadata is unimportant.
+Passing Omeify's header check means the **image header** follows this profile.
+It does not establish MITI compliance for the whole study. Keep the original
+acquisition records and other experimental metadata with the study; that
+information remains important even when it is not embedded in the image.
 
 **Before sharing:** `convert` and `mutate` write the minimized OME header
 described above. `crop` does too, but also stores ROI names and source-image
@@ -175,25 +169,23 @@ that validation to run; a missing validator is not treated as a successful check
 
 ## Command line
 
-Start with a file, identify its source profile, and produce the shared
-representation. The commands keep different responsibilities explicit:
+Omeify separates inspecting, writing, and changing pixel values:
 
-| Command | Responsibility |
+| Command | What it does |
 |---|---|
-| `omeify inspect` | Examine TIFF layout and metadata without loading the whole raster. It is not restricted to conversion profiles and does not rewrite the file. |
-| `omeify convert` | Normalize a supported image's layout and metadata, preserve numeric dtype and scale, rebuild pyramids, and verify the output. Lossy compression remains an explicit encoding policy. |
-| `omeify crop` | Export pixel-coordinate or GeoJSON rectangles into one ordered multi-image OME-TIFF; split files only with explicit `--shatter`. |
-| `omeify mutate` | Use the same writer for an intentional float-to-integer or float32-precision change, with a report of the transformation. |
-| `omeify version` | Report Omeify's version; `--json` also records the image-I/O dependency versions. |
+| `omeify inspect` | Show TIFF structure and metadata without changing the file. |
+| `omeify convert` | Write a normalized OME-TIFF, preserving pixel type and scale, rebuilding pyramids, and checking the result. |
+| `omeify crop` | Export rectangles from coordinates or GeoJSON into one OME-TIFF, or split them with `--shatter`. |
+| `omeify mutate` | Intentionally convert floating-point pixels to integers or reduce float32 precision, with a report of the changes. |
+| `omeify version` | Show the version; `--json` also shows image-I/O dependency versions. |
 
-`convert` and `mutate` require a destination file via **`--output` / `-o`**.
-The input remains positional; a second positional output path is not accepted.
-`convert`, `mutate`, and `crop` print a short completion line by default.
-Use `--output-json FILE` to retain their complete reports or `--output-json -`
-for JSON-only stdout. `-v` shows compact progress, `-vv` diagnostic logs, and
-`-vvv` the full report unless a report destination was selected.
-[Report contracts and migration](docs/reports.md) describe the precise policy.
-`inspect` still prints to stdout by default and accepts `--output` / `-o`.
+For `convert` and `mutate`, set the output file with **`--output` / `-o`**;
+a second positional filename is not accepted. Writing commands print a short
+completion message by default. Add `-v` for progress, `-vv` for diagnostic logs,
+or `-vvv` for the full report unless `--output-json` is set. Use
+`--output-json FILE` to save that report, or `--output-json -` for JSON-only
+stdout. `inspect` prints its results by default, or saves them with `-o`.
+See [report options and migration](docs/reports.md) for details.
 
 ### Inspect, convert, and retain the report
 
@@ -248,17 +240,15 @@ omeify convert source.ome.tif --output normalized.ome.tif \
   --type ome_tiff --no-overwrite
 ```
 
-**RGB defaults are lossy.** With no storage overrides, RGB uses **JPEG quality 90,
-4:2:2 YCbCr encoding, and 512 × 512 tiles**. This is the same policy for CLI
-conversion, Python `convert()`, ordinary and temporary image writers, and RGB
-series in multi-image output, including RGB OME-TIFF input. Scalar, multiplex,
-and label images retain lossless LZW and 1024 × 1024 tiles. Defaults follow the
-image's declared meaning, not its filename or simply having three channels.
+**RGB uses lossy JPEG by default:** quality 90, 4:2:2 YCbCr encoding,
+and 512 × 512 tiles. Grayscale, multiplex, and label images default to lossless
+LZW with 1024 × 1024 tiles. These defaults apply to both CLI and Python writers,
+including RGB OME-TIFF input and multi-image output. Three fluorescence channels
+do not count as RGB.
 
-`--compression` / `compression=` and `--tile-size` / `tile_size=` override those
-defaults. Explicit JPEG `444` remains true RGB encoding; `422`, `420`, and `411`
-use YCbCr with matching TIFF tags. To avoid a lossy encoding step, choose a
-lossless option explicitly, for example:
+Explicit compression and tile-size settings override these defaults. For RGB
+JPEG, `444` uses RGB encoding; `422`, `420`, and `411` use YCbCr. To preserve
+exact RGB pixel values, choose lossless compression, for example:
 
 ```bash
 omeify convert slide.svs --output slide.ome.tif \
@@ -393,12 +383,10 @@ fluorescence channels. A singleton channel stack can reopen as `YX` rather than
 `CYX`; its channel handle still exposes a scalar plane. Never infer pyramid
 calibration from ratios of rounded dimensions.
 
-**Opening is not conversion.** Reading a vendor file or a third-party OME-TIFF
-exposes its supported image representation; it neither rewrites that file nor
-certifies it against the writer's full output contract. Use `TiffInspector` or a
-file reader's `inspect()` for source diagnostics. A successful inspection can
-report missing fields or a calibration mismatch. The writer is stricter at the
-point of export and requires usable calibration.
+**Opening a file does not convert it.** Readers leave the source untouched,
+even if it doesn't meet Omeify's stricter writing rules. Use `TiffInspector`
+or a reader's `inspect()` to find missing metadata or conflicting calibration.
+Writing requires valid calibration and checks the new output.
 
 ### Other image origins and products
 
@@ -462,16 +450,11 @@ Brightfield (H&E) for known H&E data; Omeify does not fabricate acquisition or
 stain metadata for every RGB image. Changing image type cannot repair an
 incorrect JPEG color conversion.
 
-Omeify 0.18.2 makes JPEG color-space selection explicit in the shared writer,
-including CLI conversion, ordinary/temporary library writes, and RGB series in
-multi-image files. Existing files are not changed by upgrading. Re-export from
-the original SVS or the original RGB array, then open the new output in QuPath.
-Version 0.18.3 changed automatic RGB storage to JPEG 90 / 4:2:2, including
-library writes and RGB OME-TIFF conversions that previously defaulted to LZW.
-Version 0.18.4 changes the automatic RGB tile size from 256 to 512 pixels.
-Choose lossless compression explicitly for reference rasters
-or exact-value workflows. See the [JPEG policy and regression tests][jpeg-policy]
-for details.
+The 0.18 releases corrected RGB JPEG color handling and established today's
+defaults: quality 90 with 4:2:2 sampling (0.18.3), then 512-pixel tiles (0.18.4).
+Upgrading Omeify does not change existing files. Re-export older affected files
+from their original source, and choose lossless compression when exact values
+matter. See the [JPEG policy and regression tests][jpeg-policy].
 
 QuPath, Bio-Formats, and other tools do not have to reproduce Omeify's Python
 classes to use the output. The [OME-TIFF specification][ome-tiff-spec] describes
@@ -482,11 +465,11 @@ the shared file format; the rules above describe Omeify's narrower use of it.
 **Predictable construction, explicit transformations, and recorded checks** are
 the reproducibility promise, not identical file bytes on every run.
 
-The writer validates generated XML against the local OME 2016-06 XSD and the
-bundled header profile. It then checks the temporary TIFF's layout, dtype,
-channel/plane mapping, pyramid structure, calibration, and relevant ICC/provenance
-fields before installing it. Both public writers share this machinery. A missing
-schema validator or failed required check prevents successful installation.
+Before placing a finished file at its destination, Omeify checks its OME-XML
+against the OME schema and its own metadata rules. It also checks the temporary
+TIFF's pixel type, channel layout, pyramids, calibration, and relevant color or
+region metadata. Both writers use the same checks. A missing validator or failed
+check stops the write.
 
 Pixel verification uses deterministic representative locations at the base and
 every reduced level. Lossless comparisons check values under the documented
@@ -503,21 +486,21 @@ can change file bytes; reports can also contain paths and run-specific timing.
 Omeify does not promise byte-identical artifacts across runs or versions, and
 omitting the UUID alone is not a byte-reproducibility switch.
 
-Writing is bounded but not free of temporary storage. Reduced levels are staged
-on disk; their aggregate pixel payload approaches one third of the uncompressed
-base for a large two-dimensional 2x pyramid, with file/tile overhead in addition.
-Multi-series products require scratch for all their pyramids, and the final
-encoded temporary file lives beside the destination. A no-overwrite install needs
-same-filesystem hard-link support and fails rather than silently using an unsafe
-fallback. See [I/O and failure behavior][io-behavior].
+Omeify writes in bounded regions rather than loading a whole slide, but it
+needs temporary disk space. For a large 2× pyramid, reduced levels together
+approach one third of the uncompressed base image size, plus file overhead.
+Multi-image output needs space for every pyramid. The completed temporary TIFF
+is created beside the destination. `--no-overwrite` needs hard-link support on
+that filesystem; it fails rather than using an unsafe fallback.
+See [I/O and failure behavior][io-behavior].
 
 ## Scope and further documentation
 
-The current image model is two-dimensional `YX`, `CYX`, or RGB `YXS`, with
-singleton Z/T. RGB writing requires three `uint8` samples. Not every readable
-array dtype or TIFF layout is a writable product. Omeify does not perform
-segmentation, registration, stain normalization, object measurement, or
-experimental quality assurance.
+Omeify currently writes two-dimensional grayscale (`YX`), multiplex (`CYX`),
+and RGB (`YXS`) images, with single Z and T positions. RGB requires three
+`uint8` samples. Other readable TIFF layouts and pixel types may not be writable.
+Omeify does not perform segmentation, registration, stain normalization,
+object measurement, or experimental quality checks.
 
 The current Image/writer API retains the 0.18 consolidation; earlier interfaces
 are not kept as forwarding aliases. The [migration table][migration] covers those
