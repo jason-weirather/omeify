@@ -124,7 +124,7 @@ def test_version_reads_matching_source_or_returns_no_source_value(tmp_path, monk
 
 
 def test_supported_python_minimum_and_syntax_are_preserved():
-    # This is a syntax check, not a substitute for the Python 3.10 CI runtime.
+    # Syntax parsing cannot replace tests running on Python 3.10 itself.
     root = Path(__file__).resolve().parents[1]
     project = _version.tomllib.loads((root / "pyproject.toml").read_text())
     assert project["project"]["requires-python"] == ">=3.10"

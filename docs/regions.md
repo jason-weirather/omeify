@@ -154,9 +154,10 @@ no compatibility alias can silently retain the old default. Use
 
 Python's second parameter is now `output_path` rather than `output_base`.
 Positional calls still work, but without shatter they write the exact requested
-path. Change bare prefixes to complete filenames for combined output. Crop
-reports and embedded crop provenance use `omeify.crop/2`; the report includes
-`output_path` and `shatter` instead of `naming`, and each region adds `output_name`.
+path. Change bare prefixes to complete filenames for combined output. At the time of the 0.20 change, crop reports and embedded provenance both
+used `omeify.crop/2`; the report gained `output_path` and `shatter` instead of
+`naming`, and each region gained `output_name`. The current 0.21 report/provenance
+identifiers are `omeify.crop/3` and `omeify.crop_provenance/1`, respectively.
 No image, geometry, or previously written file is modified by upgrading.
 
 ## Ask for visual GeoJSON

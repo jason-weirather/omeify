@@ -36,8 +36,8 @@ image-I/O test lane**, not a complete TensorFlow/CellGate lock:
 
 The imagecodecs 2024.6.1 package documents testing with Python 3.10.11 and NumPy
 1.26.4, and supplies CPython 3.10 wheels for the target desktop/server platforms.
-That upstream evidence motivates the lane; the project's CI still has to verify
-Omeify against it. See [the upstream package record](https://pypi.org/project/imagecodecs/2024.6.1/).
+That upstream evidence motivates this compatibility check; it does not establish
+that Omeify's full suite passes in a real Python 3.10 environment. See [the upstream package record](https://pypi.org/project/imagecodecs/2024.6.1/).
 Do not use the yanked imagecodecs 2024.1.1 as a new lock simply because it is the
 oldest version allowed by the existing dependency range.
 
@@ -48,21 +48,41 @@ Run that application's regression cases, including image reads and writer calls.
 Python 3.10 syntax compatibility alone does not establish compatibility with an
 entire existing scientific environment.
 
-## What the automated checks cover
+## Manual release checks
 
-The workflow has a normal Python 3.10-3.14 core matrix, an additional Python 3.10 /
-NumPy 1.x lane on Linux, macOS, and Windows, an optional-intelligence integration
-lane, and fresh wheel-install checks on Python 3.10 and 3.13. Core jobs require
-actual codecs and the local OME XSD before running tests. They do not count a missing
-core dependency as an integration pass. The optional Bio-Formats/JVM readback still
-requires its supplied JAR; it is not certified by the ordinary Python matrix.
+Before publishing the Python 3.10 checkpoint, run the commands above in a real
+3.10 environment and exercise another supported Python version separately.
+Require actual codecs and the local OME XSD, rather than accepting skips caused
+by missing core dependencies:
 
-The wheel job builds the source distribution and then the wheel through Hatch,
-installs outside the checkout, and runs `tests/installed_smoke.py` under Python's
-isolated mode. It checks packaged schema availability and real scalar/RGB/label
-readback. Passing this job is separate from passing tests against a source checkout.
-CI gates fatal Ruff diagnostics without changing the repository's broader configured
-style rules; run `ruff check .` separately for the full style review.
+```bash
+python -c 'import imagecodecs, omeschema; from omeify.utils.ome_schema_validator import OMESchemaValidator; OMESchemaValidator()'
+python -m pip check
+python -m pytest -q
+python -m ruff check --select E9,F63,F7,F82 .
+python -m build
+```
+
+For an independent installed-package check, build from this checkout, install
+its wheel into a disposable environment, and run the retained smoke script **from
+outside the checkout** (POSIX shell example):
+
+```bash
+CHECKOUT="$(pwd)"
+TEMP_ENV="$(mktemp -d)"
+python -m venv "$TEMP_ENV/venv"
+"$TEMP_ENV/venv/bin/python" -m pip install dist/*.whl
+"$TEMP_ENV/venv/bin/python" -m pip check
+( cd "$TEMP_ENV" && "$TEMP_ENV/venv/bin/python" -I "$CHECKOUT/tests/installed_smoke.py" )
+# Remove "$TEMP_ENV" after reviewing the results.
+```
+
+The smoke test checks packaged JSON Schemas and real LZW/JPEG/label readback;
+it is not a replacement for full regression tests. Repeat on other intended
+platforms where practical. Optional Sheetbend/LLM integration and the Java
+Bio-Formats interoperability test each require their own dependencies. Run
+`ruff check .` for the complete configured style check; the fatal-error selection
+above avoids making unrelated existing formatting debt a release blocker.
 
 ## Publication sequence
 
