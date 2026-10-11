@@ -320,7 +320,7 @@ def test_real_vision_attachment_adapter(tmp_path, monkeypatch):
     sheetbend = pytest.importorskip("sheetbend", reason="Optional Sheetbend is not installed")
     pytest.importorskip("llm", minversion="0.35")
     pytest.importorskip("openai", minversion="3")
-    codecs = pytest.importorskip("imagecodecs")
+    import imagecodecs as codecs
     from omeify import RGBImage
 
     monkeypatch.setenv("SHEETBEND_RUNTIME_DIR", str(tmp_path / "runtime"))

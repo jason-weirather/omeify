@@ -7,7 +7,7 @@ name = "omeify"
 version = "0.22.0"
 description = "Predictable, metadata-minimized OME-TIFF and OME-Zarr image I/O"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [
@@ -29,7 +29,6 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -39,24 +38,22 @@ classifiers = [
 dependencies = [
   "click>=8.1,<9",
   "tqdm>=4.66,<5",
-  "numpy>=1.23,<3",
-  # Newer tifffile releases dropped Python 3.10 and then Python 3.11.
-  "tifffile>=2024.8.30,<2025.5.21; python_version == '3.10'",
+  "numpy>=1.26.4,<3",
+  # Retain the supported TIFF/codec branches for the Python 3.11 baseline.
   "tifffile>=2024.8.30,<2026.4.11; python_version == '3.11'",
   "tifffile>=2024.8.30,<2027; python_version >= '3.12'",
   # LZW and most TIFF compression codecs are supplied by imagecodecs.
-  "imagecodecs>=2024.1.1,<2025.8.2; python_version == '3.10'",
-  "imagecodecs>=2024.1.1,<2026.5.10; python_version == '3.11'",
-  "imagecodecs>=2024.1.1,<2027; python_version >= '3.12'",
+  "imagecodecs>=2024.6.1,<2026.5.10; python_version == '3.11'",
+  "imagecodecs>=2024.6.1,<2027; python_version >= '3.12'",
   # Keep segmentation and image-analysis stacks (for example scikit-image) out of omeify.
   "lxml>=5,<7",
   "jsonschema>=4.20,<5",
   "referencing>=0.31,<1",
   # Supplies a local OME 2016-06 XSD, avoiding validation-time network access.
   "ome-schema>=0.1.0",
-  # Python 3.11+ has tomllib in the standard library. This fallback is used
-  # only when importing directly from an uninstalled Python 3.10 checkout.
-  "tomli>=2,<3; python_version < '3.11'",
+  # OME-Zarr, including HTTP reads, is part of every ordinary installation.
+  "zarr>=3.1.3,<4",
+  "fsspec[http]>=2024.6,<2027",
 ]
 
 [project.urls]
@@ -68,19 +65,17 @@ Issues = "https://github.com/jason-weirather/omeify/issues"
 omeify = "omeify.cli:main"
 
 [project.optional-dependencies]
-# The TIFF core retains Python 3.10. Zarr >=3.1.3 requires Python 3.11+;
-# do not add an environment marker that installs an empty extra on 3.10.
-zarr = ["zarr>=3.1.3,<4", "fsspec[http]>=2024.6,<2027", "packaging>=22"]
 # Independent format models are tests, not a runtime model/validation framework.
 # This extra currently requires Python 3.12+ through the upstream models package.
 interop = ["ome-zarr-models>=1.8.1,<2"]
 # Sheetbend 0.5 owns source selection; its llm extra owns inference dependencies.
 # No Python marker: requesting intelligence on Python <3.13 must fail, not install
-# an apparently successful but empty extra. Base omeify remains Python >=3.10.
+# an apparently successful but empty extra. Base omeify requires Python >=3.11.
 intelligence = ["sheetbend[llm]>=0.5.0,<0.6"]
 dev = [
   "build>=1.2",
   "pytest>=8,<10",
+  "packaging>=22",
   "ruff>=0.12",
 ]
 
@@ -103,7 +98,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

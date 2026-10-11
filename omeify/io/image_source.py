@@ -4,6 +4,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Self
 
 import numpy as np
 
@@ -60,7 +61,7 @@ class ImageSource(ABC):
         """
         return ()
 
-    def open(self) -> ImageSource:
+    def open(self) -> Self:
         if not self._is_open:
             try:
                 self._open()
@@ -152,7 +153,7 @@ class ImageSource(ABC):
             f"dtype={self._metadata.dtype})"
         )
 
-    def __enter__(self) -> ImageSource:
+    def __enter__(self) -> Self:
         if self._context_active:
             raise RuntimeError("Nested contexts on the same source are not supported")
         self.open()

@@ -13,7 +13,7 @@ from .io._writer.configuration import (
     resolve_compression_name,
     resolve_tile_size,
 )
-from .io.ome_tiff_writer import JPEGSubsampling, OMETiffWriter
+from .io.ome_tiff_writer import JPEGSubsampling
 from .io.pixel_size import PixelSize
 from .io.source_reader import INPUT_TYPES, InputType, source_reader
 from .provenance import readable_runtime

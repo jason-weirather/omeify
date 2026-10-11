@@ -9,23 +9,28 @@ use of an open format, not a requirement for a private Omeify reader.
 
 ```bash
 # From the checkout, in a separate image-I/O environment:
-python -m pip install '.[zarr]'
+python -m pip install .
 
 # Development plus independent NGFF model tests (Python 3.12+):
-python -m pip install '.[dev,zarr,interop]'
+python -m pip install -e '.[dev,interop]'
 python -m pip check
 ```
 
-The TIFF core still supports Python 3.10. The `zarr` extra requires Python 3.11+
-through zarr-python >=3.1.3. Newer upstream versions can require newer Python;
-the installer resolves a compatible version. Requesting Zarr on Python 3.10 must
-fail, not install an apparently successful but empty extra. Preserve the earlier
-0.21 environment checkpoint for numerical applications that require it.
+Python **3.11+** is the baseline for the entire package. `zarr-python >=3.1.3` and
+`fsspec[http]` are required dependencies, so a normal installation includes local
+and HTTP(S) Zarr access. There is no `zarr` extra or TIFF-only installation mode.
+The installer resolves dependencies compatible with the running Python version.
+Preserve the earlier **0.21.0** checkpoint for applications that still need Python
+3.10. The independent `interop` test extra requires Python 3.12+; it does not raise
+the ordinary package minimum.
 
 `zarr-python` owns arrays, codecs and chunk access. `fsspec` owns HTTP transport.
 Omeify owns interpretation, selection, metadata policy, image semantics and
-verified construction. Ordinary imports and TIFF operations do not import the
-optional Zarr implementation. No Dask, viewer, segmentation or model-inference
+verified construction. Zarr uses ordinary imports at the backend's point of use,
+so TIFF-only operations do not initialize its array/codec stack. Delayed import
+is a startup-cost decision, not an optional installation mode; missing required
+dependencies remain installation errors. There is no optional-backend loader or
+repeated runtime version check. No Dask, viewer, segmentation or model-inference
 framework is added to the runtime. `ome-zarr-models` is an independent **test**
 consumer, not another runtime domain-model layer.
 
@@ -326,8 +331,8 @@ successful stores if a later output fails.
 
 ## Migration
 
-0.22 adds optional Zarr I/O without changing ordinary TIFF storage defaults or
-numeric mutation algorithms. The shared image descriptor gains physical origins
+0.22 includes Zarr I/O in every installation without changing ordinary TIFF
+storage defaults or numeric mutation algorithms. The shared image descriptor gains physical origins
 and level offsets; existing callers need not supply them. There is no long/wide
 parallel image API or file-only wrapper forced onto remote stores.
 
@@ -348,12 +353,17 @@ python -m pytest -q tests/test_ome_zarr*.py
 python -m pytest -q
 ```
 
-Run with real `.[dev,zarr,interop]` dependencies to include independent models and
-TIFF XSD checks. CI has a TIFF-only Python 3.10 lane, a Python 3.11 / Zarr 3.1.3
-lane, and a newer full-stack lane. Missing optional model/XSD integrations are
-explicit skips in the new tests, not successful validation. The existing TIFF
-suite intentionally still fails when its required validator is missing. The
-workflow requires the actual validator and codecs before running that suite.
+Run `.[dev]` in Python 3.11 for the ordinary suite, including real TIFF codecs,
+the OME XSD, all three NGFF readers, the canonical writer, and loopback HTTP tests.
+Missing required dependencies fail rather than silently removing format coverage.
+In a separate Python 3.12+ environment, install `.[dev,interop]` to include the
+independent NGFF models. An absent optional model package is an explicit skip;
+an installed but incompatible or broken model package must fail.
+
+The [manual development checks](development.md) define the minimum-dependency and
+newer-Python runs, plus installed-wheel smoke tests. They do not require GitHub
+Actions or any other CI service. Skipped optional integrations do not certify
+interoperability with those consumers.
 
 - [OME-Zarr 0.4](https://ngff.openmicroscopy.org/specifications/0.4/index.html)
 - [OME-Zarr 0.5](https://ngff.openmicroscopy.org/specifications/0.5/index.html)

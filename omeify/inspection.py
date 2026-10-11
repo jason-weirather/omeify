@@ -10,7 +10,7 @@ from collections.abc import Collection
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 import tifffile
@@ -961,7 +961,7 @@ class TiffInspector:
         file_path: str | Path,
         detail: int = _DEFAULT_DETAIL,
         max_text_length: int | None = _DEFAULT_MAX_TEXT_LENGTH,
-    ) -> "TiffInspector":
+    ) -> Self:
         """Create an inspector that reuses an already-open ``TiffFile``."""
 
         return cls(

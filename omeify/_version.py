@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import platform
+import tomllib
 from importlib.metadata import PackageNotFoundError, version as distribution_version
 from pathlib import Path
 from typing import Any
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
 
 _DISTRIBUTION_NAME = "omeify"
 

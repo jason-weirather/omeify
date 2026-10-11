@@ -8,8 +8,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 import pytest
+import zarr
 
-zarr = pytest.importorskip("zarr", minversion="3.1.3")
 from omeify import OMEZarrReader, ZarrInspector, convert
 from zarr_fixture import fixture
 

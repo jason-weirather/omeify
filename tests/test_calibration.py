@@ -366,7 +366,7 @@ def prepared_image(path, *, name=None, size=PixelSize(0.5, 0.6, "µm")):
 
 def write_engine(path):
     # Exercise the real engine, TIFF writing, pyramid building, verification,
-    # and atomic install without requiring the optional local XSD fixture here.
+    # and atomic install without involving the local XSD validator in this isolated unit test.
     item, settings = prepared_image(path)
     xml = generate_ome_xml(item.spec, item.level_shapes)["xml_string"]
     result = WriterEngine(settings).write(

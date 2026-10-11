@@ -2,8 +2,8 @@
 
 Core-engine tests deliberately do not call the public writer's XSD preflight;
 no validator is replaced. Public convert/mutate tests below require the real
-local XSD and skip explicitly when it is unavailable. Codec tests use the real
-codec when installed. Synthetic pixels are never production-derived fixtures.
+local XSD and codecs. Missing core dependencies fail rather than skip these
+checks. Synthetic pixels are never production-derived fixtures.
 """
 
 from __future__ import annotations
@@ -134,8 +134,6 @@ def test_grayscale_strips_keep_both_spatial_axes_and_round_trip(tmp_path, dtype,
 @pytest.mark.parametrize("dtype", ["uint16", "float32"])
 @pytest.mark.parametrize("codec", [None, "deflate", "lzw"])
 def test_strips_across_byte_orders_and_codecs(tmp_path, byteorder, dtype, codec):
-    if codec == "lzw":
-        pytest.importorskip("imagecodecs")
     data = np.arange(70).reshape(7, 10).astype(dtype)
     path = tmp_path / "source.ome.tif"
     _source(path, data, rows=3, byteorder=byteorder, compression=codec)
@@ -540,13 +538,8 @@ def test_ordinary_inspection_escapes_controls_without_altering_json(tmp_path):
     assert report["series"][0]["levels"][0]["pages"][0]["description"]["value"] == description
 
 
-def _require_xsd():
-    pytest.importorskip("omeschema", reason="public workflow requires the real local XSD")
-
-
 @pytest.mark.parametrize("workflow", ["convert", "mutate"])
 def test_public_workflow_preserves_strips_and_correct_metadata(tmp_path, workflow):
-    _require_xsd()
     source = tmp_path / "source.ome.tif"
     data = np.arange(7*9, dtype=np.float32).reshape(7, 9)
     _source(source, data, rows=3)
@@ -561,7 +554,6 @@ def test_public_workflow_preserves_strips_and_correct_metadata(tmp_path, workflo
 
 
 def test_public_convert_uses_metadata_only_image_mapping(tmp_path):
-    _require_xsd()
     source, output = tmp_path / "source.ome.tif", tmp_path / "output.ome.tif"
     data = _metadata_only_source(source, comments=True)
     convert(source, output, input_type="ome_tiff", compression="Uncompressed", tile_size=16,
@@ -577,8 +569,6 @@ def test_shared_multi_series_verification_and_reader_contract(tmp_path, lossy_pr
     from omeify import OMEMultiSeriesWriter
     from omeify.io.ome_multi_series_writer.verification import verify_output
 
-    if lossy_preview:
-        pytest.importorskip("imagecodecs")
     fluorescence = np.arange(2*33*49, dtype=np.float32).reshape(2, 33, 49)
     fluorescence[0, 0, 0] = np.nan
     labels = np.arange(33*49, dtype=np.uint32).reshape(33, 49)

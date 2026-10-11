@@ -82,9 +82,10 @@ See [reproducibility and verification](#reproducibility-and-verification).
 
 ## The OME-Zarr home base
 
-Install `python -m pip install '.[zarr]'` from this checkout in Python 3.11+.
-The TIFF-only installation retains Python 3.10 support. Neither path imports a
-viewer, segmentation framework, Dask, or an AI client for ordinary image I/O.
+OME-Zarr is included in the normal installation, alongside OME-TIFF. Both require
+**Python 3.11 or newer**. No extra is needed for local or HTTP(S) image reads.
+Ordinary image I/O does not require a viewer, segmentation framework, Dask, or an
+AI client.
 
 ```bash
 omeify convert input.ome.tif -o normalized.ome.zarr \
@@ -181,10 +182,12 @@ image as deidentified.
 
 ## Installation
 
-Omeify requires **Python 3.10 or newer** for its ordinary image-I/O features.
-The 0.21 compatibility checkpoint remains the earlier TIFF-only baseline; 0.22
-keeps Python 3.10 for the TIFF core and adds an optional Python 3.11+ Zarr stack. See [Python 3.10 environments](docs/python310.md)
-for the NumPy 1.x test lane and publication sequence. From the corresponding checkout:
+Omeify 0.22 requires **Python 3.11 or newer**. A normal installation includes both
+OME-TIFF and OME-Zarr, including HTTP(S) Zarr reads. The earlier **0.21.0** release
+is the Python 3.10 compatibility checkpoint; keep legacy scientific environments
+pinned there rather than upgrading their dependencies in place.
+
+From this checkout:
 
 ```bash
 python -m pip install .
@@ -199,8 +202,13 @@ For development:
 
 ```bash
 python -m pip install -e '.[dev]'
+python -m pip check
 python -m pytest -q
 ```
+
+[Development and release checks](docs/development.md) covers the Python 3.11
+minimum-dependency environment, newer-Python independent interoperability tests,
+and testing an installed wheel outside the checkout. No CI service is required.
 
 The required `ome-schema` distribution supplies a local OME XSD. Writing requires
 that validation to run; a missing validator is not treated as a successful check.

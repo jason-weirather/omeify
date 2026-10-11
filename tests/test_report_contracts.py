@@ -1,7 +1,6 @@
 """Current report contracts, resource resolution, and real installed-stack workflows."""
 from __future__ import annotations
 
-import ast
 import json
 from copy import deepcopy
 from importlib.resources import files
@@ -123,19 +122,6 @@ def test_version_reads_matching_source_or_returns_no_source_value(tmp_path, monk
     assert _version._source_tree_version() is None
 
 
-def test_supported_python_minimum_and_syntax_are_preserved():
-    # Syntax parsing cannot replace tests running on Python 3.10 itself.
-    root = Path(__file__).resolve().parents[1]
-    project = _version.tomllib.loads((root / "pyproject.toml").read_text())
-    assert project["project"]["requires-python"] == ">=3.10"
-    assert project["tool"]["ruff"]["target-version"] == "py310"
-    dependencies = project["project"]["dependencies"]
-    assert any(d.startswith("tomli") for d in dependencies)
-    for directory in ("omeify", "tests", "examples"):
-        for path in (root / directory).rglob("*.py"):
-            ast.parse(path.read_text(), filename=str(path), feature_version=(3, 10))
-
-
 def test_missing_xsd_is_an_error_not_a_skipped_validation(monkeypatch):
     import sys
 
@@ -146,8 +132,6 @@ def test_missing_xsd_is_an_error_not_a_skipped_validation(monkeypatch):
 
 @pytest.fixture
 def real_stack():
-    pytest.importorskip("imagecodecs", reason="Real installed codecs required for export integration")
-    pytest.importorskip("omeschema", reason="Real local OME XSD required for export integration")
     return OMESchemaValidator()
 
 

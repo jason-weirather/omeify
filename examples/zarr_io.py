@@ -7,7 +7,7 @@ from omeify import MultichannelImage, OMEZarrReader, OMEZarrWriter, PixelSize
 
 
 def run_example(output_path: str | Path = "Scratch/example.ome.zarr") -> dict:
-    """Requires omeify[zarr]. Refuses an existing output directory."""
+    """Uses the ordinary Omeify installation. Refuses an existing output directory."""
     y, x = np.indices((257, 385), dtype=np.uint16)
     data = np.stack((x, y))
     with MultichannelImage.from_array(

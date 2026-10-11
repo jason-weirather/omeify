@@ -1,4 +1,4 @@
-"""Crop geometry, lazy reads, batch preflight, and real optional TIFF readback."""
+"""Crop geometry, lazy reads, batch preflight, and real TIFF readback."""
 from __future__ import annotations
 
 import json
@@ -236,7 +236,6 @@ def test_cli_stdin_and_coordinate_guard(input_file, tmp_path, writer_spy, shatte
 
 
 def test_real_crop_tiff_readback(input_file, tmp_path):
-    pytest.importorskip("omeschema", reason="Real OME schema validation dependency is required")
     path, a = input_file
     report = crop(path, tmp_path / "real", bounds=(2, 3, 40, 30), compression="Deflate", tile_size=16)
     output = Path(report["outputs"][0]["path"])
@@ -303,7 +302,6 @@ def test_input_and_geojson_aliases_cannot_be_output(input_file, tmp_path, writer
 @pytest.mark.parametrize("shatter", [None, "by_index", "by_name"])
 @pytest.mark.parametrize("kind", ["multichannel", "rgb", "label"])
 def test_real_crop_collection_roundtrip(tmp_path, kind, shatter):
-    pytest.importorskip("omeschema", reason="Real OME schema validation dependency is required")
     from omeify import OMETiffLabelReader
 
     shape = (2, 48, 64) if kind == "multichannel" else (48, 64, 3) if kind == "rgb" else (48, 64)

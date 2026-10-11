@@ -1,4 +1,4 @@
-"""OME-Zarr I/O; importing this module does not import optional Zarr dependencies."""
+"""Native OME-Zarr I/O through the shared Image API."""
 from .reader import OMEZarrLabelReader, OMEZarrReader
 from .writer import OMEZarrCollectionWriter, OMEZarrWriter, TemporaryOMEZarrWriter
 

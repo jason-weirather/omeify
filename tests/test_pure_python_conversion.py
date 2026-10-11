@@ -703,8 +703,7 @@ def test_jpeg_411_requires_tile_size_divisible_by_32(tmp_path: Path) -> None:
     assert not output.exists()
 
 
-def test_he_default_jpeg_when_imagecodecs_is_available(tmp_path: Path) -> None:
-    pytest.importorskip("imagecodecs")
+def test_he_default_jpeg_uses_required_imagecodecs(tmp_path: Path) -> None:
     data = (
         np.arange(32 * 48 * 3, dtype=np.uint16).reshape(32, 48, 3) % 251
     ).astype(np.uint8)
@@ -976,10 +975,7 @@ def test_cli_svs_type_routes_to_rgb_converter(tmp_path: Path) -> None:
 
 
 def test_pyproject_is_the_version_authority() -> None:
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        import tomli as tomllib
+    import tomllib
 
     from omeify import __version__
 
@@ -993,7 +989,7 @@ def test_convert_helper_dogfoods_public_ome_tiff_writer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import omeify.conversion as conversion_module
+    import omeify.io.output as output_module
     from omeify import OMETiffWriter
 
     called = {"value": False}
@@ -1003,7 +999,7 @@ def test_convert_helper_dogfoods_public_ome_tiff_writer(
             called["value"] = True
             return super().write(image, **kwargs)
 
-    monkeypatch.setattr(conversion_module, "OMETiffWriter", RecordingWriter)
+    monkeypatch.setattr(output_module, "OMETiffWriter", RecordingWriter)
     data = np.arange(2 * 32 * 48, dtype=np.uint16).reshape(2, 32, 48)
     source = tmp_path / "source.ome.tif"
     output = tmp_path / "output.ome.tif"

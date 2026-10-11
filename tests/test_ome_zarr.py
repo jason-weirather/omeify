@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import copy
 import importlib
+import importlib.util
 import json
 from pathlib import Path
 
 import numpy as np
 import pytest
+import zarr
 from click.testing import CliRunner
-
-zarr = pytest.importorskip("zarr", minversion="3.1.3")
 
 from omeify import (ImageLevel, LabelImage, MultichannelImage, OMEImageSeries,
                    OMEZarrCollectionWriter, OMEZarrLabelReader, OMEZarrReader,
@@ -150,7 +150,9 @@ def test_three_channels_are_not_guessed_rgb(tmp_path):
 
 @pytest.mark.parametrize("version", ["0.4", "0.5", "0.6"])
 def test_independent_community_model_reads_fixture(tmp_path, version):
-    model = pytest.importorskip("ome_zarr_models.v" + version.replace(".", ""))
+    if importlib.util.find_spec("ome_zarr_models") is None:
+        pytest.skip("Install .[interop] on Python 3.12+ for independent NGFF models")
+    model = importlib.import_module("ome_zarr_models.v" + version.replace(".", ""))
     path = tmp_path / "foreign"
     fixture(path, version=version)
     root = zarr.open_group(path, mode="r", use_consolidated=False)
@@ -161,7 +163,9 @@ def test_independent_community_model_reads_fixture(tmp_path, version):
 
 
 def test_independent_model_reads_canonical_output(tmp_path):
-    model = pytest.importorskip("ome_zarr_models.v05")
+    if importlib.util.find_spec("ome_zarr_models") is None:
+        pytest.skip("Install .[interop] on Python 3.12+ for independent NGFF models")
+    model = importlib.import_module("ome_zarr_models.v05")
     path = tmp_path / "out"
     with MultichannelImage.from_array(np.zeros((2,33,47),dtype="uint16"), axes="CYX",
                                      pixel_size=PixelSize(1,1,"µm")) as im:

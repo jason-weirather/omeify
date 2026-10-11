@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import replace
 from pathlib import Path
+from typing import Self
 
 import numpy as np
 
@@ -27,7 +28,7 @@ from ..image_planes import ImagePlaneSource
 from ..ome_multi_series_writer import OMEImageSeries
 from .metadata import PROFILE, WRITE_VERSION, output_attributes, profile_errors
 from .reader import OMEZarrReader
-from .store import preflight_directory, publish_directory, require_zarr, store_size
+from .store import preflight_directory, publish_directory, store_size
 
 LOGGER = logging.getLogger(__name__)
 
@@ -154,7 +155,8 @@ class OMEZarrWriter:
         self.float32_mantissa_bits = normalize_float32_mantissa_bits(float32_mantissa_bits)
 
     def _codecs(self, dtype):
-        zarr = require_zarr()
+        import zarr
+
         serializer = zarr.codecs.BytesCodec(endian="little" if np.dtype(dtype).itemsize > 1 else None)
         compressors = ([] if self.compression == "uncompressed" else
                        [zarr.codecs.ZstdCodec(level=3, checksum=False)] if self.compression == "zstd" else
@@ -180,7 +182,8 @@ class OMEZarrWriter:
         return metadata, levels, method
 
     def _write_image(self, image, stage, *, level=0, name=None):
-        zarr = require_zarr()
+        import zarr
+
         metadata, levels, method = self._prepare(image, level, name=name)
         serializer, compressors = self._codecs(metadata.dtype)
         group = zarr.open_group(store=str(stage), mode="w", zarr_format=3)
@@ -277,7 +280,8 @@ class OMEZarrWriter:
 
     def _verify(self, source, stage, input_level, metadata, levels, method, attributes,
                 serializer, compressors, expected_chunks):
-        zarr = require_zarr()
+        import zarr
+
         plain = zarr.open_group(str(stage), mode="r", use_consolidated=False)
         try:
             if plain.attrs.asdict() != attributes:
@@ -351,7 +355,6 @@ class OMEZarrWriter:
 
     def write(self, image: Image, *, level: int = 0):
         self._prepare(image, level)
-        require_zarr()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".omeify-zarr-", dir=self.path.parent))
         try:
@@ -367,6 +370,8 @@ class OMEZarrWriter:
 class OMEZarrCollectionWriter(OMEZarrWriter):
     """Ordered heterogeneous images using NGFF's transitional collection layout."""
     def write(self, images: Sequence[OMEImageSeries], *, provenance=None):
+        import zarr
+
         entries = tuple(images)
         if not 1 <= len(entries) <= 4096 or any(not isinstance(e, OMEImageSeries) for e in entries):
             raise TypeError("Collection writing requires OMEImageSeries entries")
@@ -379,7 +384,6 @@ class OMEZarrCollectionWriter(OMEZarrWriter):
             if len(encoded.encode("utf-8")) > 1024 * 1024:
                 raise ValueError("Collection provenance exceeds 1 MiB")
             provenance = json.loads(encoded)
-        zarr = require_zarr()
         children = []
         for i, entry in enumerate(entries):
             entry._source.output_spec()  # Honor the entry's pinned source session.
@@ -438,7 +442,7 @@ class TemporaryOMEZarrWriter:
         self._temporary = None
         self.path = None
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         if self._temporary is not None:
             raise RuntimeError("Nested temporary writer contexts are not supported")
         self._temporary = tempfile.TemporaryDirectory(prefix="omeify-zarr-")

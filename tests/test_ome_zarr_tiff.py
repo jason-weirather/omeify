@@ -6,8 +6,6 @@ import pytest
 import tifffile
 from lxml import etree
 
-zarr = pytest.importorskip("zarr", minversion="3.1.3")
-
 from omeify import (LabelImage, MultichannelImage, OMETiffReader, OMETiffWriter,
                    OMEZarrReader, OMEZarrWriter, PixelSize, RGBImage, convert, mutate)
 from omeify.io.spec import OMEImageSpec
@@ -54,7 +52,6 @@ def test_tiff_reader_recovers_linked_image_origin(tmp_path,method):
 
 @pytest.mark.parametrize("version",["0.4","0.5","0.6"])
 def test_zarr_tiff_zarr_full_round_trip_with_real_xsd(tmp_path,version):
-    pytest.importorskip("omeschema",reason="Real OME XSD dependency required; no stub validation")
     expected,_,_=fixture(tmp_path/"a",version=version)
     convert(tmp_path/"a",tmp_path/"b.ome.tif",input_type="ome_zarr",compression="Uncompressed",tile_size=16)
     with OMETiffReader(tmp_path/"b.ome.tif") as im:

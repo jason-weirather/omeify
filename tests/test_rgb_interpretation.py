@@ -86,7 +86,6 @@ def test_supported_rgb_keeps_complete_small_rasters_at_every_level(tmp_path, pro
 
 @pytest.mark.parametrize("sampling", ["444", "422", "420", "411"])
 def test_jpeg_rgb_and_ycbcr_inputs_remain_supported(tmp_path, sampling):
-    pytest.importorskip("imagecodecs", reason="Real JPEG encoding and decoding required")
     pixels = np.full((64, 96, 3), (230, 91, 170), dtype=np.uint8)
     path = tmp_path / "jpeg.ome.tif"
     subsampling = {"444": (1, 1), "422": (2, 1), "420": (2, 2), "411": (4, 1)}[sampling]

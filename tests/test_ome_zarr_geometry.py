@@ -1,4 +1,4 @@
-"""Coordinate and metadata contract tests, runnable without optional Zarr I/O."""
+"""Coordinate and metadata contracts shared by native TIFF and Zarr I/O."""
 from __future__ import annotations
 
 import copy

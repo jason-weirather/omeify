@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from numbers import Integral
 from pathlib import Path
-from typing import TypeVar
+from typing import Self
 
 import numpy as np
 
@@ -13,8 +13,6 @@ from .image_metadata import ImageLevel, ImageMetadata
 from .image_source import ChannelSelection, ImageSource
 from .pixel_size import PixelSize
 from .spec import ImageType
-
-ImageT = TypeVar("ImageT", bound="Image")
 
 
 class Image:
@@ -111,7 +109,7 @@ class Image:
         return (self._active and self._source.is_open
                 and self._source.generation == self._source_generation)
 
-    def open(self: ImageT) -> ImageT:
+    def open(self) -> Self:
         if self._active:
             self._ensure_open()
             return self
@@ -218,12 +216,12 @@ class Image:
 
     @classmethod
     def from_array(
-        cls: type[ImageT], array: np.ndarray, *, axes: str | None = None,
+        cls, array: np.ndarray, *, axes: str | None = None,
         channel_names: Sequence[str] | None = None, pixel_size: PixelSize | None = None,
         copy: bool = False, icc_profile: bytes | None = None, background_label: int = 0,
         channel_ids: Sequence[str | None] | None = None,
         level_arrays: Sequence[np.ndarray] = (), levels: Sequence[ImageLevel] = (),
-    ) -> ImageT:
+    ) -> Self:
         """Construct an unopened image around existing array storage.
 
         Borrowing is deliberate for large images. Keep borrowed arrays unchanged
@@ -260,7 +258,7 @@ class Image:
             origin_yx=origin_yx,
         ))
 
-    def __enter__(self: ImageT) -> ImageT:
+    def __enter__(self) -> Self:
         if self._context_active:
             raise RuntimeError("Nested contexts on the same image are not supported")
         self.open()
@@ -288,7 +286,7 @@ class MultichannelImage(Image):
     def from_channels(
         cls, channels: Sequence[Channel], *, level: int = 0,
         channel_names: Sequence[str] | None = None, pixel_size: PixelSize | None = None,
-    ) -> MultichannelImage:
+    ) -> Self:
         """Assemble scalar lazy channels without reading their full arrays.
 
         All parent images must remain open. Selected channels must have matching

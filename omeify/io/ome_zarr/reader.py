@@ -10,13 +10,15 @@ from ..base import Image, LabelImage
 from ..image_metadata import integer
 from ..image_source import ImageSource
 from .metadata import ArrayInfo, ome_attributes, parse_image, relative_path
-from .store import is_remote, location, read_store, require_zarr
+from .store import is_remote, location, read_store
 
 LOGGER = logging.getLogger(__name__)
 
 
 def open_group(store, path=""):
-    return require_zarr().open_group(store=store, path=path, mode="r", use_consolidated=False)
+    import zarr
+
+    return zarr.open_group(store=store, path=path, mode="r", use_consolidated=False)
 
 
 def array_info(array) -> ArrayInfo:
@@ -34,6 +36,8 @@ def group_attributes(group):
 
 def discover_images(store, group_path="") -> tuple[tuple[str, int, str | None], ...]:
     """Discover declared images, never recursively crawl arbitrary store objects."""
+    import zarr
+
     group = open_group(store, group_path)
     _, version, ome = group_attributes(group)
     if "multiscales" in ome:
@@ -45,7 +49,6 @@ def discover_images(store, group_path="") -> tuple[tuple[str, int, str | None], 
         raise NotImplementedError("Select an image within this plate/well/scene using group= / --group")
     if ome.get("bioformats2raw.layout") != 3:
         raise ValueError("No multiscale image or supported image collection in selected group")
-    zarr = require_zarr()
     prefix = group_path + "/" if group_path else ""
     try:
         _, manifest_version, manifest = group_attributes(open_group(store, prefix + "OME"))
@@ -105,7 +108,8 @@ class ZarrSource(ImageSource):
         return () if is_remote(self.path) else (Path(self.path),)
 
     def _open(self):
-        zarr = require_zarr()
+        import zarr
+
         self.store = read_store(self.path, storage_options=self.storage_options,
                                 cache_bytes=self.cache_bytes)
         self.entries = discover_images(self.store, self.group_path)

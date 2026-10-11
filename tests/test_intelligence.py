@@ -281,6 +281,9 @@ s = TiffInspector(sys.argv[1])
 assert not s.validation_errors()
 assert 'intelligence' not in s.report
 main(['inspect', sys.argv[1], '--json'], standalone_mode=False)
+# Installed-by-default does not mean eagerly initializing unused storage stacks.
+assert 'zarr' not in sys.modules
+assert 'fsspec' not in sys.modules
 '''
     result = subprocess.run(
         [sys.executable, "-c", script, str(image_path)], capture_output=True, text=True,
@@ -498,14 +501,11 @@ def test_terminal_controls_are_escaped_but_json_retains_metadata(image_path, pac
 
 
 def test_intelligence_extra_does_not_change_base_dependencies():
-    try:
-        import tomllib
-    except ImportError:
-        import tomli as tomllib
+    import tomllib
 
     root = Path(__file__).parents[1]
     data = tomllib.loads((root / "pyproject.toml").read_text())
-    assert data["project"]["requires-python"] == ">=3.10"
+    assert data["project"]["requires-python"] == ">=3.11"
     extra = data["project"]["optional-dependencies"]["intelligence"]
     assert extra == ["sheetbend[llm]>=0.5.0,<0.6"]
     assert not any(

@@ -137,8 +137,6 @@ def sampling(request) -> str:
 @pytest.fixture(params=["single", "temporary", "multi", "convert", "cli"])
 def rgb_output(request, tmp_path: Path, sampling: str):
     # Do not substitute codecs or schema validators in these end-to-end tests.
-    pytest.importorskip("imagecodecs")
-    pytest.importorskip("omeschema")
     pixels = _swatches()
     output = tmp_path / "colors.ome.tif"
     settings = dict(tile_size=64, pyramid_levels=2, max_workers=1)

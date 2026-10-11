@@ -278,7 +278,7 @@ def _load_registry() -> Registry:
     if sys.version_info < (3, 13):
         raise IntelligenceError(
             "Intelligence requires Python 3.13+ for Sheetbend; ordinary omeify still supports "
-            "Python 3.10+. Install 'omeify[intelligence]' in a Python 3.13+ environment."
+            "Python 3.11+. Install 'omeify[intelligence]' in a Python 3.13+ environment."
         )
     try:
         from sheetbend import Registry

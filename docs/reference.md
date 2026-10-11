@@ -14,8 +14,10 @@ see [Images and sources](image_sources.md).
 
 ## Installation
 
-Omeify requires Python 3.10 or newer. The [3.10 compatibility checkpoint](python310.md)
-documents an additional NumPy 1.x test lane and downstream-environment precautions.
+Omeify 0.22 requires **Python 3.11 or newer**. TIFF and Zarr support, including
+HTTP(S) Zarr reads, are ordinary dependencies, not separate installation modes.
+Keep legacy Python 3.10 environments on **0.21.0**. See
+[development and release checks](development.md) for supported test environments.
 
 From a repository checkout:
 
@@ -30,7 +32,7 @@ python -m pip install -e '.[intelligence]'
 ```
 
 The `intelligence` extra adds `sheetbend[llm]>=0.5.0,<0.6`; it does not change the
-Python 3.10+ baseline or dependencies of an ordinary installation. Requesting the
+Python 3.11+ baseline or dependencies of an ordinary installation. Requesting the
 extra on an older Python is an installation error, not an empty-extra fallback.
 When installing from a package index, the corresponding form is
 `python -m pip install 'omeify[intelligence]'`. Sheetbend must be available from
@@ -52,7 +54,7 @@ means neither authoritative source was available.
 
 ## OME-Zarr (0.22)
 
-The [OME-Zarr reference](ome_zarr.md) describes the optional reader/writer stack,
+The [OME-Zarr reference](ome_zarr.md) describes the native reader/writer stack,
 all three readable metadata versions, shared command workflows, HTTP(S) access,
 Z/T/group selection, coordinate annotations, and the canonical 0.5 output profile.
 The TIFF-specific storage reference below continues to apply to TIFF output only.
@@ -258,8 +260,9 @@ python -m pytest -q tests/test_rgb_jpeg.py tests/test_rgb_defaults.py
 
 The end-to-end writes require the normal `imagecodecs` and `ome-schema`
 dependencies. They check physical tags, independent expected colors, raw JPEG
-tile decoding, and Omeify/tifffile reads at every level. They explicitly skip
-when those dependencies are absent, rather than substituting a codec or validator.
+tile decoding, and Omeify/tifffile reads at every level. Missing required codecs or
+the XSD fail the tests; they are not optional integrations and are never replaced
+by a substitute validator or codec.
 
 An optional integration test uses the **real Java Bio-Formats OME-TIFF reader**,
 including its JPEG decoder, without adding Java to Omeify's runtime dependencies:

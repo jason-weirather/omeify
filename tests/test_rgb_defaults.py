@@ -155,13 +155,6 @@ def test_verification_enforces_per_image_tile_size(image_factory, tmp_path, wron
         verify_storage([base], prepared)
 
 
-@pytest.fixture
-def real_codecs_and_schema():
-    # Integration means real codecs and real schema validation, never substitutes.
-    pytest.importorskip("imagecodecs")
-    pytest.importorskip("omeschema")
-
-
 def _write_source(path: Path, pixels: np.ndarray, profile: str) -> None:
     if profile == "svs":
         tifffile.imwrite(
@@ -176,7 +169,6 @@ def _write_source(path: Path, pixels: np.ndarray, profile: str) -> None:
         })
 
 
-@pytest.mark.usefixtures("real_codecs_and_schema")
 @pytest.mark.parametrize("route", ["single", "temporary", "multi", "convert-svs", "cli-svs",
                                    "convert-ome", "cli-ome"])
 def test_all_public_routes_write_rgb_with_no_storage_options(tmp_path, route) -> None:
@@ -231,7 +223,6 @@ def test_all_public_routes_write_rgb_with_no_storage_options(tmp_path, route) ->
                     )
 
 
-@pytest.mark.usefixtures("real_codecs_and_schema")
 def test_mixed_series_defaults_and_compression_precedence(image_factory, tmp_path) -> None:
     rgb = image_factory(np.full((257, 513, 3), 128, np.uint8), kind="rgb", pixel_size=_SIZE)
     labels_data = np.arange(257 * 513, dtype=np.uint32).reshape(257, 513)

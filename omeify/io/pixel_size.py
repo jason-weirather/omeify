@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Sequence
+from typing import Self
 
 import numpy as np
 import tifffile
@@ -142,7 +143,7 @@ class PixelSize:
         return self.x, self.y, self.unit
 
     @classmethod
-    def from_tuple(cls, value: Sequence[object]) -> "PixelSize":
+    def from_tuple(cls, value: Sequence[object]) -> Self:
         if len(value) != 3:
             raise ValueError("PixelSize tuple representation must contain exactly (x, y, unit)")
         return cls(float(value[0]), float(value[1]), str(value[2]))

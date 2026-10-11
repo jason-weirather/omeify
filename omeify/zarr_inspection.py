@@ -7,7 +7,7 @@ import json
 from .io.image_metadata import integer
 from .io.ome_zarr.metadata import ome_attributes, parse_image, profile_errors, relative_path
 from .io.ome_zarr.reader import array_info, discover_images, open_group
-from .io.ome_zarr.store import location, read_store, require_zarr
+from .io.ome_zarr.store import location, read_store
 from .reports import complete_report, report_validator
 from .terminal import escape_terminal
 
@@ -105,6 +105,8 @@ class ZarrInspector:
 
     @property
     def report(self):
+        import zarr
+
         if self._report is None:
             store = read_store(self.path, storage_options=self.storage_options)
             try:
@@ -124,7 +126,6 @@ class ZarrInspector:
                     datasets = ome["multiscales"][index]["datasets"]
                     if not isinstance(datasets, list) or not 1 <= len(datasets) <= 64:
                         raise ValueError("Expected 1 to 64 multiscale datasets")
-                    zarr = require_zarr()
                     arrays = tuple(zarr.open_array(store=store,
                                    path=(selected + "/" if selected else "") + relative_path(d["path"]),
                                    mode="r") for d in datasets)

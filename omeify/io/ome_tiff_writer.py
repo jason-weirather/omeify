@@ -4,7 +4,7 @@ import logging
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from omeify.io._writer import (
     DownsampleMethod,
@@ -231,7 +231,7 @@ class TemporaryOMETiffWriter:
             )
         return self._path
 
-    def __enter__(self) -> TemporaryOMETiffWriter:
+    def __enter__(self) -> Self:
         if self._temporary_directory is not None:
             raise RuntimeError("TemporaryOMETiffWriter context is already active")
         if self.directory is not None:

@@ -267,7 +267,6 @@ def test_multi_series_writer_allows_per_series_grayscale_jpeg(
     image_factory,
     tmp_path: Path,
 ) -> None:
-    pytest.importorskip("imagecodecs")
     output = tmp_path / "mixed-compression.ome.tif"
     pixel_size = PixelSize(0.5, 0.5, "µm")
     visualization = np.arange(32 * 48, dtype=np.uint8).reshape(32, 48)

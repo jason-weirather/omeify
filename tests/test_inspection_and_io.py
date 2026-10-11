@@ -609,10 +609,7 @@ def test_label_writer_and_reader_stay_at_the_virtual_io_boundary(
 
 
 def test_runtime_dependencies_exclude_scikit_image() -> None:
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        import tomli as tomllib
+    import tomllib
 
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     with pyproject.open("rb") as handle:

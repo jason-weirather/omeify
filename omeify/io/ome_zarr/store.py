@@ -1,4 +1,4 @@
-"""Optional Zarr storage, bounded read caching, and immutable local publication."""
+"""Zarr storage, bounded read caching, and immutable local publication."""
 from __future__ import annotations
 
 import ctypes
@@ -12,17 +12,6 @@ from urllib.parse import urlsplit
 from omeify.path_safety import paths_overlap
 
 from .metadata import MAX_METADATA_BYTES, relative_path
-
-
-def require_zarr():
-    try:
-        import zarr
-    except ImportError as exc:
-        raise ImportError("OME-Zarr I/O requires Python 3.11+ and pip install 'omeify[zarr]'") from exc
-    from packaging.version import Version
-    if not Version("3.1.3") <= Version(zarr.__version__) < Version("4"):
-        raise ImportError("OME-Zarr I/O requires zarr-python >=3.1.3,<4")
-    return zarr
 
 
 def is_remote(path: str | Path) -> bool:
@@ -42,7 +31,8 @@ def location(path: str | Path) -> str | Path:
 
 def read_store(path: str | Path, *, storage_options: dict | None = None,
                cache_bytes: int = 64 * 1024 * 1024):
-    zarr = require_zarr()
+    import zarr
+
     from ..image_metadata import integer
     cache_bytes = integer(cache_bytes, "cache_bytes")
     path = location(path)
