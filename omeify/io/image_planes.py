@@ -55,6 +55,9 @@ class ImagePlaneSource:
     def output_spec(self) -> OMEImageSpec:
         self._image._ensure_session(self._generation)
         metadata = self._metadata
+        if metadata.unrepresented_geometry:
+            raise ValueError("Additional NGFF spatial relationships cannot be preserved by this image "
+                             "writer; reopen with intrinsic_only=True for an explicit intrinsic export")
         descriptor = metadata.level(self._level)
         if descriptor.pixel_size is None:
             raise ValueError(
@@ -64,13 +67,13 @@ class ImagePlaneSource:
             image_type=metadata.image_type, axes=descriptor.axes, shape=descriptor.shape,
             dtype=metadata.dtype, channel_names=metadata.channel_names,
             pixel_size=descriptor.pixel_size, icc_profile=metadata.icc_profile,
+            origin_yx=descriptor.origin_yx,
         )
 
 
 def protect_source_paths(source: ImagePlaneSource, destination: Path) -> None:
     """Do not replace a declared pixel dependency, including symlinks/hard links."""
     for path in source.backing_paths:
-        if destination.resolve() == path.resolve() or (
-            destination.exists() and path.exists() and destination.samefile(path)
-        ):
+        from omeify.path_safety import paths_overlap
+        if paths_overlap(destination, path):
             raise ValueError("Output must differ from every local file backing the source image")

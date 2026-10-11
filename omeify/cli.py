@@ -31,9 +31,50 @@ from omeify.mutation import mutate
 from omeify.path_safety import atomic_write_text, check_output_path
 from omeify.regions import group_outputs, parse_regions
 from omeify.terminal import escape_terminal
+from omeify.io.output import OUTPUT_FORMATS
+from omeify.io.ome_zarr.store import is_remote, preflight_directory
+from omeify.zarr_inspection import ZarrInspector
 
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _INDEX_KEY = re.compile(r"0|[1-9][0-9]*")
+
+
+def source_options(function):
+    """Shared explicit plane/group selection for every image-consuming command."""
+    for option in reversed((
+        click.option("--group", default="", help="OME-Zarr image group within the store."),
+        click.option("--z-index", "z", type=click.IntRange(min=0), default=None,
+                     help="Explicit OME-Zarr Z plane; required when Z is non-singleton."),
+        click.option("--t-index", "t", type=click.IntRange(min=0), default=None,
+                     help="Explicit OME-Zarr time point; required when T is non-singleton."),
+        click.option("--image-type", type=click.Choice(["multichannel", "rgb", "label"]),
+                     default=None, help="Explicit pixel interpretation; three channels never imply RGB."),
+        click.option("--intrinsic-only", is_flag=True,
+                     help="Explicitly export the selected OME-Zarr intrinsic raster, not extra spatial relationships."),
+    )):
+        function = option(function)
+    return function
+
+
+def output_options(function):
+    return click.option("--output-format", type=click.Choice(OUTPUT_FORMATS),
+                        default="ome_tiff", show_default=True,
+                        help="Output storage contract; Zarr requires a NEW directory.")(function)
+
+
+def preflight_storage(output_path, output_format, *, protected=(), overwrite=True):
+    if output_format == "ome_zarr":
+        context = click.get_current_context()
+        for name in ("jpeg_quality", "jpeg_subsampling", "omit_uuid", "cache_directory"):
+            if context.get_parameter_source(name) not in (None, click.core.ParameterSource.DEFAULT):
+                raise click.UsageError(f"{name.replace('_', '-')} is TIFF-only, not an OME-Zarr setting")
+        if context.get_parameter_source("overwrite") != click.core.ParameterSource.DEFAULT and overwrite:
+            raise click.UsageError("OME-Zarr stores cannot be overwritten; choose a new destination")
+        preflight_directory(output_path, protected=protected)
+    else:
+        if Path(output_path).is_dir():
+            raise IsADirectoryError(f"Output is a directory: {output_path}")
+        check_output_path(output_path, protected=protected, overwrite=overwrite)
 
 
 class _SubcommandOnlyGroup(click.Group):
@@ -130,21 +171,23 @@ def _pixel_size_override(
 
 @click.group(cls=_SubcommandOnlyGroup, context_settings=_CONTEXT_SETTINGS)
 def main() -> None:
-    """Convert, crop, mutate, inspect, and read standardized TIFF-family images."""
+    """Convert, crop, mutate, and inspect calibrated OME-TIFF and OME-Zarr images."""
 
 
 @main.command("convert", context_settings=_CONTEXT_SETTINGS)
+@source_options
+@output_options
 @click.argument(
     "input_path",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+    type=str,
 )
 @click.option(
     "-o",
     "--output",
     "output_path",
-    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    type=click.Path(file_okay=True, dir_okay=True, path_type=Path),
     required=True,
-    help="Destination OME-TIFF file.",
+    help="Destination OME-TIFF file or NEW OME-Zarr directory.",
 )
 @click.option(
     "--type",
@@ -184,9 +227,9 @@ def main() -> None:
 )
 @click.option(
     "--compression",
-    type=click.Choice(["LZW", "Deflate", "ZSTD", "JPEG", "Uncompressed"], case_sensitive=False),
+    type=click.Choice(["LZW", "Deflate", "ZSTD", "Gzip", "JPEG", "Uncompressed"], case_sensitive=False),
     default=None,
-    help="Default: lossy JPEG for RGB (including RGB OME-TIFF); lossless LZW otherwise.",
+    help="TIFF: JPEG for RGB, LZW otherwise. OME-Zarr: lossless ZSTD.",
 )
 @click.option(
     "--jpeg-quality",
@@ -206,7 +249,7 @@ def main() -> None:
     "--tile-size",
     type=click.IntRange(min=16),
     default=None,
-    show_default="512 for RGB; 1024 otherwise",
+    show_default="TIFF: 512 RGB / 1024 scalar; Zarr: 512",
     help="Square output tile size; must be divisible by 16.",
 )
 @click.option(
@@ -225,7 +268,7 @@ def main() -> None:
     "--workers",
     type=click.IntRange(min=1),
     default=None,
-    help="Maximum parallel TIFF compression workers.",
+    help="Maximum parallel output compression workers.",
 )
 @click.option("--pixel-size-x", type=click.FloatRange(min=0, min_open=True), default=None)
 @click.option("--pixel-size-y", type=click.FloatRange(min=0, min_open=True), default=None)
@@ -244,6 +287,8 @@ def main() -> None:
           "-vvv: also print the complete report unless --output-json is supplied."),
 )
 def convert_command(
+    group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
+    output_format: str,
     input_path: Path,
     output_path: Path,
     input_type: str,
@@ -267,12 +312,13 @@ def convert_command(
     overwrite: bool,
     verbose: int,
 ) -> None:
-    """Convert INPUT_PATH into a metadata-minimized pyramidal OME-TIFF.
+    """Convert INPUT_PATH into metadata-minimized pyramidal OME-TIFF or OME-Zarr.
 
-    Supply the destination file with --output / -o.
+    Supply the destination with --output / -o.
     """
 
     configure_logging(verbose)
+    input_path = str(input_path) if is_remote(input_path) else Path(input_path)
     rename_channels, rename_mode = _load_channel_renames(
         rename_channels_json,
         rename_channels_by,  # type: ignore[arg-type]
@@ -283,7 +329,7 @@ def convert_command(
         inputs.append(rename_channels_json)
     protected = [*inputs, output_path]
     try:
-        check_output_path(output_path, protected=inputs, overwrite=overwrite)
+        preflight_storage(output_path, output_format, protected=inputs, overwrite=overwrite)
         preflight_report(output_json, protected=protected, overwrite=overwrite)
     except (OSError, ValueError) as exc:
         raise click.UsageError(escape_terminal(str(exc))) from exc
@@ -297,6 +343,8 @@ def convert_command(
             input_path,
             output_path,
             input_type=input_type,  # type: ignore[arg-type]
+            output_format=output_format, group=group, z=z, t=t, image_type=image_type,
+            intrinsic_only=intrinsic_only,
             series=series,
             channel_name_field=channel_name_field,  # type: ignore[arg-type]
             rename_channels=rename_channels,
@@ -325,17 +373,19 @@ def convert_command(
 
 
 @main.command("mutate", context_settings=_CONTEXT_SETTINGS)
+@source_options
+@output_options
 @click.argument(
     "input_path",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+    type=str,
 )
 @click.option(
     "-o",
     "--output",
     "output_path",
-    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    type=click.Path(file_okay=True, dir_okay=True, path_type=Path),
     required=True,
-    help="Destination OME-TIFF file.",
+    help="Destination OME-TIFF file or NEW OME-Zarr directory.",
 )
 @click.option(
     "--type",
@@ -424,17 +474,15 @@ def convert_command(
 )
 @click.option(
     "--compression",
-    type=click.Choice(["LZW", "Deflate", "ZSTD", "Uncompressed"], case_sensitive=False),
-    default="LZW",
-    show_default=True,
-    help="Lossless compression for quantitative channel data.",
+    type=click.Choice(["LZW", "Deflate", "ZSTD", "Gzip", "Uncompressed"], case_sensitive=False),
+    default=None,
+    help="Lossless compression: TIFF defaults to LZW; Zarr defaults to ZSTD.",
 )
 @click.option(
     "--tile-size",
     type=click.IntRange(min=16),
-    default=1024,
-    show_default=True,
-    help="Square output tile size; must be divisible by 16.",
+    default=None,
+    help="Spatial tile/chunk edge; default TIFF 1024 for scalar data, Zarr 512.",
 )
 @click.option(
     "--pyramid-levels",
@@ -452,7 +500,7 @@ def convert_command(
     "--workers",
     type=click.IntRange(min=1),
     default=None,
-    help="Maximum parallel TIFF compression workers.",
+    help="Maximum parallel output compression workers.",
 )
 @click.option("--pixel-size-x", type=click.FloatRange(min=0, min_open=True), default=None)
 @click.option("--pixel-size-y", type=click.FloatRange(min=0, min_open=True), default=None)
@@ -471,6 +519,8 @@ def convert_command(
           "-vvv: also print the complete report unless --output-json is supplied."),
 )
 def mutate_command(
+    group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
+    output_format: str,
     input_path: Path,
     output_path: Path,
     input_type: str,
@@ -497,12 +547,13 @@ def mutate_command(
     overwrite: bool,
     verbose: int,
 ) -> None:
-    """Create an explicitly pixel-mutated OME-TIFF from planar floating-point INPUT_PATH.
+    """Create an explicitly pixel-mutated OME image from floating-point INPUT_PATH.
 
-    Supply the destination file with --output / -o.
+    Supply the destination with --output / -o.
     """
 
     configure_logging(verbose)
+    input_path = str(input_path) if is_remote(input_path) else Path(input_path)
     if (dtype is None) == (float32_mantissa_bits is None):
         raise click.UsageError(
             "Choose exactly one mutation: --dtype or --float32-mantissa-bits."
@@ -520,7 +571,7 @@ def mutate_command(
         inputs.append(rename_channels_json)
     protected = [*inputs, output_path]
     try:
-        check_output_path(output_path, protected=inputs, overwrite=overwrite)
+        preflight_storage(output_path, output_format, protected=inputs, overwrite=overwrite)
         preflight_report(output_json, protected=protected, overwrite=overwrite)
     except (OSError, ValueError) as exc:
         raise click.UsageError(escape_terminal(str(exc))) from exc
@@ -533,6 +584,8 @@ def mutate_command(
             input_path,
             output_path,
             input_type=input_type,  # type: ignore[arg-type]
+            output_format=output_format, group=group, z=z, t=t, image_type=image_type,
+            intrinsic_only=intrinsic_only,
             channel_name_field=channel_name_field,  # type: ignore[arg-type]
             rename_channels=rename_channels,
             rename_channels_by=rename_mode,
@@ -564,9 +617,11 @@ def mutate_command(
 
 
 @main.command("crop", context_settings=_CONTEXT_SETTINGS)
-@click.argument("input_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@source_options
+@output_options
+@click.argument("input_path", type=str)
 @click.option("-o", "--output", "output_path", required=True,
-              type=click.Path(dir_okay=False, path_type=Path),
+              type=click.Path(dir_okay=True, path_type=Path),
               help="Exact destination OME-TIFF file; with --shatter, a filename/prefix to suffix.")
 @click.option("--bounds", type=int, nargs=4, metavar="X0 Y0 X1 Y1",
               help="Half-open integer bounds in level-zero pixels; exclusive with --geojson.")
@@ -588,7 +643,7 @@ def mutate_command(
 @click.option("--pixel-size-y", type=click.FloatRange(min=0, min_open=True), default=None)
 @click.option("--pixel-size-unit", type=str, default=None)
 @click.option("--compression", type=click.Choice(
-    ["LZW", "Deflate", "ZSTD", "JPEG", "Uncompressed"], case_sensitive=False), default=None,
+    ["LZW", "Deflate", "ZSTD", "Gzip", "JPEG", "Uncompressed"], case_sensitive=False), default=None,
     help="Default: JPEG for RGB, lossless LZW otherwise. Choose Deflate for exact RGB samples.")
 @click.option("--jpeg-quality", type=click.IntRange(min=1, max=100), default=DEFAULT_JPEG_QUALITY)
 @click.option("--jpeg-subsampling", type=click.Choice(["444", "422", "420", "411"]),
@@ -602,6 +657,8 @@ def mutate_command(
 @click.option("-v", "--verbose", count=True,
               help="-v: compact progress; -vv: diagnostic logs; -vvv: full operation report.")
 def crop_command(
+    group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
+    output_format: str,
     input_path: Path, output_path: Path, bounds: tuple[int, ...] | None, geojson_path: str | None,
     shatter: str | None, clip: bool, input_type: str, series: int, labels: bool,
     channel_name_field: str | None, pixel_size_x: float | None, pixel_size_y: float | None,
@@ -610,7 +667,7 @@ def crop_command(
     workers: int | None, cache_directory: Path | None, overwrite: bool, verbose: int,
     output_json: Path | None,
 ) -> None:
-    """Crop rectangles from INPUT_PATH into one ordered, multi-image OME-TIFF.
+    """Crop rectangles from INPUT_PATH into one ordered, multi-image OME product.
 
     OUTPUT is the exact filename by default, even for a single ROI. Each region
     becomes a named series in GeoJSON input order, not a channel or a mosaic.
@@ -621,6 +678,7 @@ def crop_command(
     Polygons are exported as bounding rectangles, without masking.
     """
     configure_logging(verbose)
+    input_path = str(input_path) if is_remote(input_path) else Path(input_path)
     if (bounds is None) == (geojson_path is None):
         raise click.UsageError("Choose exactly one of --bounds or --geojson")
     try:
@@ -631,15 +689,17 @@ def crop_command(
         else:
             geojson = geojson_path
         document, auxiliary = load_crop_document(bounds=bounds, geojson=geojson)
-        outputs = group_outputs(parse_regions(document), output_path, shatter=shatter)
+        outputs = group_outputs(parse_regions(document), output_path, shatter=shatter, output_format=output_format)
         image_paths = [path for path, _ in outputs]
         protected = [input_path, *auxiliary, *image_paths]
         for path in image_paths:
-            check_output_path(path, protected=(input_path, *auxiliary), overwrite=overwrite)
+            preflight_storage(path, output_format, protected=(input_path, *auxiliary), overwrite=overwrite)
         preflight_report(output_json, protected=protected, overwrite=overwrite)
         report = crop(
             input_path, output_path, geojson=document,
             input_type=input_type, series=series, shatter=shatter, clip=clip, labels=labels,
+            output_format=output_format, group=group, z=z, t=t, image_type=image_type,
+            intrinsic_only=intrinsic_only,
             channel_name_field=channel_name_field,
             pixel_size=_pixel_size_override(pixel_size_x, pixel_size_y, pixel_size_unit),
             compression=compression, jpeg_quality=jpeg_quality, jpeg_subsampling=jpeg_subsampling,
@@ -657,9 +717,10 @@ def crop_command(
 
 
 @main.command("inspect", context_settings=_CONTEXT_SETTINGS)
+@source_options
 @click.argument(
     "input_path",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+    type=str,
 )
 @click.option(
     "-d",
@@ -721,9 +782,9 @@ def crop_command(
 @click.option("--geojson", is_flag=True,
               help="Return visual ROI GeoJSON only; sends a bounded image preview. Requires -i -q.")
 @click.option("--type", "input_type", type=click.Choice(INPUT_TYPES), default="ome_tiff",
-              help="Input profile for --visual / --geojson only; default ome_tiff.")
+              help="Input profile for visual reads or explicit OME-Zarr inspection; default ome_tiff.")
 @click.option("--series", type=click.IntRange(min=0), default=0,
-              help="Source series for --visual / --geojson only; default 0.")
+              help="Selected series for image reads and OME-Zarr inspection; default 0.")
 @click.option("--preview-size", type=click.IntRange(min=128, max=2048), default=1536,
               help="Maximum preview edge in pixels for --visual / --geojson; default 1536.")
 @click.option("--preview-channel", type=click.IntRange(min=0), default=None,
@@ -740,6 +801,7 @@ def crop_command(
               help="Enforce exact full-resolution ROI dimensions for --geojson.")
 @click.option("-v", "--verbose", count=True, help="Progress on stderr; repeat for diagnostic logs.")
 def inspect_command(
+    group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
     input_path: Path,
     detail: int,
     as_json: bool,
@@ -756,7 +818,7 @@ def inspect_command(
     preview_range: tuple[float, float] | None, preview_quantile: float,
     roi_size: tuple[int, int] | None, verbose: int,
 ) -> None:
-    """Inspect TIFF metadata, answer visual questions, or locate visual regions.
+    """Inspect TIFF/OME-Zarr metadata, answer visual questions, or locate visual regions.
 
     Ordinary inspection never reads pixels. --visual and --geojson are explicit
     opt-ins to transmit a bounded image overview to the configured model source.
@@ -766,9 +828,10 @@ def inspect_command(
     """
 
     configure_logging(verbose)
+    input_path = str(input_path) if is_remote(input_path) else Path(input_path)
     ctx = click.get_current_context()
     visual_options = (
-        "input_type", "series", "preview_size", "preview_channel", "preview_channels",
+        "preview_size", "preview_channel", "preview_channels",
         "preview_range", "preview_quantile", "roi_size",
     )
     if visual and geojson:
@@ -819,7 +882,8 @@ def inspect_command(
         click.echo("Sending bounded preview for visual analysis...", err=True)
         try:
             with source_reader(input_path, input_type=input_type, series=series,
-                               channel_name_field=None) as image:
+                               channel_name_field=None, group=group, z=z, t=t,
+                               image_type=image_type, intrinsic_only=intrinsic_only) as image:
                 result = answer_visual_question(
                     image, question, series=series,
                     preview_size=preview_size, preview_channel=preview_channel,
@@ -841,7 +905,8 @@ def inspect_command(
         click.echo("Sending bounded preview for region localization...", err=True)
         try:
             with source_reader(input_path, input_type=input_type, series=series,
-                               channel_name_field=None) as image:
+                               channel_name_field=None, group=group, z=z, t=t,
+                               image_type=image_type, intrinsic_only=intrinsic_only) as image:
                 result = locate_regions(
                     image, question, series=series, roi_size=roi_size,
                     preview_size=preview_size, preview_channel=preview_channel,
@@ -856,11 +921,24 @@ def inspect_command(
                        output, input_path=input_path)
         return
     try:
-        inspector = TiffInspector(
-            input_path,
-            detail=detail,
-            max_text_length=None if max_text_length == 0 else max_text_length,
-        )
+        zarr_input = input_type == "ome_zarr" or is_remote(input_path) or Path(input_path).is_dir()
+        if zarr_input:
+            if intelligence:
+                raise click.UsageError("Metadata intelligence is TIFF-only; ordinary Zarr inspection and explicit --visual/--geojson are supported")
+            inspector = ZarrInspector(
+                input_path, group=group, series=series, z=z, t=t, image_type=image_type,
+                intrinsic_only=intrinsic_only, detail=detail,
+                max_text_length=None if max_text_length == 0 else max_text_length,
+            )
+        else:
+            if group or z is not None or t is not None or intrinsic_only or image_type is not None:
+                raise click.UsageError("These image selectors require OME-Zarr inspection")
+            if ctx.get_parameter_source("series") != click.core.ParameterSource.DEFAULT:
+                raise click.UsageError("Ordinary TIFF inspection lists all series; omit --series")
+            inspector = TiffInspector(
+                input_path, detail=detail,
+                max_text_length=None if max_text_length == 0 else max_text_length,
+            )
         if intelligence:
             click.echo(
                 "Answering metadata question..." if question is not None

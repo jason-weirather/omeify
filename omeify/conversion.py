@@ -18,6 +18,7 @@ from .io.pixel_size import PixelSize
 from .io.source_reader import INPUT_TYPES, InputType, source_reader
 from .provenance import readable_runtime
 from .reports import complete_report
+from .io.output import OutputFormat, image_writer
 from .workflow import (
     ChannelRenameMapping,
     RenameChannelsBy,
@@ -40,6 +41,10 @@ def convert(
     *,
     input_type: InputType,
     series: int = 0,
+    output_format: OutputFormat = "ome_tiff",
+    group: str = "", z: int | None = None, t: int | None = None,
+    image_type: str | None = None, intrinsic_only: bool = False,
+    storage_options: dict | None = None,
     channel_name_field: Literal["name", "biomarker", "auto"] | None = None,
     rename_channels: ChannelRenameMapping | None = None,
     rename_channels_by: RenameChannelsBy | None = None,
@@ -56,12 +61,15 @@ def convert(
     overwrite: bool = True,
     cache_directory: str | Path | None = None,
 ) -> dict[str, object]:
-    """Normalize one supported image into omeify's canonical OME-TIFF contract.
+    """Normalize one supported image into a canonical OME-TIFF or OME-Zarr product.
 
     This is the public Python counterpart to ``omeify convert``. Source-format
     readers live in :mod:`omeify.io`; this function only selects the reader,
     applies explicit channel-renaming policy, and delegates all OME-TIFF
-    construction and verification to :class:`OMETiffWriter`.
+    construction and verification to the selected output writer.
+
+    ``output_format="ome_zarr"`` selects a new local NGFF 0.5 / Zarr v3 store.
+    HTTP(S) input uses ``input_type="ome_zarr"``; group/z/t select its image plane.
 
     Omitted compression and tile size follow the selected image's type, not its
     file profile: RGB uses lossy JPEG quality 90 / 4:2:2 and 512-pixel tiles;
@@ -76,7 +84,7 @@ def convert(
     input_file, output_file = validate_image_paths(
         input_path,
         output_path,
-        overwrite=overwrite,
+        overwrite=overwrite, input_type=input_type, output_format=output_format,
     )
     if input_type not in INPUT_TYPES:
         raise ValueError(f"Unsupported input_type {input_type!r}")
@@ -101,6 +109,8 @@ def convert(
         input_type=input_type,
         series=int(series),
         channel_name_field=channel_name_field,
+        group=group, z=z, t=t, image_type=image_type, intrinsic_only=intrinsic_only,
+        storage_options=storage_options,
     )
 
     with reader:
@@ -109,7 +119,7 @@ def convert(
         if effective_pixel_size is None:
             raise ValueError(
                 "Input does not provide a usable physical pixel size. Supply pixel_size="
-                "PixelSize(x, y, unit) explicitly so omeify can satisfy its OME-TIFF contract."
+                "PixelSize(x, y, unit) explicitly so omeify can satisfy its output contract."
             )
 
         log_source_summary(
@@ -132,8 +142,10 @@ def convert(
             output_channel_names,
             rename_mode=normalized_rename_mode,
         )
-        effective_compression = resolve_compression_name(reader.image_type, compression)
-        effective_tile_size = resolve_tile_size(reader.image_type, tile_size)
+        effective_compression = (resolve_compression_name(reader.image_type, compression)
+                                 if output_format == "ome_tiff" else compression or "ZSTD")
+        effective_tile_size = (resolve_tile_size(reader.image_type, tile_size)
+                               if output_format == "ome_tiff" else 512 if tile_size is None else tile_size)
         LOGGER.info(
             "Convert fidelity boundary: source samples enter the writer with dtype %s and "
             "without an intensity rescale or explicit numeric cast",
@@ -148,13 +160,13 @@ def convert(
         else:
             LOGGER.info("Output storage: %s lossless compression", effective_compression)
         LOGGER.info(
-            "Using the shared OME-TIFF writer directly on the source reader "
+            "Using the shared image writer directly on the source reader "
             "(tile=%s, downsample=%s)",
             effective_tile_size,
             downsample,
         )
-        writer = OMETiffWriter(
-            output_file,
+        writer = image_writer(
+            output_file, output_format=output_format,
             compression=effective_compression,
             jpeg_quality=jpeg_quality,
             jpeg_subsampling=jpeg_subsampling,
@@ -179,7 +191,7 @@ def convert(
 
         input_report = build_input_report(reader, input_file, source_pixel_size)
 
-    output_size = output_file.stat().st_size
+    output_size = write_report["output_file"]["size_bytes"]
     output_report = dict(write_report["output_file"])
     image_report = dict(write_report["image"])
     pyramid_report = dict(write_report["pyramid"])
@@ -196,6 +208,8 @@ def convert(
     )
 
 
+    if input_type == "ome_zarr":
+        options.update(group=group, z=z, t=t, image_type=image_type, intrinsic_only=intrinsic_only)
     stop_epoch = time.time()
     report: dict[str, object] = {
         "ome": write_report["ome"],
@@ -212,7 +226,7 @@ def convert(
             "run_time": readable_runtime(stop_epoch - start_epoch),
             "output_to_input_size_ratio": (
                 output_size / int(input_report["size_bytes"])
-                if int(input_report["size_bytes"])
+                if input_report["size_bytes"]
                 else None
             ),
         },

@@ -11,12 +11,13 @@ from typing import Any
 
 from .io._writer.configuration import DEFAULT_JPEG_QUALITY, DEFAULT_JPEG_SUBSAMPLING
 from .io.image_metadata import integer
-from .io.ome_multi_series_writer import OMEImageSeries, OMEMultiSeriesWriter
-from .io.ome_tiff_reader import OMETiffLabelReader
+from .io.ome_multi_series_writer import OMEImageSeries
 from .io.ome_tiff_writer import JPEGSubsampling
 from .io.pixel_size import PixelSize
 from .io.source_reader import InputType, source_reader
-from .path_safety import paths_alias
+from .path_safety import paths_overlap
+from .io.output import OutputFormat, image_writer
+from .io.ome_zarr.store import location, is_remote, preflight_directory
 from .regions import (
     MAX_GEOJSON_CHARS,
     ShatterMode,
@@ -64,6 +65,9 @@ def crop(
     bounds: Sequence[int] | None = None,
     geojson: Mapping[str, Any] | list[Any] | str | Path | None = None,
     input_type: InputType = "ome_tiff", series: int = 0,
+    output_format: OutputFormat = "ome_tiff", group: str = "",
+    z: int | None = None, t: int | None = None, image_type: str | None = None,
+    intrinsic_only: bool = False, storage_options: dict | None = None,
     shatter: ShatterMode | None = None, clip: bool = False, labels: bool = False,
     pixel_size: PixelSize | None = None, channel_name_field: str | None = None,
     compression: str | None = None, tile_size: int | None = None,
@@ -93,19 +97,23 @@ def crop(
     series = integer(series, "series")
     if any(not isinstance(v, bool) for v in (clip, labels, overwrite)):
         raise TypeError("clip, labels, and overwrite must be booleans")
-    if labels and input_type != "ome_tiff":
-        raise ValueError("labels=True requires input_type='ome_tiff'")
+    if labels:
+        if image_type not in {None, "label"}:
+            raise ValueError("labels=True conflicts with image_type")
+        image_type = "label"
     if pixel_size is not None and not isinstance(pixel_size, PixelSize):
         raise TypeError("pixel_size must be a PixelSize")
-    source_path = Path(input_path)
+    source_path = location(input_path)
     document, auxiliary = load_crop_document(bounds=bounds, geojson=geojson)
     protected = [source_path, *auxiliary]
     regions = parse_regions(document)
-    outputs = group_outputs(regions, output_path, shatter=shatter)
+    outputs = group_outputs(regions, output_path, shatter=shatter, output_format=output_format)
     index_width = max(2, len(str(len(regions))))
-    reader = (OMETiffLabelReader(source_path, series=series) if labels else source_reader(
+    reader = source_reader(
         source_path, input_type=input_type, series=series, channel_name_field=channel_name_field,
-    ))
+        group=group, z=z, t=t, image_type=image_type, intrinsic_only=intrinsic_only,
+        storage_options=storage_options,
+    )
     if labels and channel_name_field is not None:
         raise ValueError("channel_name_field is only valid for qptiff_fusion input")
     with reader:
@@ -132,17 +140,17 @@ def crop(
         planned_paths: list[Path] = []
         # Preflight the WHOLE batch, including input aliases and dangling symlinks.
         for path, members in outputs:
-            if any(paths_alias(path, p) for p in protected):
+            if any(not is_remote(p) and paths_overlap(path, p) for p in protected):
                 raise ValueError("A crop destination would replace the image or GeoJSON input")
-            if any(paths_alias(path, p) for p in planned_paths):
+            if any(paths_overlap(path, p) for p in planned_paths):
                 raise ValueError("Crop destinations alias each other")
             if path.is_dir():
                 raise IsADirectoryError(path)
             if not overwrite and os.path.lexists(path):
                 raise FileExistsError(path)
             planned_paths.append(path)
-            writers.append((OMEMultiSeriesWriter(
-                path, compression=compression, tile_size=tile_size, pyramid_levels=pyramid_levels,
+            writers.append((image_writer(
+                path, output_format=output_format, collection=True, compression=compression, tile_size=tile_size, pyramid_levels=pyramid_levels,
                 jpeg_quality=jpeg_quality, jpeg_subsampling=jpeg_subsampling,
                 max_workers=max_workers, overwrite=overwrite, cache_directory=cache_directory,
             ), members))

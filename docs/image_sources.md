@@ -13,6 +13,23 @@ call signatures are unchanged. There are no deprecated forwarding APIs. File ope
 now validates the complete advertised level description; inconsistent metadata
 can fail earlier than a later regional read in the former reader implementation.
 
+## OME-Zarr and coordinates (0.22)
+
+`OMEZarrReader` uses this same Image/Channel API for local directories and HTTP(S)
+stores. `OMEZarrWriter` accepts the same open Image as `OMETiffWriter`.
+`OMEZarrCollectionWriter` accepts `OMEImageSeries` entries; `TemporaryOMEZarrWriter`
+owns temporary paths. None require a TIFF intermediate or an implicit whole-image
+array. [Detailed Zarr examples and limits](ome_zarr.md).
+
+`image.origin_yx` / `image.levels[n].origin_yx` is the physical location of that
+level's pixel **center** `(0,0)`, always in µm, or None if unknown. Bounds remain
+half-open integer pixel **edges**. `levels[n].offset_yx` and `downsample_yx` map
+level edges to base edges. Crops shift known origins, channel assembly refuses
+conflicting origins, and metadata overrides preserve or explicitly replace them.
+Unknown origins are not acquisition stage positions. Additional NGFF spatial
+relationships block export unless the caller explicitly requests an intrinsic-only
+image product. Views cannot silently remove that restriction.
+
 ## Supported patterns
 
 | Task | Canonical library operation |

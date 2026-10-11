@@ -15,13 +15,20 @@ def paths_alias(left: str | Path, right: str | Path) -> bool:
     )
 
 
+def paths_overlap(left: str | Path, right: str | Path) -> bool:
+    """Protect a file or a complete directory store, including resolved symlink paths."""
+    left, right = Path(left), Path(right)
+    a, b = left.resolve(), right.resolve()
+    return paths_alias(left, right) or a in b.parents or b in a.parents
+
+
 def check_output_path(
     path: str | Path, *, protected: Iterable[str | Path] = (), overwrite: bool = True,
 ) -> None:
     """Reject input aliases and unusable destinations without creating anything."""
     path = Path(path)
     for source in protected:
-        if paths_alias(path, source):
+        if "://" not in str(source) and paths_overlap(path, source):
             raise ValueError(f"Output {path} would replace a protected input/output: {source}")
     if not overwrite and os.path.lexists(path):
         raise FileExistsError(f"Output already exists: {path}")

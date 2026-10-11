@@ -10,6 +10,17 @@ The visual command proposes locations. The crop command does not use a model;
 it validates geometry and writes pixels through Omeify's existing writer.
 Ordinary inspection and metadata questions remain metadata-only.
 
+## OME-Zarr crop products (0.22)
+
+The same crop command accepts `--type ome_zarr` and the Zarr source selectors.
+`--output-format ome_zarr` writes an ordered image collection at a **new directory**.
+`--shatter by_index|by_name` retains the existing grouping rules, using `.ome.zarr`
+instead of a TIFF suffix. Names and crop provenance are intentional retained
+metadata; `by_index` does not remove names from metadata. Known physical origins
+are shifted with the crop. See [OME-Zarr](ome_zarr.md) for complete examples and
+new-directory publication restrictions. Current crop report: `omeify.crop/4`;
+embedded provenance: `omeify.crop_provenance/1`.
+
 ## Crop known coordinates
 
 ```bash

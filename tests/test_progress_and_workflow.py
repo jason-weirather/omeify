@@ -283,7 +283,7 @@ def test_mutate_uses_shared_writer_through_dtype_transform_adapter(
             observed["pixels"] = image.asarray()
             return super().write(image, **kwargs)
 
-    monkeypatch.setattr(mutation_module, "OMETiffWriter", RecordingWriter)
+    monkeypatch.setattr("omeify.io.output.OMETiffWriter", RecordingWriter)
     report = mutation_module.mutate(
         source,
         output,

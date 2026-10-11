@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/zarr_collection_report.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "output_file",
+    "series",
+    "metadata_minimization"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.zarr_collection/1"
+    },
+    "output_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size_bytes",
+        "series_count"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "series_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "series": {
+      "type": "array",
+      "items": {
+        "$ref": "https://github.com/jason-weirather/omeify/schemas/zarr_write_report.schema.json"
+      },
+      "minItems": 1
+    },
+    "metadata_minimization": {
+      "const": true
+    }
+  }
+}

@@ -133,7 +133,10 @@
           "minLength": 1
         },
         "size_bytes": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "type_description": {
@@ -183,7 +186,8 @@
         "byte_order": {
           "enum": [
             "little",
-            "big"
+            "big",
+            "not_applicable"
           ]
         },
         "pixel_size": {
@@ -224,6 +228,48 @@
           "anyOf": [
             {
               "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/miti"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ngff_version": {
+          "enum": [
+            "0.4",
+            "0.5",
+            "0.6"
+          ]
+        },
+        "group": {
+          "type": "string"
+        },
+        "z": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "t": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "intrinsic_only": {
+          "type": "boolean"
+        },
+        "origin_yx_um": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
             },
             {
               "type": "null"
@@ -754,6 +800,24 @@
         "python": {
           "type": "string",
           "minLength": 1
+        },
+        "zarr": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fsspec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "numcodecs": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": {
@@ -1550,7 +1614,8 @@
             "component",
             "ome_tiff",
             "qptiff_he",
-            "svs"
+            "svs",
+            "ome_zarr"
           ]
         },
         "series": {
@@ -1604,6 +1669,34 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "group": {
+          "type": "string"
+        },
+        "z": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "t": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "intrinsic_only": {
+          "type": "boolean"
+        },
+        "image_type": {
+          "enum": [
+            null,
+            "multichannel",
+            "rgb",
+            "label"
           ]
         }
       }
@@ -1742,6 +1835,34 @@
         "auto_max_normalized_rmse": {
           "type": "number",
           "minimum": 0
+        },
+        "group": {
+          "type": "string"
+        },
+        "z": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "t": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "intrinsic_only": {
+          "type": "boolean"
+        },
+        "image_type": {
+          "enum": [
+            null,
+            "multichannel",
+            "rgb",
+            "label"
+          ]
         }
       }
     },
@@ -1805,6 +1926,583 @@
           },
           "minItems": 2,
           "maxItems": 2
+        }
+      }
+    },
+    "zarr_ome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "version",
+        "zarr_format",
+        "profile",
+        "profile_valid",
+        "attributes"
+      ],
+      "properties": {
+        "format": {
+          "const": "OME-Zarr"
+        },
+        "version": {
+          "const": "0.5"
+        },
+        "zarr_format": {
+          "const": 3
+        },
+        "profile": {
+          "const": "omeify.ome_zarr/1"
+        },
+        "profile_valid": {
+          "const": true
+        },
+        "attributes": {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/ome_zarr_profile.schema.json"
+        }
+      }
+    },
+    "zarr_output_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size_bytes",
+        "type_description",
+        "dtype",
+        "shape",
+        "axes",
+        "byte_order",
+        "lossless_compression"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "type_description": {
+          "const": "Pyramidal OME-Zarr"
+        },
+        "dtype": {
+          "enum": [
+            "uint8",
+            "uint16",
+            "uint32",
+            "int8",
+            "int16",
+            "int32",
+            "float32",
+            "float64"
+          ]
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2,
+          "maxItems": 3
+        },
+        "axes": {
+          "enum": [
+            "YX",
+            "CYX",
+            "YXS"
+          ]
+        },
+        "byte_order": {
+          "const": "little"
+        },
+        "lossless_compression": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "axes": {
+                "const": "YX"
+              }
+            },
+            "required": [
+              "axes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "shape": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "axes": {
+                "const": "CYX"
+              }
+            },
+            "required": [
+              "axes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "shape": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "axes": {
+                "const": "YXS"
+              }
+            },
+            "required": [
+              "axes"
+            ]
+          },
+          "then": {
+            "properties": {
+              "shape": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "const": 3
+                  }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          }
+        }
+      ]
+    },
+    "zarr_write_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metadata_minimization",
+        "compression",
+        "float32_mantissa_bits",
+        "max_workers",
+        "output_format",
+        "ngff_version"
+      ],
+      "properties": {
+        "metadata_minimization": {
+          "const": true
+        },
+        "compression": {
+          "enum": [
+            "ZSTD",
+            "Gzip",
+            "Uncompressed"
+          ]
+        },
+        "float32_mantissa_bits": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 23
+        },
+        "max_workers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "output_format": {
+          "const": "ome_zarr"
+        },
+        "ngff_version": {
+          "const": "0.5"
+        }
+      }
+    },
+    "zarr_verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ome_zarr_recognized",
+        "metadata_matches_profile",
+        "geometry_matches",
+        "storage_matches_requested",
+        "dense_chunk_inventory_verified",
+        "output_pixels_decodable",
+        "base_pixel_values_checked",
+        "base_pixel_values_match",
+        "chunks_checked",
+        "pixel_verification"
+      ],
+      "properties": {
+        "ome_zarr_recognized": {
+          "const": true
+        },
+        "metadata_matches_profile": {
+          "const": true
+        },
+        "geometry_matches": {
+          "const": true
+        },
+        "storage_matches_requested": {
+          "const": true
+        },
+        "dense_chunk_inventory_verified": {
+          "const": true
+        },
+        "output_pixels_decodable": {
+          "const": true
+        },
+        "base_pixel_values_checked": {
+          "const": true
+        },
+        "base_pixel_values_match": {
+          "const": true
+        },
+        "chunks_checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pixel_verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "all_pixels_checked",
+            "sampling",
+            "base_points_compared",
+            "pyramid_points_compared",
+            "source_reader_independent",
+            "base_comparison",
+            "pyramid_comparison"
+          ],
+          "properties": {
+            "mode": {
+              "const": "sampled"
+            },
+            "all_pixels_checked": {
+              "const": false
+            },
+            "sampling": {
+              "type": "string",
+              "minLength": 1
+            },
+            "base_points_compared": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "pyramid_points_compared": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_reader_independent": {
+              "const": false
+            },
+            "base_comparison": {
+              "const": "bitwise"
+            },
+            "pyramid_comparison": {
+              "enum": [
+                "bitwise",
+                "numeric_equal_nan"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "zarr_conversion_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metadata_minimization",
+        "compression",
+        "float32_mantissa_bits",
+        "max_workers",
+        "output_format",
+        "ngff_version",
+        "input_type",
+        "series",
+        "rename_channels",
+        "rename_channels_by",
+        "channel_name_field",
+        "pixel_size_override"
+      ],
+      "properties": {
+        "metadata_minimization": {
+          "const": true
+        },
+        "compression": {
+          "enum": [
+            "ZSTD",
+            "Gzip",
+            "Uncompressed"
+          ]
+        },
+        "float32_mantissa_bits": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 23
+        },
+        "max_workers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "output_format": {
+          "const": "ome_zarr"
+        },
+        "ngff_version": {
+          "const": "0.5"
+        },
+        "input_type": {
+          "enum": [
+            "qptiff_mif",
+            "qptiff_fusion",
+            "indica_mif",
+            "component",
+            "ome_tiff",
+            "qptiff_he",
+            "svs",
+            "ome_zarr"
+          ]
+        },
+        "series": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rename_channels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rename_channels_by": {
+          "enum": [
+            null,
+            "name",
+            "index"
+          ]
+        },
+        "channel_name_field": {
+          "enum": [
+            null,
+            "name",
+            "biomarker",
+            "auto"
+          ]
+        },
+        "pixel_size_override": {
+          "anyOf": [
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "minLength": 1
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "group": {
+          "type": "string"
+        },
+        "z": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "t": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "intrinsic_only": {
+          "type": "boolean"
+        },
+        "image_type": {
+          "enum": [
+            null,
+            "multichannel",
+            "rgb",
+            "label"
+          ]
+        }
+      }
+    },
+    "zarr_mutation_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metadata_minimization",
+        "compression",
+        "float32_mantissa_bits",
+        "max_workers",
+        "output_format",
+        "ngff_version",
+        "input_type",
+        "series",
+        "rename_channels",
+        "rename_channels_by",
+        "channel_name_field",
+        "pixel_size_override",
+        "operation"
+      ],
+      "properties": {
+        "metadata_minimization": {
+          "const": true
+        },
+        "compression": {
+          "enum": [
+            "ZSTD",
+            "Gzip",
+            "Uncompressed"
+          ]
+        },
+        "float32_mantissa_bits": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 23
+        },
+        "max_workers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "output_format": {
+          "const": "ome_zarr"
+        },
+        "ngff_version": {
+          "const": "0.5"
+        },
+        "input_type": {
+          "$ref": "#/$defs/conversion_options/properties/input_type"
+        },
+        "series": {
+          "$ref": "#/$defs/conversion_options/properties/series"
+        },
+        "rename_channels": {
+          "$ref": "#/$defs/conversion_options/properties/rename_channels"
+        },
+        "rename_channels_by": {
+          "$ref": "#/$defs/conversion_options/properties/rename_channels_by"
+        },
+        "channel_name_field": {
+          "$ref": "#/$defs/conversion_options/properties/channel_name_field"
+        },
+        "pixel_size_override": {
+          "$ref": "#/$defs/conversion_options/properties/pixel_size_override"
+        },
+        "operation": {
+          "enum": [
+            "dtype",
+            "float32_precision"
+          ]
+        },
+        "dtype": {
+          "enum": [
+            "uint8",
+            "uint16"
+          ]
+        },
+        "range_mode": {
+          "enum": [
+            "auto",
+            "preserve",
+            "full"
+          ]
+        },
+        "sample_pixels_per_channel": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "auto_max_normalized_rmse": {
+          "type": "number",
+          "minimum": 0
+        },
+        "group": {
+          "type": "string"
+        },
+        "z": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "t": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "intrinsic_only": {
+          "type": "boolean"
+        },
+        "image_type": {
+          "enum": [
+            null,
+            "multichannel",
+            "rgb",
+            "label"
+          ]
         }
       }
     }

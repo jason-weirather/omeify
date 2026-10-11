@@ -19,13 +19,27 @@
   ],
   "properties": {
     "schema": {
-      "const": "omeify.convert/1"
+      "const": "omeify.convert/2"
     },
     "ome": {
-      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/ome"
+      "oneOf": [
+        {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/ome"
+        },
+        {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/zarr_ome"
+        }
+      ]
     },
     "output_file": {
-      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/output_file"
+      "oneOf": [
+        {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/output_file"
+        },
+        {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/zarr_output_file"
+        }
+      ]
     },
     "image": {
       "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/image"
@@ -34,16 +48,37 @@
       "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/pyramid"
     },
     "verification": {
-      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/verification"
+      "oneOf": [
+        {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/verification"
+        },
+        {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/zarr_verification"
+        }
+      ]
     },
     "miti_header": {
-      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/miti"
+      "oneOf": [
+        {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/miti"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "input_file": {
       "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/input_file"
     },
     "options": {
-      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/conversion_options"
+      "oneOf": [
+        {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/conversion_options"
+        },
+        {
+          "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/zarr_conversion_options"
+        }
+      ]
     },
     "conversion_stats": {
       "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/stats"
@@ -51,5 +86,52 @@
     "versions": {
       "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/versions"
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "output_file": {
+            "properties": {
+              "type_description": {
+                "const": "Pyramidal OME-Zarr"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "ome": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/zarr_ome"
+          },
+          "options": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/zarr_conversion_options"
+          },
+          "verification": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/zarr_verification"
+          },
+          "miti_header": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "ome": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/ome"
+          },
+          "options": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/conversion_options"
+          },
+          "verification": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/verification"
+          },
+          "miti_header": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/miti"
+          }
+        }
+      }
+    }
+  ]
 }

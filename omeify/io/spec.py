@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal, Sequence
 
@@ -37,8 +38,19 @@ class OMEImageSpec:
     pixel_size: PixelSize
     icc_profile: bytes | None = None
     significant_bits_override: int | None = None
+    origin_yx: tuple[float, float] | None = None
+    pyramid_method: str = "mean"
 
     def __post_init__(self) -> None:
+        if self.origin_yx is not None:
+            if len(self.origin_yx) != 2 or any(
+                isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float))
+                or not math.isfinite(v) for v in self.origin_yx
+            ):
+                raise ValueError("origin_yx requires two finite micrometer coordinates")
+            object.__setattr__(self, "origin_yx", tuple(float(v) for v in self.origin_yx))
+        if self.pyramid_method not in {"mean", "nearest"}:
+            raise ValueError("pyramid_method must be mean or nearest")
         image_type = str(self.image_type)
         if image_type not in {"multichannel", "rgb", "label"}:
             raise ValueError(
@@ -136,6 +148,7 @@ class OMEImageSpec:
         channel_names: Sequence[str] | None,
         pixel_size: PixelSize,
         icc_profile: bytes | None = None,
+        origin_yx: tuple[float, float] | None = None,
     ) -> "OMEImageSpec":
         normalized_shape = tuple(int(item) for item in shape)
         if channel_names is None:
@@ -155,7 +168,7 @@ class OMEImageSpec:
             dtype=np.dtype(dtype),
             channel_names=names,
             pixel_size=pixel_size,
-            icc_profile=icc_profile,
+            icc_profile=icc_profile, origin_yx=origin_yx,
         )
 
     @property

@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/zarr_inspection.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "omeify.zarr_inspect/1"
+    },
+    "path": {
+      "type": "string"
+    },
+    "group": {
+      "type": "string"
+    },
+    "series_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "format": {
+      "const": "OME-Zarr"
+    },
+    "ngff_version": {
+      "enum": [
+        null,
+        "0.4",
+        "0.5",
+        "0.6"
+      ]
+    },
+    "detail": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    },
+    "series": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "image": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "arrays": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "attributes": {
+      "type": "object"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "matches_image_attributes",
+        "findings",
+        "whole_store_audited"
+      ],
+      "properties": {
+        "name": {
+          "const": "omeify.ome_zarr/1"
+        },
+        "matches_image_attributes": {
+          "type": "boolean"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "whole_store_audited": {
+          "const": false
+        }
+      }
+    },
+    "raster_pixels_examined": {
+      "const": false
+    }
+  },
+  "required": [
+    "schema",
+    "path",
+    "group",
+    "series_index",
+    "format",
+    "ngff_version",
+    "detail",
+    "series",
+    "image",
+    "arrays",
+    "attributes",
+    "diagnostics",
+    "profile",
+    "raster_pixels_examined"
+  ]
+}

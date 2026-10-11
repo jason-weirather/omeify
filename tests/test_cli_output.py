@@ -89,5 +89,7 @@ def test_output_help_is_available_without_paths(image_command: list[str]) -> Non
     assert result.exit_code == 0, result.output
     assert result.output.splitlines()[0].endswith("[OPTIONS] INPUT_PATH")
     output_line = next(line for line in result.output.splitlines() if "-o, --output" in line)
-    assert "FILE" in output_line
-    assert "[required]" in output_line
+    assert "PATH" in output_line
+    assert "Destination OME-TIFF file or NEW OME-Zarr directory. [required]" in " ".join(
+        result.output.split()
+    )

@@ -469,12 +469,16 @@ def verify_physical_calibration(
         tiff_calibration,
     )
 
+    from omeify.utils.ome_geometry import read_geometry, record_for_spec
+
     images = root.findall(f"{{{OME_NAMESPACE}}}Image")
     if len(images) != len(prepared):
         raise ValueError("OME image count does not match calibration specifications")
     ifd = 0
     checked = 0
     for image_index, (image, item) in enumerate(zip(images, prepared, strict=True)):
+        if read_geometry(root, image) != record_for_spec(item.spec):
+            raise ValueError("OME image-coordinate metadata differs from the writer specification")
         pixels = image.find(f"{{{OME_NAMESPACE}}}Pixels")
         declared = ome_calibration(pixels)
         expected = item.spec.pixel_size.converted_to("µm")

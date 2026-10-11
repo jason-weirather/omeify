@@ -8,6 +8,7 @@ from lxml import etree
 from tifffile import OmeXml
 
 from omeify._version import __version__
+from .ome_geometry import attach_geometry
 
 _OME_NAMESPACE = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
 _PYRAMID_NAMESPACE = "openmicroscopy.org/PyramidResolution"
@@ -176,12 +177,13 @@ def generate_ome_xml(
     ome = OmeXml(Creator=f"omeify {__version__}", UUID=file_uuid)
     _add_image(ome, tiff_features, level_shapes, name=None)
     root = etree.fromstring(ome.tostring(declaration=True).encode("utf-8"))
-    _normalize_root(
+    image_elements = _normalize_root(
         root,
         display_uuid=display_uuid,
         output_byteorder=output_byteorder,
         remove_image_names=True,
     )
+    attach_geometry(root, image_elements, (tiff_features,))
     return {
         "xml_string": _serialize(root),
         "uuid": file_uuid if display_uuid else None,
@@ -226,6 +228,7 @@ def generate_multi_series_ome_xml(
         output_byteorder=output_byteorder,
         remove_image_names=False,
     )
+    attach_geometry(root, image_elements, [spec for _, spec, _ in normalized])
     if provenance_json is not None:
         if not isinstance(provenance_json, str) or not provenance_json:
             raise ValueError("provenance_json must be a non-empty string or None")

@@ -17,6 +17,12 @@ from .vendor_tiff_readers import (
 )
 
 __all__ = [
+    "OMEZarrReader",
+    "OMEZarrLabelReader",
+    "OMEZarrWriter",
+    "OMEZarrCollectionWriter",
+    "TemporaryOMEZarrWriter",
+
     "AkoyaComponentTiffReader",
     "AkoyaFusionQPTiffReader",
     "AkoyaHEQPTiffReader",
@@ -42,6 +48,9 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
+    if name in {"OMEZarrReader", "OMEZarrLabelReader", "OMEZarrWriter", "OMEZarrCollectionWriter", "TemporaryOMEZarrWriter"}:
+        from . import ome_zarr
+        return getattr(ome_zarr, name)
     if name in {"OMETiffReader", "OMETiffLabelReader"}:
         from .ome_tiff_reader import OMETiffLabelReader, OMETiffReader
 

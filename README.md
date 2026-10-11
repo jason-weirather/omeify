@@ -1,11 +1,15 @@
 # omeify
 
-**A predictable OME-TIFF home base for microscopy images.**
+**Predictable OME-TIFF and OME-Zarr home bases for microscopy images.**
 
-Omeify converts supported tissue-imaging formats into tiled, pyramidal OME-TIFFs
-with explicit pixel interpretation, calibrated geometry, and deliberately
-controlled metadata. It also provides a Python library for reading images and
-writing new products under the same rules.
+Omeify converts supported tissue-imaging formats into calibrated, pyramidal
+**OME-TIFF** files or **OME-Zarr 0.5 / Zarr v3** stores with explicit pixel
+interpretation and deliberately controlled metadata. The same regional Image API
+also reads OME-Zarr **0.4, 0.5 and 0.6**, locally or over HTTP(S).
+
+The Zarr reader supports selected 2D images and explicit Z/T plane selection,
+not arbitrary registered scenes. OME-TIFF remains the default output.
+See the [OME-Zarr contract and compatibility boundaries](docs/ome_zarr.md).
 
 Microscopy TIFFs can arrive with different channel layouts, calibration
 conventions, pyramid structures, and vendor descriptions. Those descriptions
@@ -57,7 +61,7 @@ predictable.
 
 | Aspect | Omeify's output contract |
 |---|---|
-| Container | Self-contained, little-endian BigTIFF with OME 2016-06 XML. No separate OME metadata file is needed. |
+| Container | Self-contained, little-endian BigTIFF with OME 2016-06 XML. No separate OME metadata file is needed. Explicit image origins use a linked, controlled geometry annotation. |
 | Image layout | Grayscale (`YX`), multiplex channel stacks (`CYX`), or interleaved RGB (`YXS`). RGB has three color samples per pixel, not three fluorescence channels. |
 | Pixel types | Grayscale and multiplex images support 8-, 16-, and 32-bit signed or unsigned integers (including `uint32`), plus 32- and 64-bit floats. RGB uses `uint8` only. |
 | Pixel values | `convert` preserves the original dtype and intensity scale. Lossless compression preserves full-resolution pixel values; JPEG is lossy. Use `mutate` for intentional changes to pixel type or precision. |
@@ -75,6 +79,40 @@ These are **file-construction guarantees**, not a judgment of scientific quality
 Pixel checks sample representative locations rather than every pixel. Correctly
 writing a pixel size cannot prove that the microscope was calibrated correctly.
 See [reproducibility and verification](#reproducibility-and-verification).
+
+## The OME-Zarr home base
+
+Install `python -m pip install '.[zarr]'` from this checkout in Python 3.11+.
+The TIFF-only installation retains Python 3.10 support. Neither path imports a
+viewer, segmentation framework, Dask, or an AI client for ordinary image I/O.
+
+```bash
+omeify convert input.ome.tif -o normalized.ome.zarr \
+  --type ome_tiff --output-format ome_zarr --no-overwrite
+omeify inspect normalized.ome.zarr
+omeify mutate normalized.ome.zarr -o integers.ome.zarr \
+  --type ome_zarr --output-format ome_zarr --dtype uint16 --range-mode preserve
+```
+
+The mutation example requires floating-point input. Conversion preserves the
+source dtype and intensity scale; mutation is the deliberate numerical operation.
+
+The canonical writer emits **0.5 metadata on Zarr v3**, fresh allowlisted JSON,
+explicit physical coordinates in `micrometer` units, lossless Zstd level 3,
+unsharded 512-pixel spatial chunks, and one stored component per chunk. Gzip and
+uncompressed encoding are explicit alternatives. RGB components remain explicit;
+three scalar channels are never guessed to be RGB. Ordinary scalar output needs
+no private metadata. Supplemental declarations retain RGB/ICC, categorical-label,
+or explicit float-precision meaning where NGFF's raster model does not encode it.
+
+A Zarr destination must be a **new local directory**, even when a common workflow
+permits TIFF replacement. Construction is staged, the dense chunk inventory and
+sampled pixels are checked, and a no-replace rename publishes the completed store.
+Remote writes, ZIP stores, output sharding, arbitrary scenes, and whole-experiment
+metadata conversion are outside this profile. Input sharding is delegated to Zarr;
+remote sharded input additionally needs server byte-range support.
+
+[Library examples, coordinate conventions, version decision, tests, and limits](docs/ome_zarr.md)
 
 ## Metadata minimization and MITI alignment
 
@@ -144,8 +182,8 @@ image as deidentified.
 ## Installation
 
 Omeify requires **Python 3.10 or newer** for its ordinary image-I/O features.
-The 0.21 compatibility checkpoint keeps this baseline while applying the current
-hardening and report cleanup. See [Python 3.10 environments](docs/python310.md)
+The 0.21 compatibility checkpoint remains the earlier TIFF-only baseline; 0.22
+keeps Python 3.10 for the TIFF core and adds an optional Python 3.11+ Zarr stack. See [Python 3.10 environments](docs/python310.md)
 for the NumPy 1.x test lane and publication sequence. From the corresponding checkout:
 
 ```bash
@@ -173,10 +211,10 @@ Omeify separates inspecting, writing, and changing pixel values:
 
 | Command | What it does |
 |---|---|
-| `omeify inspect` | Show TIFF structure and metadata without changing the file. |
-| `omeify convert` | Write a normalized OME-TIFF, preserving pixel type and scale, rebuilding pyramids, and checking the result. |
-| `omeify crop` | Export rectangles from coordinates or GeoJSON into one OME-TIFF, or split them with `--shatter`. |
-| `omeify mutate` | Intentionally convert floating-point pixels to integers or reduce float32 precision, with a report of the changes. |
+| `omeify inspect` | Show TIFF or OME-Zarr structure and metadata without reading image pixels. |
+| `omeify convert` | Write normalized OME-TIFF or OME-Zarr, preserving pixel type and scale and rebuilding pyramids. |
+| `omeify crop` | Export rectangles into an OME-TIFF or ordered OME-Zarr image collection, optionally split with `--shatter`. |
+| `omeify mutate` | Intentionally change floating-point pixels or float32 precision, to either output format, with a report. |
 | `omeify version` | Show the version; `--json` also shows image-I/O dependency versions. |
 
 For `convert` and `mutate`, set the output file with **`--output` / `-o`**;
@@ -495,6 +533,13 @@ that filesystem; it fails rather than using an unsafe fallback.
 See [I/O and failure behavior][io-behavior].
 
 ## Scope and further documentation
+
+In 0.22, convert/mutate/crop accept `--output-format ome_tiff|ome_zarr`.
+OME-Zarr input uses `--type ome_zarr`; inspection recognizes a local directory or
+HTTP(S) root without that flag. `--group`, `--z-index`, and `--t-index` select a
+specific Zarr image and plane. [0.22 report and geometry changes](docs/ome_zarr.md#migration)
+are deliberate pre-1.0 changes, not compatibility aliases.
+
 
 Omeify currently writes two-dimensional grayscale (`YX`), multiplex (`CYX`),
 and RGB (`YXS`) images, with single Z and T positions. RGB requires three

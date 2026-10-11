@@ -22,17 +22,31 @@ def validate_image_paths(
     output_path: str | Path,
     *,
     overwrite: bool,
-) -> tuple[Path, Path]:
+    input_type: str = "ome_tiff", output_format: str = "ome_tiff",
+) -> tuple[str | Path, Path]:
     """Validate the common source/destination contract for convert and mutate."""
 
-    input_file = Path(input_path)
+    from .io.ome_zarr.store import is_remote, location, preflight_directory
+    from .io.output import OUTPUT_FORMATS
+    from .path_safety import check_output_path, paths_alias
+
+    if output_format not in OUTPUT_FORMATS:
+        raise ValueError(f"Unsupported output_format {output_format!r}")
+    input_file = location(input_path)
+    if is_remote(input_file):
+        if input_type != "ome_zarr":
+            raise ValueError("Remote input requires input_type='ome_zarr'")
+    elif not (input_file.is_dir() if input_type == "ome_zarr" else input_file.is_file()):
+        raise FileNotFoundError(f"Input image does not exist or has the wrong storage type: {input_file}")
+    if is_remote(output_path):
+        raise ValueError("Image output must be a local file or new local Zarr directory")
     output_file = Path(output_path)
-    if not input_file.is_file():
-        raise FileNotFoundError(f"Input image does not exist: {input_file}")
-    if input_file.resolve() == output_file.resolve():
-        raise ValueError("Input and output paths must be different")
-    if os.path.lexists(output_file) and not overwrite:
-        raise FileExistsError(f"Output already exists: {output_file}")
+    if not is_remote(input_file) and paths_alias(input_file, output_file):
+        raise ValueError("Input and output must be different paths")
+    if output_format == "ome_zarr":
+        preflight_directory(output_file, protected=(input_file,))
+    else:
+        check_output_path(output_file, protected=(input_file,), overwrite=overwrite)
     return input_file, output_file
 
 
@@ -215,7 +229,7 @@ def _report_metadata(value: Any) -> Any:
 
 def build_input_report(
     reader: Any,
-    input_file: Path,
+    input_file: str | Path,
     source_pixel_size: PixelSize | None,
     *,
     always_include_source_miti_header: bool = False,
@@ -235,9 +249,10 @@ def build_input_report(
         }
         for channel in reader.channels
     ]
+    from .io.ome_zarr.store import store_size
     report: dict[str, object] = {
         "path": str(input_file),
-        "size_bytes": input_file.stat().st_size,
+        "size_bytes": None if hasattr(reader, "ngff_version") else store_size(input_file),
         "type_description": reader.input_type_description,
         "dtype": reader.dtype.name,
         "shape": list(reader.native_shape),
@@ -250,6 +265,12 @@ def build_input_report(
         ),
         "channels": source_channels,
     }
+    from .io.ome_zarr import OMEZarrReader
+    if isinstance(reader, OMEZarrReader):
+        source = reader._source
+        report.update(ngff_version=reader.ngff_version, group=source.selected_group,
+                      z=source.z, t=source.t, intrinsic_only=source.intrinsic_only,
+                      origin_yx_um=None if reader.origin_yx is None else list(reader.origin_yx))
     source_header = source_miti_header(reader)
     if source_header is not None or always_include_source_miti_header:
         report["source_miti_header"] = source_header

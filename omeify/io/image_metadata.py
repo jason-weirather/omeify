@@ -64,7 +64,10 @@ class ImageLevel:
 
     ``downsample_yx`` is an explicitly known sampling scale relative to level zero,
     NOT the ratio of rounded raster dimensions. None means unknown. All levels
-    share an origin and axis directions; arbitrary registration is not modeled.
+    share axis directions; arbitrary registration is not modeled. ``offset_yx``
+    maps level-local pixel EDGES to base pixel edges after applying downsample.
+    ``origin_yx`` is the physical position of pixel CENTER (0,0), in micrometers;
+    None means no physical origin was supplied (not a measured stage position).
     """
 
     index: int
@@ -72,6 +75,8 @@ class ImageLevel:
     shape: tuple[int, ...]
     pixel_size: PixelSize | None = None
     downsample_yx: tuple[float, float] | None = None
+    offset_yx: tuple[float, float] | None = (0.0, 0.0)
+    origin_yx: tuple[float, float] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "index", integer(self.index, "level index"))
@@ -90,6 +95,17 @@ class ImageLevel:
             if self.index == 0 and scale != (1.0, 1.0):
                 raise ValueError("Level zero must have downsample_yx=(1, 1)")
         object.__setattr__(self, "downsample_yx", scale)
+        for name in ("offset_yx", "origin_yx"):
+            value = getattr(self, name)
+            if value is not None:
+                if len(value) != 2 or any(
+                    isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float, np.number))
+                    or not math.isfinite(v) for v in value
+                ):
+                    raise ValueError(f"{name} requires two finite numbers or None")
+                object.__setattr__(self, name, tuple(float(v) for v in value))
+        if self.index == 0 and self.offset_yx != (0.0, 0.0):
+            raise ValueError("Level zero must have offset_yx=(0, 0)")
 
     @property
     def spatial_shape(self) -> tuple[int, int]:
@@ -122,8 +138,11 @@ class ImageMetadata:
     background_label: int = 0
     channel_source_ids: tuple[str | None, ...] | None = None
     channel_metadata: tuple[Mapping[str, Any], ...] | None = None
+    unrepresented_geometry: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.unrepresented_geometry, bool):
+            raise TypeError("unrepresented_geometry must be boolean")
         shape = _shape(self.shape, self.axes)
         dtype = np.dtype(self.dtype).newbyteorder("=")
         if dtype.kind not in "buif":
@@ -211,6 +230,16 @@ class ImageMetadata:
                     for a, b in zip(actual, level.downsample_yx)
                 ):
                     raise ValueError("Level calibration disagrees with its declared sampling scale")
+        if self.pixel_size is not None and levels[0].origin_yx is not None:
+            size_um = self.pixel_size.converted_to("µm")
+            for item in levels:
+                if (item.origin_yx is not None and item.offset_yx is not None
+                        and item.downsample_yx is not None):
+                    for j, step in enumerate((size_um.y, size_um.x)):
+                        expected = (levels[0].origin_yx[j] + step *
+                                    (item.offset_yx[j] + (item.downsample_yx[j] - 1) / 2))
+                        if not math.isclose(expected, item.origin_yx[j], rel_tol=1e-9, abs_tol=1e-9):
+                            raise ValueError("Physical origin disagrees with pixel-edge level mapping")
         if levels[0].shape != shape or levels[0].pixel_size != self.pixel_size:
             raise ValueError("Level zero geometry/calibration must equal the image descriptor")
         object.__setattr__(self, "shape", shape)

@@ -168,6 +168,7 @@ def parse_regions(value: Mapping[str, Any] | list[Any]) -> tuple[Region, ...]:
 
 def group_outputs(
     regions: Sequence[Region], output_path: str | Path, *, shatter: ShatterMode | None = None,
+    output_format: str = "ome_tiff",
 ) -> list[tuple[Path, tuple[Region, ...]]]:
     """Keep all ROIs in one file unless explicitly shattered by input index or name.
 
@@ -176,6 +177,10 @@ def group_outputs(
     .ome.tiff when no TIFF extension was supplied. Input order is retained within
     every file; name groups follow their first occurrence, never alphabetical order.
     """
+    if output_format not in {"ome_tiff", "ome_zarr"}:
+        raise ValueError("output_format must be ome_tiff or ome_zarr")
+    if "://" in str(output_path):
+        raise ValueError("Crop output must be local")
     if shatter not in (None, "by_index", "by_name"):
         raise ValueError("shatter must be None, 'by_index', or 'by_name'")
     if not regions:
@@ -188,8 +193,10 @@ def group_outputs(
     if shatter is None:
         return [(base, tuple(regions))]
 
-    extension = ".ome.tiff"
-    for suffix in (".ome.tiff", ".ome.tif", ".tiff", ".tif"):
+    extension = ".ome.zarr" if output_format == "ome_zarr" else ".ome.tiff"
+    suffixes = ((".ome.zarr", ".zarr") if output_format == "ome_zarr" else
+                (".ome.tiff", ".ome.tif", ".tiff", ".tif"))
+    for suffix in suffixes:
         if base.name.lower().endswith(suffix):
             stem, extension = base.name[:-len(suffix)], base.name[-len(suffix):]
             if not stem or stem in {".", ".."}:

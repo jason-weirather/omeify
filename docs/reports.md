@@ -1,9 +1,24 @@
 # Reports and terminal output
 
-Omeify 0.21 keeps full library reports while making routine image-writing CLI
+Omeify 0.22 keeps full library reports while making routine image-writing CLI
 output compact. This is a pre-1.0 contract cleanup, not a compatibility alias layer.
 The image API, coordinate conventions, storage defaults, and numeric algorithms
 are unchanged for supported inputs.
+
+## Zarr integration (0.22)
+
+OME-Zarr has its own storage and inspection records, not fabricated TIFF IFDs.
+`omeify.zarr_write/1`, `omeify.zarr_collection/1`, and `omeify.zarr_inspect/1`
+are validated by packaged schemas. Convert/mutate report version 2 selects the
+appropriate TIFF or Zarr output/verification variant. Crop version 4 accepts both
+collection writers; the embedded crop provenance stays `omeify.crop_provenance/1`.
+`miti_header` is null for Zarr, never a false claim of TIFF-header compliance.
+Input Zarr `size_bytes` is null: discovery does not traverse an entire store to
+measure it. Source selectors and physical origins are explicit. A source store
+and the intended output directory are protected in their entirety from report
+writes. Explicit storage credentials are never copied to reports.
+
+See [the Zarr contract](ome_zarr.md) for publication, version, and capability limits.
 
 ## CLI presentation
 
@@ -49,9 +64,9 @@ References resolve against packaged resources, never by fetching their `$id` URL
 |---|---|
 | `write_report.schema.json` | Single image or temporary writer: `omeify.write/1` |
 | `multi_series_report.schema.json` | Named heterogeneous images: `omeify.multi_series/1` |
-| `conversion_report.schema.json` | Conversion: `omeify.convert/1` |
-| `mutation_report.schema.json` | Integer or float32 precision mutation: `omeify.mutate/1` |
-| `crop_report.schema.json` | Crop export, including nested writer reports: `omeify.crop/3` |
+| `conversion_report.schema.json` | Conversion: `omeify.convert/2` |
+| `mutation_report.schema.json` | Integer or float32 precision mutation: `omeify.mutate/2` |
+| `crop_report.schema.json` | Crop export, including nested writer reports: `omeify.crop/4` |
 | `crop_provenance.schema.json` | Embedded crop geometry/provenance: `omeify.crop_provenance/1` |
 | `tiff_inspection.schema.json` | Inspection: `schema_version="2.0"` |
 | `metadata_intelligence.schema.json` | Summary or focused metadata answer: `schema_version="2.0"` |

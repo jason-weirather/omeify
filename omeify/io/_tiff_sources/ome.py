@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 import tifffile
+from lxml import etree
+from omeify.utils.ome_geometry import calibrated_levels, read_geometry
 
 from ..image_metadata import ImageMetadata
 from ..pixel_size import PixelSize, consistent_tiff_resolution_pixel_size, pixel_size_from_xy_units
@@ -128,6 +130,12 @@ class OMESource(TiffSource):
             records.append(summary)
         pixel_size = self._pixel_size()
         levels = self._levels(axes, count, pixel_size)
+        # Match via the established local TiffData mapping, never series ordinal.
+        summary = self._ome_image_summary()
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
+        root = etree.fromstring(self._tiff.ome_metadata.encode("utf-8") if isinstance(self._tiff.ome_metadata, str) else self._tiff.ome_metadata, parser)
+        images = root.findall(f"{{{etree.QName(root).namespace}}}Image")
+        levels = calibrated_levels(levels, read_geometry(root, images[summary["index"]]))
         profile = pages[0].iccprofile if kind == "rgb" else None
         return ImageMetadata(
             axes=axes, shape=levels[0].shape, dtype=native.dtype, image_type=kind,

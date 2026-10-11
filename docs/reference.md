@@ -50,6 +50,13 @@ expected neighboring file after confirming `[project].name == "omeify"`. A wheel
 uses installed distribution metadata when that source file is absent; `0+unknown`
 means neither authoritative source was available.
 
+## OME-Zarr (0.22)
+
+The [OME-Zarr reference](ome_zarr.md) describes the optional reader/writer stack,
+all three readable metadata versions, shared command workflows, HTTP(S) access,
+Z/T/group selection, coordinate annotations, and the canonical 0.5 output profile.
+The TIFF-specific storage reference below continues to apply to TIFF output only.
+
 ## Supported inputs
 
 ### Planar multiplex images

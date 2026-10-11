@@ -162,6 +162,8 @@ def build_preview(
     canvas_scale = (height / ph, width / pw)
     candidates = []
     for descriptor in image.levels:
+        if descriptor.offset_yx is None or any(abs(v) > 1e-10 for v in descriptor.offset_yx):
+            continue  # This renderer bins common-origin edges; do not misplace shifted levels.
         scale = descriptor.downsample_yx
         if scale is None or any(a > b for a, b in zip(scale, canvas_scale)):
             continue

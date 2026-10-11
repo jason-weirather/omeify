@@ -15,7 +15,7 @@
   ],
   "properties": {
     "schema": {
-      "const": "omeify.crop/3"
+      "const": "omeify.crop/4"
     },
     "input_path": {
       "type": "string",
@@ -62,7 +62,14 @@
             "minItems": 1
           },
           "write_report": {
-            "$ref": "https://github.com/jason-weirather/omeify/schemas/multi_series_report.schema.json"
+            "oneOf": [
+              {
+                "$ref": "https://github.com/jason-weirather/omeify/schemas/multi_series_report.schema.json"
+              },
+              {
+                "$ref": "https://github.com/jason-weirather/omeify/schemas/zarr_collection_report.schema.json"
+              }
+            ]
           }
         }
       },

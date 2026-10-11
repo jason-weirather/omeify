@@ -48,7 +48,7 @@ def writer_spy(monkeypatch):
                           "sizes": [s.image.pixel_size for s in entries]})
             return multi_report_fixture(self.path, entries, provenance)
 
-    monkeypatch.setattr("omeify.cropping.OMEMultiSeriesWriter", Writer)
+    monkeypatch.setattr("omeify.io.output.OMEMultiSeriesWriter", Writer)
     return calls
 
 
@@ -158,7 +158,7 @@ def test_grouped_exports_use_real_lazy_crops(input_file, tmp_path, writer_spy, s
         feature["properties"]["index"] = 10 - i
     output = tmp_path / "out.he.ome.tiff"
     report = crop(path, output_path=output, geojson=collection(*features), shatter=shatter)
-    assert report["schema"] == "omeify.crop/3" and report["shatter"] == shatter
+    assert report["schema"] == "omeify.crop/4" and report["shatter"] == shatter
     assert report["output_path"] == str(output) and "naming" not in report
     assert len(writer_spy) == len(report["outputs"]) == len(groups)
     if shatter is None:

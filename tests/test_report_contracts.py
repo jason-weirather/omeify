@@ -205,7 +205,7 @@ def test_real_workflow_reports_and_pixels(tmp_path, real_stack, operation):
             rectangle_feature([20, 5, 36, 21], name="second"),
         ]}, shatter="by_index" if operation == "shatter" else None, **settings)
         schema = "crop_report.schema.json"
-        assert report["schema"] == "omeify.crop/3"
+        assert report["schema"] == "omeify.crop/4"
         for product in report["outputs"]:
             for region in product["regions"]:
                 x0, y0, x1, y1 = region["bounds"]

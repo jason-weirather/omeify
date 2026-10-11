@@ -3,6 +3,7 @@ from .conversion import convert
 from .cropping import crop
 from .inspection import TiffInspector
 from .io import (
+    OMEZarrReader, OMEZarrLabelReader, OMEZarrWriter, OMEZarrCollectionWriter, TemporaryOMEZarrWriter,
     AkoyaComponentTiffReader,
     AkoyaFusionQPTiffReader,
     AkoyaHEQPTiffReader,
@@ -26,8 +27,16 @@ from .io import (
     TemporaryOMETiffWriter,
 )
 from .mutation import mutate
+from .zarr_inspection import ZarrInspector
 
 __all__ = [
+    "ZarrInspector",
+    "OMEZarrReader",
+    "OMEZarrLabelReader",
+    "OMEZarrWriter",
+    "OMEZarrCollectionWriter",
+    "TemporaryOMEZarrWriter",
+
     "AkoyaComponentTiffReader",
     "AkoyaFusionQPTiffReader",
     "AkoyaHEQPTiffReader",

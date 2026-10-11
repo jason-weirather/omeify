@@ -24,11 +24,12 @@ from .dtype_mutation import (
 from .io._writer.configuration import normalize_float32_mantissa_bits
 from .io._writer.precision import float32_significant_bits
 from .io.base import MultichannelImage
-from .io.ome_tiff_writer import DownsampleMethod, OMETiffWriter
+from .io.ome_tiff_writer import DownsampleMethod
 from .io.pixel_size import PixelSize
 from .io.source_reader import PLANAR_INPUT_TYPES, PlanarInputType, source_reader
 from .provenance import readable_runtime
 from .reports import complete_report
+from .io.output import OutputFormat, image_writer
 from .workflow import (
     ChannelRenameMapping,
     RenameChannelsBy,
@@ -54,14 +55,18 @@ def mutate(
     float32_mantissa_bits: int | None = None,
     range_mode: RangeMode | None = None,
     series: int = 0,
+    output_format: OutputFormat = "ome_tiff",
+    group: str = "", z: int | None = None, t: int | None = None,
+    image_type: str | None = None, intrinsic_only: bool = False,
+    storage_options: dict | None = None,
     channel_name_field: Literal["name", "biomarker", "auto"] | None = None,
     rename_channels: ChannelRenameMapping | None = None,
     rename_channels_by: RenameChannelsBy | None = None,
     pixel_size: PixelSize | None = None,
     sample_pixels_per_channel: int = DEFAULT_SAMPLE_PIXELS_PER_CHANNEL,
     auto_max_normalized_rmse: float = DEFAULT_AUTO_MAX_NORMALIZED_RMSE,
-    compression: str = "LZW",
-    tile_size: int = 1024,
+    compression: str | None = None,
+    tile_size: int | None = None,
     pyramid_levels: int | None = None,
     downsample: DownsampleMethod = "mean",
     max_workers: int | None = None,
@@ -70,7 +75,7 @@ def mutate(
     overwrite: bool = True,
     cache_directory: str | Path | None = None,
 ) -> dict[str, object]:
-    """Write an explicitly pixel-mutated OME-TIFF from one planar float source.
+    """Write an explicitly pixel-mutated OME image from one planar float source.
 
     Exactly one mutation is selected:
 
@@ -79,14 +84,15 @@ def mutate(
     * ``float32_mantissa_bits=`` keeps float32 storage and exponent range while
       rounding the stored fraction to the requested number of bits.
 
-    Both operations stream through the same :class:`OMETiffWriter` used by
-    conversion and rebuild all pyramid levels from the mutated representation.
+    Both operations use the same output writer selection as conversion and rebuild
+    all pyramid levels from the mutated representation. ``output_format="ome_zarr"``
+    selects a new local NGFF 0.5 / Zarr v3 store.
     """
 
     input_file, output_file = validate_image_paths(
         input_path,
         output_path,
-        overwrite=overwrite,
+        overwrite=overwrite, input_type=input_type, output_format=output_format,
     )
     if input_type not in PLANAR_INPUT_TYPES:
         raise ValueError(f"Unsupported input_type {input_type!r}")
@@ -126,7 +132,7 @@ def mutate(
 
     if pixel_size is not None and not isinstance(pixel_size, PixelSize):
         raise TypeError("pixel_size must be a PixelSize instance")
-    if compression.strip().lower() in {"jpeg", "jpg"}:
+    if compression is not None and compression.strip().lower() in {"jpeg", "jpg"}:
         raise ValueError("quantitative mutation output requires lossless compression")
 
     operation = "dtype" if dtype_requested else "float32_precision"
@@ -143,8 +149,12 @@ def mutate(
         input_type=input_type,
         series=int(series),
         channel_name_field=channel_name_field,
+        group=group, z=z, t=t, image_type=image_type, intrinsic_only=intrinsic_only,
+        storage_options=storage_options,
     )
     with reader, ExitStack() as stack:
+        if reader._metadata.unrepresented_geometry:
+            raise ValueError("Additional NGFF spatial relationships require an explicit intrinsic_only export")
         if reader.image_type == "rgb":
             raise ValueError("mutation currently supports planar grayscale channels only")
         if reader.axes not in {"YX", "CYX"}:
@@ -279,14 +289,14 @@ def mutate(
             }
 
         LOGGER.info(
-            "Using the shared OME-TIFF writer through a streaming mutation adapter "
+            "Using the shared image writer through a streaming mutation adapter "
             "(compression=%s, tile=%s, downsample=%s)",
             compression,
             tile_size,
             downsample,
         )
-        writer = OMETiffWriter(
-            output_file,
+        writer = image_writer(
+            output_file, output_format=output_format,
             compression=compression,
             tile_size=tile_size,
             pyramid_levels=pyramid_levels,
@@ -315,7 +325,7 @@ def mutate(
             always_include_source_miti_header=True,
         )
 
-    output_size = output_file.stat().st_size
+    output_size = write_report["output_file"]["size_bytes"]
     output_report = dict(write_report["output_file"])
     options = dict(write_report["options"])
     options.update(
@@ -343,6 +353,8 @@ def mutate(
     else:
         options["float32_mantissa_bits"] = normalized_mantissa_bits
 
+    if input_type == "ome_zarr":
+        options.update(group=group, z=z, t=t, image_type=image_type, intrinsic_only=intrinsic_only)
     stop_epoch = time.time()
     report: dict[str, object] = {
         "operation": operation,
@@ -360,7 +372,7 @@ def mutate(
             "run_time": readable_runtime(stop_epoch - start_epoch),
             "output_to_input_size_ratio": (
                 output_size / int(input_report["size_bytes"])
-                if int(input_report["size_bytes"])
+                if input_report["size_bytes"]
                 else None
             ),
         },

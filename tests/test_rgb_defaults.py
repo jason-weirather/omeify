@@ -107,8 +107,9 @@ def test_conversion_and_cli_share_public_defaults(tmp_path, monkeypatch) -> None
     assert seen["compression"] is None and seen["tile_size"] is None
     assert seen["jpeg_quality"] == 90 and seen["jpeg_subsampling"] == "422"
     help_result = CliRunner().invoke(main, ["convert", "--help"])
-    assert "512 for RGB; 1024 otherwise" in help_result.output
-    assert "RGB OME-TIFF" in " ".join(help_result.output.split())
+    help_text = " ".join(help_result.output.split())
+    assert "TIFF: 512 RGB / 1024 scalar; Zarr: 512" in help_text
+    assert "TIFF: JPEG for RGB, LZW otherwise" in help_text
 
 
 def test_temporary_writer_inherits_rgb_defaults(image_factory) -> None:

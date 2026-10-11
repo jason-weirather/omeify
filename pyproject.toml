@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omeify"
-version = "0.21.0"
-description = "Convert tissue images into metadata-minimized, pyramidal OME-TIFF"
+version = "0.22.0"
+description = "Predictable, metadata-minimized OME-TIFF and OME-Zarr image I/O"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -15,6 +15,7 @@ authors = [
 ]
 keywords = [
   "OME-TIFF",
+  "OME-Zarr",
   "microscopy",
   "pathology",
   "whole slide imaging",
@@ -67,6 +68,12 @@ Issues = "https://github.com/jason-weirather/omeify/issues"
 omeify = "omeify.cli:main"
 
 [project.optional-dependencies]
+# The TIFF core retains Python 3.10. Zarr >=3.1.3 requires Python 3.11+;
+# do not add an environment marker that installs an empty extra on 3.10.
+zarr = ["zarr>=3.1.3,<4", "fsspec[http]>=2024.6,<2027", "packaging>=22"]
+# Independent format models are tests, not a runtime model/validation framework.
+# This extra currently requires Python 3.12+ through the upstream models package.
+interop = ["ome-zarr-models>=1.8.1,<2"]
 # Sheetbend 0.5 owns source selection; its llm extra owns inference dependencies.
 # No Python marker: requesting intelligence on Python <3.13 must fail, not install
 # an apparently successful but empty extra. Base omeify remains Python >=3.10.

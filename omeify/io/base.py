@@ -76,6 +76,11 @@ class Image:
         return self._metadata.levels
 
     @property
+    def origin_yx(self) -> tuple[float, float] | None:
+        """Pixel-center (0,0) position in micrometers, or an unspecified local origin."""
+        return self.levels[0].origin_yx
+
+    @property
     def channel_names(self) -> tuple[str, ...]:
         return self._metadata.channel_names
 
@@ -241,6 +246,7 @@ class Image:
     def with_metadata(
         self, *, channel_names: Sequence[str] | None = None,
         pixel_size: PixelSize | None = None, icc_profile: bytes | None = None,
+        origin_yx: tuple[float, float] | None = None,
     ) -> Image:
         """Create an unopened, borrowed observation with explicit metadata overrides.
 
@@ -251,6 +257,7 @@ class Image:
         from .image_views import MetadataSource
         return _semantic_image(MetadataSource(
             self, channel_names=channel_names, pixel_size=pixel_size, icc_profile=icc_profile,
+            origin_yx=origin_yx,
         ))
 
     def __enter__(self: ImageT) -> ImageT:

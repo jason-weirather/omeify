@@ -51,6 +51,7 @@ class MetadataSource(BorrowedSource):
     def __init__(
         self, image: Image, *, channel_names: Sequence[str] | None,
         pixel_size: PixelSize | None, icc_profile: bytes | None,
+        origin_yx: tuple[float, float] | None = None,
     ) -> None:
         metadata = image._metadata
         levels = metadata.levels
@@ -63,6 +64,20 @@ class MetadataSource(BorrowedSource):
                     pixel_size.y * item.downsample_yx[0], pixel_size.unit,
                 ),
             ) for item in levels)
+        base_origin = metadata.levels[0].origin_yx if origin_yx is None else replace(
+            metadata.levels[0], origin_yx=origin_yx,
+        ).origin_yx
+        base_size = metadata.pixel_size if pixel_size is None else pixel_size
+        if base_origin is not None and base_size is not None:
+            base_um = base_size.converted_to("µm")
+            levels = tuple(replace(
+                item, origin_yx=tuple(
+                    base_origin[j] + (item.offset_yx[j] + (item.downsample_yx[j] - 1) / 2)
+                    * (base_um.y, base_um.x)[j] for j in range(2)
+                ) if item.offset_yx is not None and item.downsample_yx is not None else None,
+            ) for item in levels)
+        elif origin_yx is not None:
+            raise ValueError("An explicit physical origin requires pixel calibration")
         metadata = replace(
             metadata,
             channel_names=metadata.channel_names if channel_names is None else channel_names,
@@ -107,15 +122,20 @@ class ChannelSource(BorrowedSource):
                      for d in descriptions]
             if any(s != sizes[0] for s in sizes):
                 raise ValueError("Channel calibrations differ; supply an explicit pixel_size")
+        origin = descriptions[0].origin_yx
+        if any(d.origin_yx != origin for d in descriptions):
+            raise ValueError("Channel origins differ; explicit registration is required")
         metadata = ImageMetadata(
             axes="CYX", shape=(len(selected), *shape), dtype=dtype,
             channel_names=(
                 tuple(c.name for c in selected) if channel_names is None else channel_names
             ),
             pixel_size=pixel_size,
+            levels=(ImageLevel(0, "CYX", (len(selected), *shape), pixel_size, origin_yx=origin),),
             # New assembled channels get unique IDs; origins remain separate provenance.
             channel_source_ids=tuple(c.id for c in selected),
             channel_metadata=tuple(c.source_metadata for c in selected),
+            unrepresented_geometry=any(c._image._metadata.unrepresented_geometry for c in selected),
         )
         super().__init__(metadata, tuple(c._image for c in selected))
         self._channels = selected
@@ -140,7 +160,13 @@ class CropSource(BorrowedSource):
         shape = list(image.shape)
         shape[image.axes.index("Y")] = y1 - y0
         shape[image.axes.index("X")] = x1 - x0
-        level = ImageLevel(0, image.axes, tuple(shape), image.pixel_size, (1., 1.))
+        origin = image.origin_yx
+        if origin is not None:
+            if image.pixel_size is None:
+                raise ValueError("Cropping an anchored image requires physical pixel calibration")
+            size = image.pixel_size.converted_to("µm")
+            origin = (origin[0] + y0 * size.y, origin[1] + x0 * size.x)
+        level = ImageLevel(0, image.axes, tuple(shape), image.pixel_size, (1., 1.), origin_yx=origin)
         metadata = replace(image._metadata, shape=tuple(shape), levels=(level,))
         super().__init__(metadata, (image,))
         self._image, self._y0, self._x0 = image, y0, x0

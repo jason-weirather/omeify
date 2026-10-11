@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -63,6 +63,7 @@ def prepare_image(
         settings.float32_mantissa_bits,
     )
     effective_downsample = resolve_downsample(spec.image_type, downsample)
+    spec = replace(spec, pyramid_method=effective_downsample)
     tile_size = resolve_tile_size(spec.image_type, settings.tile_size)
     display_name = "image" if name is None else f"series {name!r}"
 
