@@ -2,13 +2,14 @@
 
 Omeify 0.22 keeps full library reports while making routine image-writing CLI
 output compact. This is a pre-1.0 contract cleanup, not a compatibility alias layer.
-The image API, coordinate conventions, storage defaults, and numeric algorithms
-are unchanged for supported inputs.
+Both storage formats use the common Image API and explicit geometry model.
+The current hardening pass does not change pixel arithmetic or storage defaults;
+it tightens interpretation/metadata checks and makes inspection scope explicit.
 
 ## Zarr integration (0.22)
 
 OME-Zarr has its own storage and inspection records, not fabricated TIFF IFDs.
-`omeify.zarr_write/1`, `omeify.zarr_collection/1`, and `omeify.zarr_inspect/1`
+`omeify.zarr_write/1`, `omeify.zarr_collection/1`, and `omeify.zarr_inspect/2`
 are validated by packaged schemas. Convert/mutate report version 2 selects the
 appropriate TIFF or Zarr output/verification variant. Crop version 4 accepts both
 collection writers; the embedded crop provenance stays `omeify.crop_provenance/1`.
@@ -68,7 +69,14 @@ References resolve against packaged resources, never by fetching their `$id` URL
 | `mutation_report.schema.json` | Integer or float32 precision mutation: `omeify.mutate/2` |
 | `crop_report.schema.json` | Crop export, including nested writer reports: `omeify.crop/4` |
 | `crop_provenance.schema.json` | Embedded crop geometry/provenance: `omeify.crop_provenance/1` |
-| `tiff_inspection.schema.json` | Inspection: `schema_version="2.0"` |
+| `tiff_inspection.schema.json` | TIFF inspection: `schema_version="2.0"` |
+| `zarr_inspection.schema.json` | Zarr inspection, including discovery metadata snapshots: `omeify.zarr_inspect/2` |
+| `zarr_write_report.schema.json` | Zarr single-image/temporary writer: `omeify.zarr_write/1` |
+| `zarr_collection_report.schema.json` | Zarr collection writer report: `omeify.zarr_collection/1` |
+| `ome_zarr_profile.schema.json` | Canonical NGFF 0.5 image attributes: `omeify.ome_zarr/1` policy |
+| `ome_zarr_collection.schema.json` | Canonical NGFF 0.5 collection-root attributes, not the writer report |
+| `ome_zarr_manifest.schema.json` | Canonical `OME/` ordered series manifest attributes |
+| `ome_geometry.schema.json` | Linked TIFF image-coordinate record: `omeify.geometry/1` |
 | `metadata_intelligence.schema.json` | Summary or focused metadata answer: `schema_version="2.0"` |
 | `calibration.schema.json` | Deterministic calibration comparison: version `1.0` |
 | `visual_answer.schema.json` | Visual answer: `omeify.visual_answer/1`; also defines its model response |
@@ -121,13 +129,83 @@ and explicit computed-record counts. Only current version 2.0 reports validate:
 summary responses use prompt 2.1, question/answer responses prompt 3.0. These prompt
 identifiers describe active protocols and are independent of report/package versions.
 Retired schema/prompt combinations are not silently upgraded or reinterpreted.
-Inspection version 2.0 reflects that nested contract change, not a restriction to
+TIFF inspection schema version 2.0 reflects that nested contract change, not a restriction to
 writer-supported TIFF layouts. Ordinary inspection remains useful on unsupported inputs.
 
-Crop report version 3 replaces version 2 because its nested writer reports and
-embedded provenance now have explicit current contracts. Embedded crop provenance
-uses its own identifier rather than sharing the report's identifier. Crop filenames,
-ROI order, coordinate conventions, bounds, and offsets are unchanged.
+The 0.21 cleanup introduced crop report version 3; **current output is version 4**
+to support either TIFF or Zarr collection reports. Embedded crop provenance
+retains its separate `omeify.crop_provenance/1` identifier. Old reports are not
+silently rewritten into current schemas.
+
+## Stored metadata checks
+
+The inventory above is the single current schema index. Operation-report schemas
+validate report structure, not the truth of a claimed pixel check. Stored-metadata
+schemas validate the image product's own controlled records:
+
+* `ome_geometry.schema.json` is used when generating and reading a linked TIFF
+  geometry annotation. Python additionally checks finite coordinates and the
+  4 KiB UTF-8 bound. Duplicate JSON keys are rejected on read; the existing
+  namespace and OME Image reference remain authoritative.
+* `ome_zarr_profile.schema.json` fixes axes to ordered `yx` or `cyx`, requires
+  scale followed by optional translation of matching rank, fixes channel scale
+  to one/translation to zero, and constrains image-type extensions. Python checks
+  consecutive dataset paths, display-range ordering, and supplemental value
+  relationships. Array dimensions, pixels, encoding and physical consistency
+  remain reader/writer checks, not facts inferred from schema success.
+* Zarr collection-root and `OME/` manifest attributes are schema-checked before
+  construction and on readback, with exact generated-value/order comparison.
+  Child images use the ordinary image-attribute profile. These output profiles
+  do not forbid unrelated valid metadata in a foreign input store.
+
+Explicit collection provenance in either backend must be a mapping of finite,
+acyclic plain Python JSON data with string keys (no object/key coercion), at most
+64 nested containers and 1 MiB encoded
+UTF-8. A declared `omeify.crop_provenance/1` object must also satisfy its schema.
+Other caller-supplied provenance objects are intentionally not given invented
+biological semantics; they are copied deliberately and need sharing review.
+
+## Inspection report version 2 for Zarr
+
+`omeify.zarr_inspect/2` adds required `metadata_nodes`, a list of
+`{"group": relative_group_path, "attributes": raw_attributes}` snapshots collected
+during bounded discovery. It preserves collection-root provenance, the consulted
+`OME` manifest and declared child-image attributes rather than hiding them behind
+the selected image. `attributes` still describes the selected group, while
+`arrays` holds that image's original array metadata. Normalized `image`, `levels`
+and `series` fields have strict application-owned schemas; raw source metadata
+remains open because inspection must be able to describe foreign formats.
+
+This is **not recursive discovery** of arbitrary sidecars, sibling groups or
+unvisited ancestors. Selecting `group="1"` directly does not inspect the
+collection above it. Inspect from the collection root to include its discovery
+context. Reader-owned `image.inspect()` snapshots the already opened session and
+does not reopen the source, fetch additional URLs, or keep its handles alive.
+Ordinary text output flags additional group metadata; detail 3 shows bounded raw
+snippets and JSON retains all collected snapshots. `whole_store_audited=false`
+and `raster_pixels_examined=false` remain explicit.
+
+## Metadata retention and sharing
+
+Metadata minimization means constructing the chosen output vocabulary, **not
+classifying every retained value as safe**. These distinctions apply to both
+formats:
+
+| Value or object | Boundary |
+|---|---|
+| Vendor descriptions, patient/scanner fields, arbitrary source dictionaries, array attributes and unrelated groups/sidecars | Not automatically copied into new image products |
+| Channel names | Only selected fields in supported source structures; names are still free text requiring review |
+| ROI/collection names, caller Software tag and explicit provenance | Deliberate retention, not automatic privacy approval; index-based filenames do not erase internal names |
+| RGB ICC profile | Opaque color-information preservation, including any internal descriptive text; no implicit color conversion, internal-text sanitization or ICC/privacy certification |
+| Physical origins and crop coordinates | Retained when needed for the explicitly selected product; not invented acquisition-stage measurements |
+| Inspection and operation reports | Diagnostics may include original attributes, paths and allowed free text; these are not the minimized image artifact |
+| Pixels | Preserved/transformed under the selected image operation; burned-in identifiers are not detected |
+
+`metadata_minimization=true` records application of the construction policy.
+A MITI minimum-header pass permits additional OME metadata and reports it
+separately; it is not a minimization certificate. A canonical Zarr attribute
+profile match is not a whole-store privacy audit. Neither replaces independent
+sharing review, and no validator proves source calibration or biological truth.
 
 ## Safety and failure behavior
 
@@ -143,8 +221,8 @@ not truncate the other linked file. Temporary report files are cleaned on failur
 `--no-overwrite` applies to an explicitly named report as well as the image. It uses
 an atomic hard-link install and fails on filesystems without that support.
 
-**The image and report are not one transaction.** Image encoding, required OME-XSD/
-profile validation, and TIFF readback checks precede the TIFF's installation. Final
+**The image and report are not one transaction.** Required metadata validation
+and backend-specific readback precede TIFF installation or Zarr publication. Final
 operation-report construction/validation and report-file serialization can occur
 after installation. A later report failure does not delete or roll back a valid
 image; the command fails and the explicit report-output error identifies that the

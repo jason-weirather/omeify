@@ -12,9 +12,7 @@ import tifffile
 from click.testing import CliRunner
 
 from omeify import (
-    AkoyaComponentTiffReader,
     AkoyaFusionQPTiffReader,
-    Channel,
     OMETiffReader,
     OMETiffWriter,
     PixelSize,
@@ -870,65 +868,5 @@ def test_partial_ome_pixel_size_requires_explicit_conversion_override(tmp_path: 
         pyramid_levels=0,
     )
     assert report["input_file"]["pixel_size"] is None
-    assert report["image"]["pixel_size"] == [0.75, 0.8, "µm"]
-    assert report["options"]["pixel_size_override"] == [0.75, 0.8, "µm"]
-
-
-def test_component_reader_uses_tiff_resolution_when_no_override_is_supplied(
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / "component.tif"
-    output = tmp_path / "component.ome.tif"
-    tifffile.imwrite(
-        source,
-        np.zeros((16, 16), dtype=np.uint16),
-        tile=(16, 16),
-        description="<Component><Name>DAPI</Name></Component>",
-        resolution=(20000.0, 25000.0),
-        resolutionunit="CENTIMETER",
-        metadata=None,
-    )
-
-    with AkoyaComponentTiffReader(source) as reader:
-        assert reader.pixel_size == PixelSize(0.5, 0.4, "µm")
-
-    report = convert(
-        source,
-        output,
-        input_type="component",
-        compression="Uncompressed",
-        tile_size=16,
-        pyramid_levels=0,
-    )
-    assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
-    assert report["image"]["pixel_size"] == [0.5, 0.4, "µm"]
-
-
-def test_component_pixel_size_override_does_not_replace_source_provenance(
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / "component-calibrated.tif"
-    output = tmp_path / "component-override.ome.tif"
-    tifffile.imwrite(
-        source,
-        np.zeros((16, 16), dtype=np.uint16),
-        tile=(16, 16),
-        description="<Component><Name>DAPI</Name></Component>",
-        resolution=(20000.0, 25000.0),
-        resolutionunit="CENTIMETER",
-        metadata=None,
-    )
-
-    report = convert(
-        source,
-        output,
-        input_type="component",
-        pixel_size=PixelSize(0.75, 0.8, "µm"),
-        compression="Uncompressed",
-        tile_size=16,
-        pyramid_levels=0,
-    )
-
-    assert report["input_file"]["pixel_size"] == [0.5, 0.4, "µm"]
     assert report["image"]["pixel_size"] == [0.75, 0.8, "µm"]
     assert report["options"]["pixel_size_override"] == [0.75, 0.8, "µm"]

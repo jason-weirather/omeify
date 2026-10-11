@@ -15,6 +15,8 @@ from dataclasses import replace
 
 from lxml import etree
 
+from omeify.reports import validate_report
+
 NAMESPACE = "https://github.com/jason-weirather/omeify/ns/geometry/1"
 RECORD_SCHEMA = "omeify.geometry/1"
 
@@ -26,12 +28,35 @@ def _tag(root, name):
 def record_for_spec(spec):
     if getattr(spec, "origin_yx", None) is None:
         return None
-    return {"schema": RECORD_SCHEMA, "origin_yx_um": list(spec.origin_yx),
-            "pyramid_method": spec.pyramid_method}
+    record = {"schema": RECORD_SCHEMA, "origin_yx_um": list(spec.origin_yx),
+              "pyramid_method": spec.pyramid_method}
+    _validate_record(record)
+    return record
+
+
+def _validate_record(record):
+    validate_report(record, "ome_geometry.schema.json")
+    try:
+        finite = all(math.isfinite(v) for v in record["origin_yx_um"])
+    except OverflowError:
+        finite = False
+    if not finite:
+        raise ValueError("Image origin must contain two finite micrometer coordinates")
+    if len(json.dumps(record, allow_nan=False, ensure_ascii=False).encode("utf-8")) > 4096:
+        raise ValueError("Image-coordinate annotation exceeds its bound")
+
+
+def _unique_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate image-coordinate JSON key")
+        result[key] = value
+    return result
 
 
 def attach_geometry(root, images: Sequence, specs: Sequence) -> None:
-    for i, (image, spec) in enumerate(zip(images, specs)):
+    for i, (image, spec) in enumerate(zip(images, specs, strict=True)):
         record = record_for_spec(spec)
         if record is None:
             continue
@@ -59,20 +84,13 @@ def read_geometry(root, image):
     if len(items) != 1 or items[0].get("K") != "geometry":
         raise ValueError("Malformed image-coordinate annotation")
     text = items[0].text or ""
-    if len(text) > 4096:
+    if len(text.encode("utf-8")) > 4096:
         raise ValueError("Image-coordinate annotation exceeds its bound")
     try:
-        record = json.loads(text)
+        record = json.loads(text, object_pairs_hook=_unique_keys)
     except ValueError as exc:
         raise ValueError("Malformed image-coordinate JSON") from exc
-    if (not isinstance(record, dict) or set(record) != {"schema", "origin_yx_um", "pyramid_method"}
-            or record["schema"] != RECORD_SCHEMA or record["pyramid_method"] not in {"mean", "nearest"}):
-        raise ValueError("Unsupported image-coordinate annotation")
-    origin = record["origin_yx_um"]
-    if (not isinstance(origin, list) or len(origin) != 2 or any(
-            isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
-            for v in origin)):
-        raise ValueError("Image origin must contain two finite micrometer coordinates")
+    _validate_record(record)
     return record
 
 

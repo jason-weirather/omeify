@@ -7,6 +7,7 @@ whether a real language model interprets microscopy metadata correctly.
 from __future__ import annotations
 
 import json
+import os
 import re
 from contextlib import contextmanager
 from copy import deepcopy
@@ -383,7 +384,7 @@ def test_renderer_wraps_and_escapes_controls_without_altering_json(image_path, m
     import omeify.inspection as inspection
 
     monkeypatch.setattr(
-        inspection.shutil, "get_terminal_size", lambda **kw: SimpleNamespace(columns=52),
+        inspection.shutil, "get_terminal_size", lambda **kw: os.terminal_size((52, 24)),
     )
     inspector = TiffInspector(image_path)
     result = inspector.summarize_metadata(question="Channels?\x1b[2J\r\b\u202e")

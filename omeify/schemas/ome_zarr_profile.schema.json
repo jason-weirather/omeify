@@ -32,123 +32,39 @@
             ],
             "properties": {
               "axes": {
-                "type": "array",
-                "items": {
-                  "oneOf": [
+                "enum": [
+                  [
                     {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "name",
-                        "type"
-                      ],
-                      "properties": {
-                        "name": {
-                          "const": "c"
-                        },
-                        "type": {
-                          "const": "channel"
-                        }
-                      }
+                      "name": "y",
+                      "type": "space",
+                      "unit": "micrometer"
                     },
                     {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "name",
-                        "type",
-                        "unit"
-                      ],
-                      "properties": {
-                        "name": {
-                          "enum": [
-                            "y",
-                            "x"
-                          ]
-                        },
-                        "type": {
-                          "const": "space"
-                        },
-                        "unit": {
-                          "const": "micrometer"
-                        }
-                      }
+                      "name": "x",
+                      "type": "space",
+                      "unit": "micrometer"
+                    }
+                  ],
+                  [
+                    {
+                      "name": "c",
+                      "type": "channel"
+                    },
+                    {
+                      "name": "y",
+                      "type": "space",
+                      "unit": "micrometer"
+                    },
+                    {
+                      "name": "x",
+                      "type": "space",
+                      "unit": "micrometer"
                     }
                   ]
-                },
-                "minItems": 2,
-                "maxItems": 3
+                ]
               },
               "datasets": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "path",
-                    "coordinateTransformations"
-                  ],
-                  "properties": {
-                    "path": {
-                      "type": "string",
-                      "pattern": "^(0|[1-9][0-9]*)$"
-                    },
-                    "coordinateTransformations": {
-                      "type": "array",
-                      "items": {
-                        "oneOf": [
-                          {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "type",
-                              "scale"
-                            ],
-                            "properties": {
-                              "type": {
-                                "const": "scale"
-                              },
-                              "scale": {
-                                "type": "array",
-                                "items": {
-                                  "type": "number",
-                                  "exclusiveMinimum": 0
-                                },
-                                "minItems": 2,
-                                "maxItems": 3
-                              }
-                            }
-                          },
-                          {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "type",
-                              "translation"
-                            ],
-                            "properties": {
-                              "type": {
-                                "const": "translation"
-                              },
-                              "translation": {
-                                "type": "array",
-                                "items": {
-                                  "type": "number"
-                                },
-                                "minItems": 2,
-                                "maxItems": 3
-                              }
-                            }
-                          }
-                        ]
-                      },
-                      "minItems": 1,
-                      "maxItems": 2
-                    }
-                  }
-                },
-                "minItems": 1,
-                "maxItems": 64
+                "type": "array"
               },
               "type": {
                 "enum": [
@@ -179,7 +95,240 @@
                 "type": "string",
                 "minLength": 1
               }
-            }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "axes": {
+                      "const": [
+                        {
+                          "name": "y",
+                          "type": "space",
+                          "unit": "micrometer"
+                        },
+                        {
+                          "name": "x",
+                          "type": "space",
+                          "unit": "micrometer"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "datasets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "coordinateTransformations"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "pattern": "^(0|[1-9][0-9]*)$"
+                          },
+                          "coordinateTransformations": {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "type",
+                                  "scale"
+                                ],
+                                "properties": {
+                                  "type": {
+                                    "const": "scale"
+                                  },
+                                  "scale": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0
+                                      },
+                                      {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0
+                                      }
+                                    ],
+                                    "items": false,
+                                    "minItems": 2,
+                                    "maxItems": 2
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "type",
+                                  "translation"
+                                ],
+                                "properties": {
+                                  "type": {
+                                    "const": "translation"
+                                  },
+                                  "translation": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      }
+                                    ],
+                                    "items": false,
+                                    "minItems": 2,
+                                    "maxItems": 2
+                                  }
+                                }
+                              }
+                            ],
+                            "items": false,
+                            "minItems": 1,
+                            "maxItems": 2
+                          }
+                        }
+                      },
+                      "minItems": 1,
+                      "maxItems": 64
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "datasets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "coordinateTransformations"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "pattern": "^(0|[1-9][0-9]*)$"
+                          },
+                          "coordinateTransformations": {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "type",
+                                  "scale"
+                                ],
+                                "properties": {
+                                  "type": {
+                                    "const": "scale"
+                                  },
+                                  "scale": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "const": 1
+                                      },
+                                      {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0
+                                      },
+                                      {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0
+                                      }
+                                    ],
+                                    "items": false,
+                                    "minItems": 3,
+                                    "maxItems": 3
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "type",
+                                  "translation"
+                                ],
+                                "properties": {
+                                  "type": {
+                                    "const": "translation"
+                                  },
+                                  "translation": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "const": 0
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      }
+                                    ],
+                                    "items": false,
+                                    "minItems": 3,
+                                    "maxItems": 3
+                                  }
+                                }
+                              }
+                            ],
+                            "items": false,
+                            "minItems": 1,
+                            "maxItems": 2
+                          }
+                        }
+                      },
+                      "minItems": 1,
+                      "maxItems": 64
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "mean"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "metadata": {
+                      "properties": {
+                        "method": {
+                          "const": "omeify.mean_2x"
+                        }
+                      }
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "metadata": {
+                      "properties": {
+                        "method": {
+                          "const": "omeify.nearest_2x"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
           },
           "minItems": 1,
           "maxItems": 1
@@ -248,38 +397,297 @@
       }
     },
     "omeify": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [],
-      "properties": {
-        "image_type": {
-          "enum": [
-            "rgb",
-            "label"
-          ]
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "image_type",
+            "logical_channel_name"
+          ],
+          "properties": {
+            "image_type": {
+              "const": "rgb"
+            },
+            "logical_channel_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "icc_profile_base64": {
+              "type": "string",
+              "minLength": 4,
+              "maxLength": 1398104,
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+            }
+          }
         },
-        "logical_channel_name": {
-          "type": "string",
-          "minLength": 1
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "image_type",
+            "background_label",
+            "channel_name"
+          ],
+          "properties": {
+            "image_type": {
+              "const": "label"
+            },
+            "background_label": {
+              "type": "integer"
+            },
+            "channel_name": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         },
-        "icc_profile_base64": {
-          "type": "string",
-          "maxLength": 1398104
-        },
-        "background_label": {
-          "type": "integer"
-        },
-        "channel_name": {
-          "type": "string",
-          "minLength": 1
-        },
-        "float32_mantissa_bits": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 23
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "float32_mantissa_bits"
+          ],
+          "properties": {
+            "float32_mantissa_bits": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 23
+            }
+          }
         }
-      }
+      ]
     }
   },
-  "description": "Omeify single-image production profile. A strict subset, not an exhaustive validator for all NGFF metadata."
+  "description": "Omeify single-image attribute production profile for NGFF 0.5, not a validator for foreign NGFF or a whole-store privacy audit. Python also checks finite JSON, sequential dataset paths, ordered display windows and cross-field label identity. Array storage/geometry are verified separately.",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ome": {
+            "properties": {
+              "multiscales": {
+                "items": {
+                  "properties": {
+                    "axes": {
+                      "const": [
+                        {
+                          "name": "y",
+                          "type": "space",
+                          "unit": "micrometer"
+                        },
+                        {
+                          "name": "x",
+                          "type": "space",
+                          "unit": "micrometer"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "ome": {
+            "properties": {
+              "omero": {
+                "properties": {
+                  "channels": {
+                    "minItems": 1,
+                    "maxItems": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "omeify"
+        ],
+        "properties": {
+          "omeify": {
+            "required": [
+              "image_type"
+            ],
+            "properties": {
+              "image_type": {
+                "const": "rgb"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "allOf": [
+          {
+            "properties": {
+              "ome": {
+                "properties": {
+                  "multiscales": {
+                    "items": {
+                      "properties": {
+                        "axes": {
+                          "const": [
+                            {
+                              "name": "c",
+                              "type": "channel"
+                            },
+                            {
+                              "name": "y",
+                              "type": "space",
+                              "unit": "micrometer"
+                            },
+                            {
+                              "name": "x",
+                              "type": "space",
+                              "unit": "micrometer"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "ome": {
+                "properties": {
+                  "omero": {
+                    "properties": {
+                      "channels": {
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "prefixItems": [
+                          {
+                            "properties": {
+                              "label": {
+                                "const": "Red"
+                              },
+                              "color": {
+                                "const": "FF0000"
+                              },
+                              "active": {
+                                "const": true
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "label": {
+                                "const": "Green"
+                              },
+                              "color": {
+                                "const": "00FF00"
+                              },
+                              "active": {
+                                "const": true
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "label": {
+                                "const": "Blue"
+                              },
+                              "color": {
+                                "const": "0000FF"
+                              },
+                              "active": {
+                                "const": true
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "omeify"
+        ],
+        "properties": {
+          "omeify": {
+            "required": [
+              "image_type"
+            ],
+            "properties": {
+              "image_type": {
+                "const": "label"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "allOf": [
+          {
+            "properties": {
+              "ome": {
+                "properties": {
+                  "multiscales": {
+                    "items": {
+                      "properties": {
+                        "axes": {
+                          "const": [
+                            {
+                              "name": "y",
+                              "type": "space",
+                              "unit": "micrometer"
+                            },
+                            {
+                              "name": "x",
+                              "type": "space",
+                              "unit": "micrometer"
+                            }
+                          ]
+                        },
+                        "type": {
+                          "const": "nearest"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "ome": {
+                "properties": {
+                  "omero": {
+                    "properties": {
+                      "channels": {
+                        "minItems": 1,
+                        "maxItems": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
 }

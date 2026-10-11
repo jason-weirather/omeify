@@ -8,7 +8,6 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 import pytest
-import zarr
 
 from omeify import OMEZarrReader, ZarrInspector, convert
 from zarr_fixture import fixture
@@ -119,3 +118,26 @@ def test_metadata_path_cannot_escape_over_http(tmp_path,server):
     with pytest.raises(ValueError,match="relative"):
         with OMEZarrReader(base+"/a"):pass
     assert not any("outside" in p for p in requests)
+
+
+def test_http_collection_inspection_keeps_metadata_without_extra_requests(tmp_path, server):
+    from omeify import MultichannelImage, OMEImageSeries, OMEZarrCollectionWriter, PixelSize
+    path = tmp_path / "collection"
+    with MultichannelImage.from_array(np.zeros((16, 16), dtype="uint16"), axes="YX",
+                                     pixel_size=PixelSize(.5, .5, "µm")) as image:
+        OMEZarrCollectionWriter(path, tile_size=16).write(
+            [OMEImageSeries("A", image)], provenance={"note": "REVIEW_ROOT_CONTEXT"},
+        )
+    base, requests, _ = server
+    with OMEZarrReader(base + "/collection") as image:
+        assert not any(is_chunk(p) for p in requests)
+        requests.clear()
+        inspector = image.inspect()
+        report = inspector.report
+        inspector.to_json()
+        assert not requests
+        nodes = {n["group"]: n["attributes"] for n in report["metadata_nodes"]}
+        assert nodes[""]["omeify"]["provenance"]["note"] == "REVIEW_ROOT_CONTEXT"
+        assert nodes["OME"]["ome"]["series"] == ["0"]
+        assert report["profile"]["whole_store_audited"] is False
+    assert "REVIEW_ROOT_CONTEXT" in inspector.to_json()

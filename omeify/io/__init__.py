@@ -8,7 +8,6 @@ from .image_metadata import ImageLevel, ImageMetadata
 from .image_source import ImageSource
 from .pixel_size import PixelSize
 from .vendor_tiff_readers import (
-    AkoyaComponentTiffReader,
     AkoyaFusionQPTiffReader,
     AkoyaHEQPTiffReader,
     AkoyaMIFQPTiffReader,
@@ -23,7 +22,6 @@ __all__ = [
     "OMEZarrCollectionWriter",
     "TemporaryOMEZarrWriter",
 
-    "AkoyaComponentTiffReader",
     "AkoyaFusionQPTiffReader",
     "AkoyaHEQPTiffReader",
     "AkoyaMIFQPTiffReader",

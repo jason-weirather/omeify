@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/ome_zarr_collection.schema.json",
+  "description": "Omeify canonical collection-root attributes for NGFF 0.5 / Zarr v3. Child images have the single-image profile; OME/ has a separate ordered manifest. This is not a whole-store or deidentification validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ome"
+  ],
+  "properties": {
+    "ome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "bioformats2raw.layout"
+      ],
+      "properties": {
+        "version": {
+          "const": "0.5"
+        },
+        "bioformats2raw.layout": {
+          "const": 3
+        }
+      }
+    },
+    "omeify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provenance"
+      ],
+      "properties": {
+        "provenance": {
+          "type": "object",
+          "description": "Deliberate caller-supplied finite JSON, not copied source metadata or privacy-reviewed text. String keys, depth and a 1 MiB encoded-size bound are checked in Python."
+        }
+      }
+    }
+  }
+}

@@ -4,7 +4,6 @@ from .cropping import crop
 from .inspection import TiffInspector
 from .io import (
     OMEZarrReader, OMEZarrLabelReader, OMEZarrWriter, OMEZarrCollectionWriter, TemporaryOMEZarrWriter,
-    AkoyaComponentTiffReader,
     AkoyaFusionQPTiffReader,
     AkoyaHEQPTiffReader,
     AkoyaMIFQPTiffReader,
@@ -37,7 +36,6 @@ __all__ = [
     "OMEZarrCollectionWriter",
     "TemporaryOMEZarrWriter",
 
-    "AkoyaComponentTiffReader",
     "AkoyaFusionQPTiffReader",
     "AkoyaHEQPTiffReader",
     "AkoyaMIFQPTiffReader",

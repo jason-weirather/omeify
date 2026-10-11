@@ -318,7 +318,7 @@ def test_cli_verbose_levels(tmp_path: Path, monkeypatch, verbose: int) -> None:
     monkeypatch.setattr("omeify.cli.convert", fake_convert)
     result = CliRunner().invoke(main, [
         "convert", str(source), "--output", str(tmp_path / "output.ome.tif"),
-        "--type", "component", "--pixel-size-x", "0.5", "--pixel-size-y", "0.5",
+        "--type", "ome_tiff", "--pixel-size-x", "0.5", "--pixel-size-y", "0.5",
         "--output-json", str(report_path), *(["--verbose"] * verbose),
     ])
     assert result.exit_code == 0, result.output

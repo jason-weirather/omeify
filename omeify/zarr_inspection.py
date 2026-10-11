@@ -57,17 +57,17 @@ class ZarrInspector:
         # Copy current session metadata, without reopening or retaining its handles.
         result._report = result._describe(
             source.attributes, source.arrays, source.selected_group,
-            source.entries, source.parsed,
+            source.entries, source.parsed, metadata_nodes=source.discovery_metadata,
+            zarr_format=source.zarr_format,
         )
         return result
 
-    def _describe(self, attributes, arrays, selected_group, entries, parsed=None, errors=()):
+    def _describe(self, attributes, arrays, selected_group, entries, parsed=None, errors=(),
+                  *, metadata_nodes, zarr_format):
         errors = list(errors)
         version = None
         try:
-            # Arrays and their owning group have the same storage version for a
-            # supported observation. A metadata-only failure may have no arrays.
-            fmt = arrays[0].metadata.zarr_format if arrays else (3 if "ome" in attributes else 2)
+            fmt = zarr_format
             version, _ = ome_attributes(attributes, fmt)
             if parsed is None and arrays:
                 index = entries[self.series][1]
@@ -98,6 +98,8 @@ class ZarrInspector:
                        for i, e in enumerate(entries)],
             "image": image, "arrays": [a.metadata.to_dict() for a in arrays],
             "attributes": attributes, "diagnostics": errors,
+            "metadata_nodes": [{"group": path, "attributes": value}
+                               for path, value in metadata_nodes.items()],
             "profile": {"name": "omeify.ome_zarr/1", "matches_image_attributes": not problems,
                         "findings": list(problems), "whole_store_audited": False},
             "raster_pixels_examined": False,
@@ -112,16 +114,19 @@ class ZarrInspector:
             try:
                 group = open_group(store, self.group)
                 attributes = group.attrs.asdict()
+                metadata_nodes = {self.group: attributes}
+                zarr_format = group.metadata.zarr_format
                 arrays, entries = (), ()
                 selected = self.group
                 problems = []
                 try:
-                    entries = discover_images(store, self.group)
+                    entries = discover_images(store, self.group, metadata_nodes=metadata_nodes)
                     if self.series >= len(entries):
                         raise IndexError("Selected series is outside the declared image collection")
                     selected, index, _ = entries[self.series]
                     group = open_group(store, selected)
                     attributes = group.attrs.asdict()
+                    zarr_format = group.metadata.zarr_format
                     _, ome = ome_attributes(attributes, group.metadata.zarr_format)
                     datasets = ome["multiscales"][index]["datasets"]
                     if not isinstance(datasets, list) or not 1 <= len(datasets) <= 64:
@@ -131,7 +136,10 @@ class ZarrInspector:
                                    mode="r") for d in datasets)
                 except (ValueError, TypeError, KeyError, IndexError, NotImplementedError) as exc:
                     problems.append(f"{type(exc).__name__}: {exc}")
-                self._report = self._describe(attributes, arrays, selected, entries, errors=problems)
+                self._report = self._describe(
+                    attributes, arrays, selected, entries, errors=problems,
+                    metadata_nodes=metadata_nodes, zarr_format=zarr_format,
+                )
             finally:
                 store.close()
         return self._report
@@ -161,16 +169,29 @@ class ZarrInspector:
         lines.append("  Image-attribute production profile: " +
                      ("PASS" if r["profile"]["matches_image_attributes"] else "NOT MATCHED"))
         lines.append("  Metadata only; no pixel checks or whole-store minimization audit.")
+        context_nodes = [n for n in r["metadata_nodes"] if n["group"] != r["group"]]
+        if context_nodes:
+            lines.append(f"  Additional discovery metadata: {len(context_nodes)} group(s); "
+                         "review collection/manifest fields before sharing.")
+            for node in context_nodes[:16]:
+                keys = ", ".join(node["attributes"])
+                if self.max_text_length is not None and len(keys) > self.max_text_length:
+                    keys = keys[:self.max_text_length] + "…"
+                lines.append(f"    {node['group'] or '<root>'}: {keys}")
+            if len(context_nodes) > 16:
+                lines.append("    More group metadata is available in JSON.")
         if self.detail >= 2:
             for i, a in enumerate(r["arrays"]):
                 lines.append(f"  Array {i}: Zarr v{a['zarr_format']}; "
                              f"chunks={a.get('chunks', a.get('chunk_grid'))}; "
                              f"encoding={a.get('codecs', a.get('compressor'))}")
         if self.detail >= 3:
-            value = json.dumps(r["attributes"], ensure_ascii=False)
-            if self.max_text_length is not None and len(value) > self.max_text_length:
-                value = value[:self.max_text_length] + "… (full attributes in JSON)"
-            lines.append("  Raw attributes: " + value)
+            shown = [{"group": r["group"], "attributes": r["attributes"]}, *context_nodes[:16]]
+            for node in shown:
+                value = json.dumps(node["attributes"], ensure_ascii=False)
+                if self.max_text_length is not None and len(value) > self.max_text_length:
+                    value = value[:self.max_text_length] + "… (full attributes in JSON)"
+                lines.append(f"  Raw attributes [{node['group'] or '<root>'}]: " + value)
         lines.extend("  Diagnostic: " + d for d in r["diagnostics"])
         return "\n".join(escape_terminal(line) for line in lines)
 

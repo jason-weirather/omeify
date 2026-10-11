@@ -622,7 +622,7 @@ def mutate_command(
 @click.argument("input_path", type=str)
 @click.option("-o", "--output", "output_path", required=True,
               type=click.Path(dir_okay=True, path_type=Path),
-              help="Exact destination OME-TIFF file; with --shatter, a filename/prefix to suffix.")
+              help="Exact TIFF file or NEW Zarr directory; --shatter adds per-product suffixes.")
 @click.option("--bounds", type=int, nargs=4, metavar="X0 Y0 X1 Y1",
               help="Half-open integer bounds in level-zero pixels; exclusive with --geojson.")
 @click.option("--geojson", "geojson_path", type=str, metavar="FILE",
@@ -637,19 +637,19 @@ def mutate_command(
               default="ome_tiff", show_default=True)
 @click.option("--series", type=click.IntRange(min=0), default=0, show_default=True)
 @click.option("--labels", is_flag=True,
-              help="Declare an OME-TIFF label series; use lossless/nearest storage.")
+              help="Declare a categorical label image; use lossless/nearest storage.")
 @click.option("--channel-name-field", type=click.Choice(["name", "biomarker", "auto"]), default=None)
 @click.option("--pixel-size-x", type=click.FloatRange(min=0, min_open=True), default=None)
 @click.option("--pixel-size-y", type=click.FloatRange(min=0, min_open=True), default=None)
 @click.option("--pixel-size-unit", type=str, default=None)
 @click.option("--compression", type=click.Choice(
     ["LZW", "Deflate", "ZSTD", "Gzip", "JPEG", "Uncompressed"], case_sensitive=False), default=None,
-    help="Default: JPEG for RGB, lossless LZW otherwise. Choose Deflate for exact RGB samples.")
+    help="TIFF: JPEG for RGB, LZW otherwise. Zarr: lossless ZSTD.")
 @click.option("--jpeg-quality", type=click.IntRange(min=1, max=100), default=DEFAULT_JPEG_QUALITY)
 @click.option("--jpeg-subsampling", type=click.Choice(["444", "422", "420", "411"]),
               default=DEFAULT_JPEG_SUBSAMPLING)
 @click.option("--tile-size", type=click.IntRange(min=16), default=None,
-              help="Default: 512 RGB, 1024 otherwise; must be divisible by 16.")
+              help="Default: TIFF 512 RGB / 1024 scalar, Zarr 512; must be divisible by 16.")
 @click.option("--pyramid-levels", type=click.IntRange(min=0), default=None)
 @click.option("--workers", type=click.IntRange(min=1), default=None)
 @click.option("--cache-directory", type=click.Path(file_okay=False, path_type=Path), default=None)
@@ -669,10 +669,10 @@ def crop_command(
 ) -> None:
     """Crop rectangles from INPUT_PATH into one ordered, multi-image OME product.
 
-    OUTPUT is the exact filename by default, even for a single ROI. Each region
-    becomes a named series in GeoJSON input order, not a channel or a mosaic.
-    --shatter by_index writes one file per ROI; by_name groups equal names into
-    files. Shattered filenames add a suffix before the TIFF extension.
+    OUTPUT is the exact TIFF file or new Zarr directory, even for a single ROI.
+    Each region becomes a named image in GeoJSON input order, not a channel or
+    mosaic. --shatter by_index writes one product per ROI; by_name groups equal
+    names. Shattered paths add a suffix before the selected format's extension.
 
     GeoJSON uses full-resolution XY pixel coordinates, not geographic coordinates.
     Polygons are exported as bounding rectangles, without masking.

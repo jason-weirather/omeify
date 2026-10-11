@@ -15,15 +15,17 @@ Microscopy TIFFs can arrive with different channel layouts, calibration
 conventions, pyramid structures, and vendor descriptions. Those descriptions
 may also contain information that should remain private, including patient
 identifiers, specimen labels, user names, and file paths. Omeify resolves
-these differences at the file boundary and **minimizes metadata** by building
-a controlled OME-XML header rather than copying arbitrary source descriptions.
-The result is a documented, narrower profile of **OME-TIFF**, not a new private
-file format.
+these differences at the image boundary and **minimizes metadata** by building
+controlled OME-XML or NGFF JSON rather than copying arbitrary source descriptions.
+The results are documented, narrower profiles of open formats, not new private
+file formats.
 
 Metadata minimization is an important step when preparing an image for
 deidentification review, but **it does not deidentify or certify the image**.
-Retained channel names and image pixels (including burned-in labels) still
-require independent review before sharing.
+Retained channel/ROI names, explicit provenance, opaque RGB ICC profiles, and
+image pixels (including burned-in labels) still require independent review before
+sharing. [Retention boundaries](docs/reports.md#metadata-retention-and-sharing)
+distinguishes construction guarantees from privacy review.
 
 The file is the common ground. Convert once and use an OME-aware application such
 as **QuPath**, read the result with **tifffile**, or build on Omeify's own regional
@@ -117,8 +119,8 @@ remote sharded input additionally needs server byte-range support.
 
 ## Metadata minimization and MITI alignment
 
-Omeify constructs a new OME-XML document instead of copying arbitrary source metadata. Its
-minimum-information policy is guided by:
+Omeify constructs new OME-XML or NGFF JSON instead of copying arbitrary source
+metadata. The OME-TIFF minimum-information policy is guided by:
 
 [Schapiro D, Yapp C, Sokolov A, et al. **MITI Minimum Information guidelines for highly
 multiplexed tissue images.** *Nature Methods.* 2022;19:262-267.
@@ -135,9 +137,9 @@ Only a small set of source information is eligible to cross that boundary automa
 | Source information | Omeify policy | Why it is retained or rejected |
 |---|---|---|
 | Pixel dtype and image geometry | Preserved by `convert`; dtype changes occur only through explicit mutation | The numeric representation and dimensions are intrinsic to interpreting the raster, and conversion should not silently change them. |
-| Channel names | Read from supported source metadata, normalized according to the selected profile, and optionally renamed explicitly | Logical channel identity is needed to interpret planar multiplex data. |
+| Channel names | Read from exact fields in supported source metadata, normalized according to the selected profile, and optionally renamed explicitly | Logical channel identity is needed to interpret planar multiplex data. |
 | Physical pixel size | Read from supported source metadata or standard TIFF calibration, or supplied as an explicit override | Spatial calibration is required by omeify's normalized output contract and is important for quantitative interpretation. |
-| RGB ICC profile | Preserved when present on supported RGB input | Color interpretation can depend on the source color profile. |
+| RGB ICC profile | Preserved opaquely when present on supported RGB input | Color interpretation can depend on the profile. Its embedded text is not stripped or privacy-reviewed. |
 | Vendor descriptions, filenames, scanner fields, dates, user names, and unrelated TIFF text | Not copied into generated OME-XML | Arbitrary free text is not required to interpret the normalized raster and defeats strict metadata control. |
 | Biospecimen, reagent, instrument, acquisition, processing, and analysis metadata | Not inferred or invented | These are important MITI companion records, but omeify does not manufacture experimental facts that were not supplied through an explicit contract. |
 
@@ -167,18 +169,19 @@ needed to interpret the generated file mechanically.
 | ICC profile | Preserved for RGB when supplied | Retains source color-management information when it is relevant to pixel interpretation. |
 | Multi-image annotations | Added only when a Python application explicitly requests them, or when `crop` records its regions | Describe intentional output context without copying arbitrary scanner metadata. |
 
-Passing Omeify's header check means the **image header** follows this profile.
-It does not establish MITI compliance for the whole study. Keep the original
+Passing the MITI header check means the **minimum fields** are present and valid;
+extra metadata is reported separately and does not itself fail that minimum check.
+It is not a minimization certificate or MITI compliance for the whole study. Keep the original
 acquisition records and other experimental metadata with the study; that
 information remains important even when it is not embedded in the image.
 
-**Before sharing:** `convert` and `mutate` write the minimized OME header
-described above. `crop` does too, but also stores ROI names and source-image
-coordinates in the output TIFF ([crop privacy details](docs/regions.md#privacy-when-sharing-crops)).
-`inspect` reports the original metadata; it does not minimize or rewrite it.
-Review retained names, image pixels (including burned-in labels), and separate
-JSON reports as part of a deidentification process. Omeify does not certify an
-image as deidentified.
+**Before sharing:** `convert` and `mutate` construct the selected minimized image
+product. `crop` additionally stores ROI names and source-image coordinates in
+either format ([crop privacy details](docs/regions.md#privacy-when-sharing-crops)).
+`inspect` reports original metadata; it neither minimizes nor rewrites it, and
+Zarr inspection is not a recursive audit of every object in a store. Review
+retained names, explicit provenance, ICC contents, pixels, and separate reports.
+`metadata_minimization=true` records the construction policy, not sharing clearance.
 
 ## Installation
 
@@ -260,16 +263,21 @@ by default. JSON reports may contain source paths and metadata.
 
 ### Supported file conversions
 
-| Source | `--type` | Representation | Default compression |
+| Source | `--type` | Representation | Default TIFF compression |
 |---|---|---|---|
 | Akoya mIF QPTIFF | `qptiff_mif` | Planar multiplex | LZW |
 | Akoya Fusion multiplex QPTIFF | `qptiff_fusion` | Planar multiplex | LZW |
 | Indica Labs/HALO mIF TIFF | `indica_mif` | Planar multiplex | LZW |
-| Akoya component TIFF | `component` | Scalar or planar multiplex | LZW |
 | Scalar/planar OME-TIFF | `ome_tiff` | Scalar or planar multiplex | LZW |
 | Interleaved RGB OME-TIFF | `ome_tiff` | Interleaved RGB | JPEG |
 | Akoya H&E QPTIFF | `qptiff_he` | Interleaved RGB | JPEG |
 | Aperio SVS | `svs` | Interleaved RGB | JPEG |
+
+OME-Zarr input additionally uses `--type ome_zarr`; its supported 0.4/0.5/0.6
+images use the same conversions. Zarr output always has its own lossless defaults.
+The retired `component` profile and `AkoyaComponentTiffReader` are removed in 0.22
+without aliases. Legacy inForm component ROI TIFFs need a separately reviewed
+workflow; they are not silently routed through another vendor profile.
 
 Only the selected series is converted; `--series 0` is the default. RGB inputs
 must have actual RGB samples or a supported JPEG decoding path that yields RGB.
@@ -511,11 +519,13 @@ the shared file format; the rules above describe Omeify's narrower use of it.
 **Predictable construction, explicit transformations, and recorded checks** are
 the reproducibility promise, not identical file bytes on every run.
 
-Before placing a finished file at its destination, Omeify checks its OME-XML
-against the OME schema and its own metadata rules. It also checks the temporary
-TIFF's pixel type, channel layout, pyramids, calibration, and relevant color or
-region metadata. Both writers use the same checks. A missing validator or failed
-check stops the write.
+Before publication, TIFF writers check generated OME-XML against the local OME
+XSD and minimum-header profile, then verify temporary TIFF structure, geometry,
+encoding and representative pixels. Zarr writers check the generated image,
+collection and manifest contracts, array structure, dense chunk inventory,
+geometry and representative pixels. Each backend uses its own storage checks;
+neither fabricates verification fields for the other format. A required missing
+validator or failed check stops the write.
 
 Pixel verification uses deterministic representative locations at the base and
 every reduced level. Lossless comparisons check values under the documented
@@ -533,12 +543,14 @@ Omeify does not promise byte-identical artifacts across runs or versions, and
 omitting the UUID alone is not a byte-reproducibility switch.
 
 Omeify writes in bounded regions rather than loading a whole slide, but it
-needs temporary disk space. For a large 2× pyramid, reduced levels together
+needs temporary disk space. For TIFF output, a large 2× pyramid's reduced levels together
 approach one third of the uncompressed base image size, plus file overhead.
 Multi-image output needs space for every pyramid. The completed temporary TIFF
 is created beside the destination. `--no-overwrite` needs hard-link support on
 that filesystem; it fails rather than using an unsafe fallback.
-See [I/O and failure behavior][io-behavior].
+Zarr stages the entire new directory beside its destination and publishes it
+without replacement. See [I/O and failure behavior][io-behavior] and the
+[Zarr publication contract](docs/ome_zarr.md#safe-writing-and-verification).
 
 ## Scope and further documentation
 
@@ -558,7 +570,8 @@ object measurement, or experimental quality checks.
 The current Image/writer API retains the 0.18 consolidation; earlier interfaces
 are not kept as forwarding aliases. The [migration table][migration] covers those
 older library changes. The [0.21 report migration](docs/reports.md#migration-from-020)
-covers this checkpoint's field/schema and CLI-output changes. This README describes
+covers the earlier field/schema and CLI-output changes; the
+[current inventory](docs/reports.md#current-external-contracts) includes both formats. This README describes
 the current contract, not a 1.0 compatibility commitment.
 
 [The detailed reference][reference] retains source-profile details, the complete

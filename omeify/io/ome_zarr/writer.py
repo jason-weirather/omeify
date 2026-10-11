@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import itertools
-import json
-import os
 import logging
-import math
+import os
 import shutil
 import tempfile
 from collections.abc import Sequence
@@ -17,7 +15,8 @@ from typing import Self
 import numpy as np
 
 from omeify.progress import ProgressLogger
-from omeify.reports import complete_report
+from omeify.provenance import canonical_provenance
+from omeify.reports import complete_report, validate_report
 
 from .._writer.configuration import normalize_float32_mantissa_bits
 from .._writer.precision import float32_significant_bits, round_float32_mantissa
@@ -378,12 +377,14 @@ class OMEZarrCollectionWriter(OMEZarrWriter):
         names = [e.name for e in entries]
         if len(set(names)) != len(names):
             raise ValueError("Collection image names must be unique")
+        _, provenance = canonical_provenance(provenance)
+        attrs = {"ome": {"version": WRITE_VERSION, "bioformats2raw.layout": 3}}
         if provenance is not None:
-            # Only caller-supplied, deliberate context. Never copy source attributes.
-            encoded = json.dumps(provenance, allow_nan=False)
-            if len(encoded.encode("utf-8")) > 1024 * 1024:
-                raise ValueError("Collection provenance exceeds 1 MiB")
-            provenance = json.loads(encoded)
+            attrs["omeify"] = {"provenance": provenance}
+        manifest_attrs = {"ome": {"version": WRITE_VERSION,
+                                  "series": [str(i) for i in range(len(entries))]}}
+        validate_report(attrs, "ome_zarr_collection.schema.json")
+        validate_report(manifest_attrs, "ome_zarr_manifest.schema.json")
         children = []
         for i, entry in enumerate(entries):
             entry._source.output_spec()  # Honor the entry's pinned source session.
@@ -401,20 +402,20 @@ class OMEZarrCollectionWriter(OMEZarrWriter):
         try:
             root = zarr.open_group(str(stage), mode="w", zarr_format=3)
             try:
-                root.create_group("OME", attributes={"ome": {"version": WRITE_VERSION,
-                                                              "series": [str(i) for i in range(len(entries))]}})
+                root.create_group("OME", attributes=manifest_attrs)
                 reports = [children[i]._write_image(e.image, stage / str(i), level=e.level, name=e.name)
                            for i, e in enumerate(entries)]
-                attrs = {"ome": {"version": WRITE_VERSION, "bioformats2raw.layout": 3}}
-                if provenance is not None:
-                    attrs["omeify"] = {"provenance": provenance}
                 root.attrs.update(attrs)
             finally:
                 root.store.close()
             check_root = zarr.open_group(str(stage), mode="r", use_consolidated=False)
             try:
-                if check_root.attrs.asdict() != attrs:
-                    raise ValueError("Collection metadata/provenance failed readback")
+                actual_attrs = check_root.attrs.asdict()
+                actual_manifest = check_root["OME"].attrs.asdict()
+                validate_report(actual_attrs, "ome_zarr_collection.schema.json")
+                validate_report(actual_manifest, "ome_zarr_manifest.schema.json")
+                if actual_attrs != attrs or actual_manifest != manifest_attrs:
+                    raise ValueError("Collection metadata/provenance/manifest failed readback")
             finally:
                 check_root.store.close()
             with OMEZarrReader(stage) as check:

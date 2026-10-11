@@ -5,7 +5,6 @@ from typing import Literal
 
 from .ome_tiff_reader import OMETiffReader, OMETiffLabelReader
 from .vendor_tiff_readers import (
-    AkoyaComponentTiffReader,
     AkoyaFusionQPTiffReader,
     AkoyaHEQPTiffReader,
     AkoyaMIFQPTiffReader,
@@ -20,7 +19,6 @@ InputType = Literal[
     "svs",
     "ome_tiff",
     "ome_zarr",
-    "component",
     "indica_mif",
 ]
 PlanarInputType = Literal[
@@ -28,7 +26,6 @@ PlanarInputType = Literal[
     "qptiff_fusion",
     "ome_tiff",
     "ome_zarr",
-    "component",
     "indica_mif",
 ]
 
@@ -39,7 +36,6 @@ INPUT_TYPES: tuple[str, ...] = (
     "svs",
     "ome_tiff",
     "ome_zarr",
-    "component",
     "indica_mif",
 )
 PLANAR_INPUT_TYPES: tuple[str, ...] = (
@@ -47,7 +43,6 @@ PLANAR_INPUT_TYPES: tuple[str, ...] = (
     "qptiff_fusion",
     "ome_tiff",
     "ome_zarr",
-    "component",
     "indica_mif",
 )
 
@@ -107,8 +102,4 @@ def source_reader(
         if channel_name_field is not None:
             raise ValueError("channel_name_field is only valid for qptiff_fusion input")
         return IndicaMIFTiffReader(input_path, series=series)
-    if input_type == "component":
-        if channel_name_field is not None:
-            raise ValueError("channel_name_field is only valid for qptiff_fusion input")
-        return AkoyaComponentTiffReader(input_path, series=series)
     raise ValueError(f"Unsupported input_type {input_type!r}")

@@ -34,24 +34,42 @@ def group_attributes(group):
     return attributes, version, ome
 
 
-def discover_images(store, group_path="") -> tuple[tuple[str, int, str | None], ...]:
-    """Discover declared images, never recursively crawl arbitrary store objects."""
+def discover_images(store, group_path="", *, metadata_nodes=None) -> tuple[tuple[str, int, str | None], ...]:
+    """Discover declared images, optionally retaining the group metadata consulted.
+
+    This records collection roots/manifests as well as image attributes without
+    recursive listing or reading chunks. It is not a whole-store metadata audit.
+    """
     import zarr
 
-    group = open_group(store, group_path)
-    _, version, ome = group_attributes(group)
+    def describe(path):
+        group = open_group(store, path)
+        attributes = group.attrs.asdict()
+        if metadata_nodes is not None:
+            metadata_nodes[path] = attributes
+        return ome_attributes(attributes, group.metadata.zarr_format)
+
+    def image_name(item):
+        if not isinstance(item, dict):
+            raise ValueError("A multiscale image entry must be an object")
+        name = item.get("name")
+        if name is not None and not isinstance(name, str):
+            raise ValueError("An image name must be a string or absent")
+        return name
+
+    version, ome = describe(group_path)
     if "multiscales" in ome:
         ms = ome["multiscales"]
         if not isinstance(ms, list) or not ms or len(ms) > 4096:
             raise ValueError("Invalid or excessive multiscale image list")
-        return tuple((group_path, i, item.get("name")) for i, item in enumerate(ms))
+        return tuple((group_path, i, image_name(item)) for i, item in enumerate(ms))
     if any(key in ome for key in ("plate", "well", "scene")):
         raise NotImplementedError("Select an image within this plate/well/scene using group= / --group")
     if ome.get("bioformats2raw.layout") != 3:
         raise ValueError("No multiscale image or supported image collection in selected group")
     prefix = group_path + "/" if group_path else ""
     try:
-        _, manifest_version, manifest = group_attributes(open_group(store, prefix + "OME"))
+        manifest_version, manifest = describe(prefix + "OME")
         if manifest_version != version:
             raise ValueError("Collection metadata versions disagree")
         paths = manifest.get("series")
@@ -62,23 +80,23 @@ def discover_images(store, group_path="") -> tuple[tuple[str, int, str | None], 
         paths = []
         for i in range(4097):
             try:
-                open_group(store, prefix + str(i))
+                describe(prefix + str(i))
             except zarr.errors.GroupNotFoundError:
                 break
             paths.append(str(i))
     if (not isinstance(paths, list) or not 1 <= len(paths) <= 4096
-            or len(set(paths)) != len(paths)):
+            or any(not isinstance(p, str) for p in paths) or len(set(paths)) != len(paths)):
         raise ValueError("Invalid or excessive collection series manifest")
     entries = []
     for path in paths:
         path = prefix + relative_path(path)
-        _, child_version, child = group_attributes(open_group(store, path))
+        child_version, child = describe(path)
         if child_version != version:
             raise ValueError("Collection image metadata versions disagree")
         ms = child.get("multiscales")
         if not isinstance(ms, list) or len(ms) != 1:
             raise ValueError("Each collection series must describe exactly one multiscale image")
-        entries.append((path, 0, ms[0].get("name")))
+        entries.append((path, 0, image_name(ms[0])))
     return tuple(entries)
 
 
@@ -101,6 +119,8 @@ class ZarrSource(ImageSource):
         self.entries = ()
         self.parsed = None
         self.attributes = {}
+        self.discovery_metadata = {}
+        self.zarr_format = None
         self.array_metadata = ()
 
     @property
@@ -112,7 +132,9 @@ class ZarrSource(ImageSource):
 
         self.store = read_store(self.path, storage_options=self.storage_options,
                                 cache_bytes=self.cache_bytes)
-        self.entries = discover_images(self.store, self.group_path)
+        self.discovery_metadata = {}
+        self.entries = discover_images(self.store, self.group_path,
+                                       metadata_nodes=self.discovery_metadata)
         if self.series_index >= len(self.entries):
             raise IndexError(f"Series {self.series_index} is outside {len(self.entries)} declared images")
         if len(self.entries) > 1:
@@ -121,6 +143,7 @@ class ZarrSource(ImageSource):
         self.selected_group = path
         group = open_group(self.store, path)
         self.attributes, _, ome = group_attributes(group)
+        self.zarr_format = group.metadata.zarr_format
         datasets = ome["multiscales"][index].get("datasets", [])
         if not isinstance(datasets, list) or not 1 <= len(datasets) <= 64:
             raise ValueError("Expected 1 to 64 image resolutions")
@@ -144,6 +167,8 @@ class ZarrSource(ImageSource):
         self.entries = ()
         self.parsed = None
         self.attributes = {}
+        self.discovery_metadata = {}
+        self.zarr_format = None
         self.array_metadata = ()
         self._metadata = None
         if self.store is not None:

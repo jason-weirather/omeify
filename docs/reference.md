@@ -1,8 +1,8 @@
 # Omeify reference
 
 Detailed options, library recipes, and implementation policies for the current
-Omeify image/file contract. Start with the [README](../README.md) for the OME-TIFF
-home base, quickstarts, the tifffile comparison, and the
+Omeify image contract. Start with the [README](../README.md) for both OME
+home bases, quickstarts, the tifffile comparison, and the
 [metadata/MITI tables](../README.md#metadata-minimization-and-miti-alignment).
 For the common Image interface, regional providers, lifetime rules, and migration,
 see [Images and sources](image_sources.md).
@@ -63,13 +63,12 @@ The TIFF-specific storage reference below continues to apply to TIFF output only
 
 ### Planar multiplex images
 
-| Input profile | `--type` | Canonical output | Default compression |
+| Input profile | `--type` | TIFF output layout | Default TIFF compression |
 |---|---|---|---|
 | Akoya mIF QPTIFF | `qptiff_mif` | `CYX` planar | LZW |
 | Akoya Fusion multiplex QPTIFF | `qptiff_fusion` | `CYX` planar | LZW |
 | Indica Labs/HALO mIF TIFF | `indica_mif` | `CYX` planar | LZW |
 | Planar OME-TIFF | `ome_tiff` | `CYX` or `YX` | LZW |
-| Akoya component TIFF | `component` | `CYX` or `YX` | LZW |
 
 Planar output uses one grayscale top-level IFD per physical plane,
 `SamplesPerPixel=1`, and `Interleaved=false`. Supported scalar dtypes are `uint8`, `uint16`,
@@ -77,7 +76,7 @@ Planar output uses one grayscale top-level IFD per physical plane,
 
 ### Brightfield RGB images
 
-| Input profile | `--type` | Canonical output | Default compression |
+| Input profile | `--type` | TIFF output layout | Default TIFF compression |
 |---|---|---|---|
 | Akoya H&E QPTIFF | `qptiff_he` | `YXS` interleaved RGB | JPEG |
 | Aperio SVS | `svs` | `YXS` interleaved RGB | JPEG |
@@ -87,17 +86,28 @@ RGB output is restricted to interleaved `uint8` data with three contiguous sampl
 uses `SizeC=3`, one logical `Channel` with `SamplesPerPixel=3`, `Interleaved=true`, and one physical
 TIFF plane.
 
+OME-Zarr uses `--type ome_zarr` with the same image API, plus explicit `group`,
+Z and T selectors. Its output is not TIFF plane storage and uses the
+[Zarr profile](ome_zarr.md#canonical-output-profile). The `component` input profile
+and `AkoyaComponentTiffReader` are retired without a compatibility alias.
+
+Akoya QPTIFF names come only from direct `Name`/`Biomarker` fields in the
+recognized QPI description, with the namespace of that description. The mIF
+profile uses `Name`; Fusion keeps its explicit `auto|name|biomarker` policy.
+Unrelated descendant/extension fields are never searched for names. Duplicate
+or structured scalar declarations fail instead of selecting the first value.
+Missing permitted names use generated channel labels under the chosen policy.
+
 ### Physical pixel calibration
 
-A generated OME-TIFF requires usable X and Y physical pixel sizes.
+Both generated output formats require usable X and Y physical pixel sizes.
 
 - Akoya QPTIFF readers use `PixelSizeMicrons` from the QPI description.
-- Fusion multiplex calibration is checked across every full-resolution channel page.
+- Akoya mIF and Fusion multiplex calibration is checked across every full-resolution channel page.
 - Indica mIF uses standard TIFF `XResolution`, `YResolution`, and `ResolutionUnit` tags.
 - Aperio SVS uses `MPP` and warns before falling back to TIFF resolution tags.
 - OME-TIFF uses OME physical-size metadata, then falls back to TIFF resolution tags only when
   both OME X and Y calibration values are absent.
-- Component TIFF uses an explicit override when supplied, otherwise standard TIFF resolution tags.
 
 For multi-page inputs, calibration present on one page may apply to pages where those tags are
 absent. Any other page that explicitly provides usable calibration must agree. Partial OME
@@ -118,8 +128,8 @@ independently using the writer's existing centimeter density convention.
 When no usable calibration remains, provide an explicit override:
 
 ```bash
-omeify convert component.tif --output component.ome.tif \
-  --type component \
+omeify convert uncalibrated.ome.tif --output calibrated.ome.tif \
+  --type ome_tiff \
   --pixel-size-x 0.5068 \
   --pixel-size-y 0.5068 \
   --pixel-size-unit µm
@@ -292,18 +302,21 @@ library may supply `software=` to identify the product generator. The command li
 does not expose this override. Changing the TIFF Software tag does not change the OME root
 `Creator`, which continues to identify the omeify version that generated the OME metadata.
 
-A source ICC profile is retained for RGB output when present. Arbitrary vendor descriptions and
-other free text are not copied.
+A source ICC profile is retained **opaquely** for RGB output when present; no
+implicit color transform, internal-text stripping, or ICC/privacy certification
+is performed. Its contents can include descriptive text and require review.
+This is a deliberate retention exception, not arbitrary vendor-description
+copying. See [metadata retention](reports.md#metadata-retention-and-sharing).
 
 ## Command-line reference
 
 Omeify uses explicit subcommands:
 
 ```text
-omeify convert   Normalize a supported source into OME-TIFF
-omeify mutate    Create an explicitly pixel-mutated OME-TIFF
-omeify crop      Export coordinate/GeoJSON rectangles into one ordered OME-TIFF
-omeify inspect   Inspect TIFF structure and metadata
+omeify convert   Normalize a supported source into OME-TIFF or OME-Zarr
+omeify mutate    Create an explicitly pixel-mutated OME-TIFF or OME-Zarr
+omeify crop      Export rectangles into an ordered OME image collection
+omeify inspect   Inspect TIFF or OME-Zarr structure and metadata
 omeify version   Show package and dependency versions
 ```
 
@@ -320,7 +333,7 @@ omeify mutate input.ome.tif -o output.ome.tif --type ome_tiff --dtype uint16
 The former positional destination is no longer accepted. Omitting the output
 option is a usage error before image processing begins; `--output-json` cannot
 substitute for it. That option remains an optional report destination, separate
-from the OME-TIFF. `inspect` retains its optional `--output` / `-o` report file
+from the image product. `inspect` retains its optional `--output` / `-o` report file
 and defaults to stdout. Python `convert()` and `mutate()` signatures are unchanged.
 
 Image-writing commands now default to a short completion line. `-v` enables compact
@@ -374,8 +387,11 @@ omeify convert slide.svs --output slide.ome.tif \
   --jpeg-subsampling 444
 ```
 
-Only the selected TIFF series is converted. Series 0 is the default. Use `--series` when
-`omeify inspect` shows that the desired full-resolution image is elsewhere.
+Only the selected image/series is converted. Series 0 is the default. Use
+`--series` when inspection shows the desired image elsewhere. Zarr additionally
+accepts `--group`, `--z-index`, and `--t-index`; its selectors never reinterpret
+a multi-plane TIFF. The [Zarr reading contract](ome_zarr.md#reading-contract)
+describes additional-geometry and intrinsic-only restrictions.
 
 #### Channel renaming
 
@@ -420,22 +436,31 @@ mode. Malformed or mixed mappings fail rather than being guessed.
 Common conversion options:
 
 ```text
--o, --output FILE          Required destination OME-TIFF file
---series N                 Source TIFF series; default 0
---compression NAME         JPEG for RGB, LZW otherwise; explicit overrides supported
+-o, --output PATH          Required TIFF file or NEW Zarr directory
+--output-format FORMAT     ome_tiff (default) or ome_zarr
+--series N                 Declared source image/series; default 0
+--group PATH               Zarr image group within the store
+--z-index N, --t-index N    Explicit Zarr plane selectors when required
+--intrinsic-only           Explicitly discard additional Zarr spatial context
+--compression NAME         TIFF: JPEG for RGB, LZW otherwise; Zarr: ZSTD
 --jpeg-quality N           JPEG quality from 1 through 100; default 90
 --jpeg-subsampling MODE    444, 422, 420, or 411; default 422
---tile-size N              Square tiles; default 512 for RGB, 1024 otherwise
+--tile-size N              TIFF: 512 RGB / 1024 scalar; Zarr: 512
 --pyramid-levels N         Exact reduced-level count; automatic when omitted
 --downsample METHOD        mean or nearest
---cache-directory PATH     Temporary pyramid scratch location
---workers N                Parallel TIFF compression workers
---omit-uuid                Omit the optional OME root UUID
+--cache-directory PATH     TIFF-only temporary pyramid scratch location
+--workers N                Writer workers (backend-specific encoding/concurrency)
+--omit-uuid                TIFF-only omission of optional OME root UUID
 --output-json FILE|-        Write the complete report, or JSON-only stdout
 -v                         Compact stages and progress
 -vv                        Timestamped debug logging and tracebacks
 -vvv                       Also print the full report unless --output-json is supplied
 ```
+
+TIFF JPEG options, cache directories and UUID flags are not Zarr settings.
+Explicit incompatible options fail rather than silently being ignored. Zarr
+writing requires a new local destination regardless of general TIFF overwrite
+permission. [Zarr examples](ome_zarr.md#convert-mutate-crop-and-inspect).
 
 ### `omeify mutate`
 
@@ -1050,16 +1075,17 @@ lists removed interfaces; there is no parallel compatibility API.
 
 Use a format-specific reader in a context manager. The supported constructors are
 `AkoyaMIFQPTiffReader`, `AkoyaFusionQPTiffReader`, `AkoyaHEQPTiffReader`,
-`AperioSVSReader`, `AkoyaComponentTiffReader`, `IndicaMIFTiffReader`,
-`OMETiffReader`, and `OMETiffLabelReader`.
+`AperioSVSReader`, `IndicaMIFTiffReader`, `OMETiffReader`, `OMETiffLabelReader`,
+`OMEZarrReader`, and `OMEZarrLabelReader`.
 
 The [reading example](image_sources.md#1-read-select-channels-and-write) covers
 channel lookup, regional reads, and lazy channel assembly. The
 [coordinate contract](image_sources.md#5-coordinates-channels-and-levels) defines
 logical RGB channels and level calibration. `reader.series_name` and
-`reader.series_names` follow TIFF-series order; `native_axes` and `native_shape`
-describe source storage. `reader.inspect()` supplies the full file diagnostics,
-while `print(reader)` is a compact image summary. Fusion source `Name` and
+`reader.series_names` follow TIFF-series order or Zarr's declared image order;
+`native_axes` and `native_shape` describe source storage. `reader.inspect()` supplies
+backend-specific diagnostics, including Zarr's bounded discovery context, while
+`print(reader)` is a compact image summary. Fusion source `Name` and
 `Biomarker` remain in each channel's `source_metadata`.
 
 ### Single-image writing and metadata
@@ -1159,7 +1185,10 @@ certification of dataset-level MITI completeness or deidentification.
 
 ## Validation and verification
 
-Before a temporary output replaces the destination, omeify checks:
+The following checks describe TIFF output. The [Zarr verification contract](ome_zarr.md#safe-writing-and-verification)
+covers Zarr arrays, metadata and staged-directory publication.
+
+Before a temporary TIFF replaces the destination, omeify checks:
 
 - OME 2016-06 XML schema validity using a local schema
 - the bundled MITI-aligned header profile
@@ -1205,6 +1234,9 @@ verification as distinct structured sections.
 
 ## I/O, scratch space, and failure behavior
 
+This section describes TIFF writing and decoding. [Zarr storage and remote access](ome_zarr.md#remote-access)
+have separate cache, staging and no-replace publication rules.
+
 Full-resolution sources are read through bounded strips or tiles. Omeify does not materialize a
 whole slide merely to convert or write it. Temporary reduced levels are uncompressed tiled BigTIFF
 files built one level at a time. Peak RAM is governed primarily by a small number of image tiles
@@ -1235,7 +1267,8 @@ TIFF segments continue to read as zeros.
 ## Current limitations
 
 - Supported image models are two-dimensional `YX`, planar `CYX`, and interleaved `YXS` RGB.
-  Non-singleton Z and T workflows require an explicit future plane-selection contract.
+  Zarr requires explicit selection of non-singleton Z/T planes; this does not add
+  general multi-plane TIFF selection or multidimensional output.
 - RGB writing is restricted to interleaved `uint8` samples.
 - Mutation supports planar floating-point input to `uint8` or `uint16`, or float32-to-float32 precision trimming through retained mantissa bits.
 - Metadata minimization does not detect identifying text embedded in pixels.

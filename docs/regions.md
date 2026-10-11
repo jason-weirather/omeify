@@ -1,4 +1,4 @@
-# Cropping and visual region questions (0.20)
+# Cropping and visual region questions
 
 Two explicit operations compose through **image-pixel GeoJSON**:
 
@@ -35,9 +35,11 @@ No source pixels are rescaled or masked. Output encoding can still be lossy.
 
 `--type` defaults to `ome_tiff`; supported vendor profiles are the same as
 `convert`. `--series` defaults to zero. All channels of the selected series are
-exported. Scalar/label output retains lossless LZW / 1024-pixel tiles; RGB retains
+exported. For TIFF destinations, scalar/label output retains lossless LZW /
+1024-pixel tiles; RGB retains
 JPEG quality 90 / 4:2:2 / 512-pixel tiles. Use `--compression Deflate` for exact
-RGB sample values. The output pyramid is rebuilt from the cropped base.
+RGB sample values. Zarr destinations instead default to lossless Zstd and
+512-pixel spatial chunks. Each output pyramid is rebuilt from the cropped base.
 
 Physical pixel calibration is preserved and remains required for export.
 `--pixel-size-x`, `--pixel-size-y`, and optionally `--pixel-size-unit` supply an
@@ -60,7 +62,7 @@ is added. Prefer an explicit `.ome.tif` or `.ome.tiff` filename for viewers.
 Crop prints a short completion line by default; progress goes to stderr.
 Use `--output-json FILE` to save its full report, `--output-json -` for JSON-only
 stdout, or `-vvv` for the diagnostic report. [Current report contracts](reports.md)
-use crop report `omeify.crop/3` and embedded provenance `omeify.crop_provenance/1`.
+use crop report `omeify.crop/4` and embedded provenance `omeify.crop_provenance/1`.
 
 Supported inputs are a Feature, FeatureCollection, bare Polygon/MultiPolygon,
 polygon GeometryCollection, or a Feature array. `--geojson -` reads stdin.
@@ -176,8 +178,8 @@ Python's second parameter is now `output_path` rather than `output_base`.
 Positional calls still work, but without shatter they write the exact requested
 path. Change bare prefixes to complete filenames for combined output. At the time of the 0.20 change, crop reports and embedded provenance both
 used `omeify.crop/2`; the report gained `output_path` and `shatter` instead of
-`naming`, and each region gained `output_name`. The current 0.21 report/provenance
-identifiers are `omeify.crop/3` and `omeify.crop_provenance/1`, respectively.
+`naming`, and each region gained `output_name`. The current 0.22 report/provenance
+identifiers are `omeify.crop/4` and `omeify.crop_provenance/1`, respectively.
 No image, geometry, or previously written file is modified by upgrading.
 
 ## Ask for visual GeoJSON

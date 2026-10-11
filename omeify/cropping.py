@@ -1,4 +1,4 @@
-"""Named, tile-streamed crop exports through the existing OME-TIFF writer."""
+"""Named, regional crop exports through the selected OME output writer."""
 from __future__ import annotations
 
 import logging
@@ -17,7 +17,7 @@ from .io.pixel_size import PixelSize
 from .io.source_reader import InputType, source_reader
 from .path_safety import paths_overlap
 from .io.output import OutputFormat, image_writer
-from .io.ome_zarr.store import location, is_remote, preflight_directory
+from .io.ome_zarr.store import location, is_remote
 from .regions import (
     MAX_GEOJSON_CHARS,
     ShatterMode,
@@ -76,7 +76,7 @@ def crop(
     jpeg_quality: int = DEFAULT_JPEG_QUALITY,
     jpeg_subsampling: JPEGSubsampling = DEFAULT_JPEG_SUBSAMPLING,
 ) -> dict[str, Any]:
-    """Export full-resolution rectangles into one named, ordered OME-TIFF collection.
+    """Export full-resolution rectangles into one named, ordered OME image collection.
 
     Supply exactly one of integer ``bounds=(x0,y0,x1,y1)`` or pixel-coordinate
     ``geojson`` (a dict/list or a JSON file path). Float geometry edges are rounded
@@ -88,11 +88,12 @@ def crop(
     the supplied name (or ROI). Model-supplied names never choose paths by default.
     ``shatter='by_index'`` writes one file per ROI; ``shatter='by_name'`` groups
     equal names into files, with unnamed ROIs falling back to their input indices.
-    Shattered filenames insert the name/index before a TIFF extension, or append
-    .ome.tiff when output_path is a bare prefix. No file is written at the prefix.
-    All geometry and destinations are checked before writing any pixels. Each file
-    installs atomically; a multiple-file export is NOT an all-or-nothing transaction.
-    Writer defaults remain authoritative, including lossy RGB JPEG 90 / 422 / 512.
+    Shattered filenames insert the name/index before the selected format's suffix.
+    Bare prefixes receive .ome.tiff or .ome.zarr; no product is written at the prefix.
+    All geometry and destinations are checked before writing any pixels. Products
+    publish individually; a batch is NOT an all-or-nothing transaction. TIFF RGB
+    defaults remain JPEG 90 / 422 / 512; Zarr defaults to lossless Zstd / 512 and
+    requires a new local directory for every destination.
     """
     series = integer(series, "series")
     if any(not isinstance(v, bool) for v in (clip, labels, overwrite)):

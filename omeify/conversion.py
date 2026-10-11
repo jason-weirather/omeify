@@ -65,16 +65,17 @@ def convert(
 
     This is the public Python counterpart to ``omeify convert``. Source-format
     readers live in :mod:`omeify.io`; this function only selects the reader,
-    applies explicit channel-renaming policy, and delegates all OME-TIFF
+    applies explicit channel-renaming policy, and delegates all output
     construction and verification to the selected output writer.
 
     ``output_format="ome_zarr"`` selects a new local NGFF 0.5 / Zarr v3 store.
     HTTP(S) input uses ``input_type="ome_zarr"``; group/z/t select its image plane.
 
-    Omitted compression and tile size follow the selected image's type, not its
-    file profile: RGB uses lossy JPEG quality 90 / 4:2:2 and 512-pixel tiles;
-    non-RGB uses lossless LZW and 1024-pixel tiles. This includes RGB OME-TIFF
-    inputs. Supply a lossless codec explicitly to preserve RGB sample values.
+    TIFF compression and tile size follow the image's type, not the input profile:
+    RGB uses lossy JPEG quality 90 / 4:2:2 and 512-pixel tiles; non-RGB uses lossless
+    LZW and 1024-pixel tiles. Choose lossless TIFF compression explicitly for exact
+    RGB samples. Zarr defaults to lossless Zstd and 512-pixel spatial chunks for
+    every supported image type, independent of those TIFF storage defaults.
 
     ``rename_channels`` uses native Python key types: strings in ``name`` mode
     and zero-based integers in ``index`` mode. The CLI converts JSON string keys

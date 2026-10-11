@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import logging
-import math
 import re
 from pathlib import Path
 from typing import Any, Literal
-from xml.etree import ElementTree
 
 import numpy as np
 import tifffile
@@ -36,7 +34,6 @@ SourceProfile = Literal[
     "akoya_fusion_qptiff",
     "akoya_he_qptiff",
     "svs",
-    "component",
     "indica_mif",
 ]
 
@@ -56,49 +53,6 @@ _APERIO_MPP_PATTERN = re.compile(
     r"(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)",
     flags=re.IGNORECASE,
 )
-_XML_ENCODING_DECLARATION = re.compile(
-    r"(<\?xml\b[^>]*?)\s+encoding=(['\"])[^'\"]+\2",
-    flags=re.IGNORECASE,
-)
-
-
-def _local_name(tag: str) -> str:
-    return str(tag).rsplit("}", 1)[-1]
-
-
-def _parse_xml(xml: str | bytes | None) -> ElementTree.Element | None:
-    if not xml:
-        return None
-    payload: str | bytes
-    if isinstance(xml, bytes):
-        payload = xml
-    else:
-        # tifffile may already have decoded the tag while leaving a stale
-        # encoding declaration such as encoding="utf-16" in the text.
-        payload = _XML_ENCODING_DECLARATION.sub(r"\1", str(xml), count=1)
-    try:
-        return ElementTree.fromstring(payload)
-    except (ElementTree.ParseError, ValueError, TypeError):
-        return None
-
-
-def _first_child_text(root: ElementTree.Element, local_name: str) -> str | None:
-    for child in root:
-        if _local_name(child.tag) == local_name and child.text:
-            value = child.text.strip()
-            if value:
-                return value
-    return None
-
-
-def _first_descendant_text(root: ElementTree.Element, local_name: str) -> str | None:
-    for element in root.iter():
-        if _local_name(element.tag) == local_name and element.text:
-            value = element.text.strip()
-            if value:
-                return value
-    return None
-
 
 
 class VendorSource(TiffSource):
@@ -112,6 +66,9 @@ class VendorSource(TiffSource):
             raise ValueError("channel_name_field must be 'name', 'biomarker', or 'auto'")
         if pixel_size is not None and not isinstance(pixel_size, PixelSize):
             raise TypeError("pixel_size must be PixelSize")
+        if profile not in {"akoya_mif_qptiff", "akoya_fusion_qptiff", "akoya_he_qptiff",
+                           "svs", "indica_mif"}:
+            raise ValueError("Unsupported vendor source profile")
         self.profile = profile
         self.input_type_description = description
         self.pixel_size_override = pixel_size
@@ -269,22 +226,23 @@ class VendorSource(TiffSource):
                 metadata.append(channel.as_dict())
             pixel_size = consistent_tiff_resolution_pixel_size(self._pages)
             self._pixel_size = self.pixel_size_override or pixel_size
-        elif self.profile == "component":
-            pixel_size = consistent_tiff_resolution_pixel_size(self._pages)
-            self._pixel_size = self.pixel_size_override or pixel_size
-            for index, page in enumerate(self._pages):
-                name = self._tolerant_akoya_name(page) or f"Channel {index + 1}"
-                names.append(name)
-                metadata.append({"name": name})
         else:
-            for index, page in enumerate(self._pages):
-                name = self._tolerant_akoya_name(page) or f"Channel {index + 1}"
+            # Name is only the direct QPI channel field. Never promote an unrelated
+            # descendant Name (patient, slide, scanner, etc.) to channel identity.
+            parsed = tuple(
+                parse_akoya_qpi_channel_metadata(page.description, channel_index=index)
+                for index, page in enumerate(self._pages)
+            )
+            for index, item in enumerate(parsed):
+                name = item.name or f"Channel {index + 1}"
                 names.append(name)
                 metadata.append({"name": name})
-            source_pixel_size = self._akoya_description_pixel_size(page0)
-            if source_pixel_size is None:
-                source_pixel_size = self._warn_tiff_resolution_fallback(
-                    "Akoya PixelSizeMicrons"
+            source_pixel_size = consistent_akoya_pixel_size(parsed, self._pages)
+            if source_pixel_size is not None and any(
+                item.pixel_size_microns is None for item in parsed
+            ):
+                self._warn_tiff_resolution_fallback(
+                    "Akoya PixelSizeMicrons", pixel_size=source_pixel_size,
                 )
             self._pixel_size = self.pixel_size_override or source_pixel_size
 
@@ -326,29 +284,11 @@ class VendorSource(TiffSource):
         self._source_channel_metadata = ({"name": "RGB"},)
 
     @staticmethod
-    def _tolerant_akoya_name(page: tifffile.TiffPage) -> str | None:
-        root = _parse_xml(page.description)
-        if root is None:
-            return None
-        return _first_child_text(root, "Name") or _first_descendant_text(root, "Name")
-
-    @staticmethod
     def _akoya_description_pixel_size(page: tifffile.TiffPage) -> PixelSize | None:
-        try:
-            parsed = parse_akoya_qpi_channel_metadata(page.description, channel_index=0)
-        except ValueError:
-            parsed = None
-        if parsed is not None and parsed.pixel_size_microns is not None:
-            value = parsed.pixel_size_microns
-            return PixelSize(value, value, "µm")
-        root = _parse_xml(page.description)
-        raw = _first_descendant_text(root, "PixelSizeMicrons") if root is not None else None
-        if raw is not None:
-            value = float(raw)
-            if not math.isfinite(value) or value <= 0:
-                raise ValueError(f"Invalid Akoya PixelSizeMicrons={raw!r}")
-            return PixelSize(value, value, "µm")
-        return None
+        parsed = parse_akoya_qpi_channel_metadata(page.description, channel_index=0)
+        if parsed.pixel_size_microns is None:
+            return None
+        return PixelSize(parsed.pixel_size_microns, parsed.pixel_size_microns, "µm")
 
     @staticmethod
     def _svs_description_pixel_size(page: tifffile.TiffPage) -> PixelSize | None:

@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "properties": {
     "schema": {
-      "const": "omeify.zarr_inspect/1"
+      "const": "omeify.zarr_inspect/2"
     },
     "path": {
       "type": "string"
@@ -36,20 +36,53 @@
     "series": {
       "type": "array",
       "items": {
-        "type": "object"
-      }
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "group",
+          "multiscale_index",
+          "name"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "group": {
+            "type": "string"
+          },
+          "multiscale_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "minItems": 0,
+      "maxItems": 4096
     },
     "image": {
-      "type": [
-        "object",
-        "null"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/image"
+        }
       ]
     },
     "arrays": {
       "type": "array",
       "items": {
         "type": "object"
-      }
+      },
+      "description": "Raw Zarr array metadata, including original attributes and encoding declarations; not minimized or reinterpreted by this report schema."
     },
     "attributes": {
       "type": "object"
@@ -89,6 +122,15 @@
     },
     "raster_pixels_examined": {
       "const": false
+    },
+    "metadata_nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/metadata_node"
+      },
+      "minItems": 0,
+      "maxItems": 8192,
+      "description": "Snapshot of group attributes actually consulted during bounded image discovery, including a selected collection root, OME manifest and declared child images. Not a recursive audit; unvisited ancestors/siblings and arbitrary sidecars are not included."
     }
   },
   "required": [
@@ -105,6 +147,331 @@
     "attributes",
     "diagnostics",
     "profile",
-    "raster_pixels_examined"
-  ]
+    "raster_pixels_examined",
+    "metadata_nodes"
+  ],
+  "$defs": {
+    "level": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "shape",
+        "downsample_yx",
+        "offset_yx",
+        "origin_yx_um",
+        "pixel_size"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2,
+          "maxItems": 3
+        },
+        "downsample_yx": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 1
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
+        "offset_yx": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
+        "origin_yx_um": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
+        "pixel_size": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "const": "µm"
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          ]
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "axes",
+        "shape",
+        "dtype",
+        "image_type",
+        "channel_names",
+        "pixel_size",
+        "origin_yx_um",
+        "additional_spatial_context",
+        "export_geometry_representable",
+        "levels"
+      ],
+      "properties": {
+        "axes": {
+          "enum": [
+            "YX",
+            "CYX",
+            "YXS"
+          ]
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2,
+          "maxItems": 3
+        },
+        "dtype": {
+          "enum": [
+            "uint8",
+            "uint16",
+            "uint32",
+            "int8",
+            "int16",
+            "int32",
+            "float32",
+            "float64"
+          ]
+        },
+        "image_type": {
+          "enum": [
+            "multichannel",
+            "rgb",
+            "label"
+          ]
+        },
+        "channel_names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 4096
+        },
+        "pixel_size": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "const": "µm"
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          ]
+        },
+        "origin_yx_um": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
+        "additional_spatial_context": {
+          "type": "boolean"
+        },
+        "export_geometry_representable": {
+          "type": "boolean"
+        },
+        "levels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/level"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "axes": {
+                "const": "YX"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "shape": {
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "levels": {
+                "items": {
+                  "properties": {
+                    "shape": {
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "shape": {
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "levels": {
+                "items": {
+                  "properties": {
+                    "shape": {
+                      "minItems": 3,
+                      "maxItems": 3
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "image_type": {
+                "const": "rgb"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "axes": {
+                "const": "YXS"
+              },
+              "dtype": {
+                "const": "uint8"
+              },
+              "channel_names": {
+                "minItems": 1,
+                "maxItems": 1
+              },
+              "shape": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "const": 3
+                  }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          }
+        }
+      ]
+    },
+    "metadata_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "group",
+        "attributes"
+      ],
+      "properties": {
+        "group": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "description": "Metadata-only diagnostic report. Normalized image/series fields are strict; raw group/array attributes deliberately remain open. Passing the image-attribute profile is not a whole-store privacy or pixel-integrity certification."
 }

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/ome_zarr_manifest.schema.json",
+  "description": "Omeify OME/ manifest attributes. Paths are relative to the collection root. The writer separately requires consecutive paths 0 through N-1 and verifies exact readback order.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ome"
+  ],
+  "properties": {
+    "ome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "series"
+      ],
+      "properties": {
+        "version": {
+          "const": "0.5"
+        },
+        "series": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "minItems": 1,
+          "maxItems": 4096,
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

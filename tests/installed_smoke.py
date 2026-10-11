@@ -50,6 +50,10 @@ def main() -> None:
     assert "ome_zarr_profile.schema.json" in schemas
     assert "zarr_write_report.schema.json" in schemas
     assert "zarr_inspection.schema.json" in schemas
+    assert "ome_geometry.schema.json" in schemas
+    assert "ome_zarr_collection.schema.json" in schemas
+    assert "ome_zarr_manifest.schema.json" in schemas
+    assert not hasattr(omeify, "AkoyaComponentTiffReader")
     size = PixelSize(.5, .7, "µm")
     with TemporaryDirectory() as directory:
         root = Path(directory)

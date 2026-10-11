@@ -157,7 +157,11 @@ reader recovers that record through the authoritative OME Image mapping. It does
 not mislabel the origin as acquisition `Plane/PositionX/Y`. Ordinary TIFF readers
 still see standard pixels and physical pixel sizes; interpreting this supplemental
 origin requires understanding the annotation. Arbitrary external TIFF annotations
-are not imported as geometry.
+are not imported as geometry. The stored record has the packaged
+`ome_geometry.schema.json` contract: `schema`, `origin_yx_um` (finite Y/X pair),
+and `pyramid_method` (`mean` or `nearest`), with no additional fields. Both
+serialization and interpretation check it; reading also rejects duplicate JSON
+keys and records exceeding 4 KiB of UTF-8.
 
 Preview rendering currently uses only pyramid levels whose edge origin matches
 the base. Shifted levels fall back to a suitable aligned level or the base rather
@@ -191,7 +195,9 @@ UUID flags do not silently become Zarr settings.
 Ordinary intensity output needs no private metadata. NGFF stores RGB as three
 component planes with red/green/blue display colors. A small supplemental `omeify`
 attribute records that they belong to one logical RGB channel, retains its name,
-and preserves an existing ICC profile. No implicit ICC transform is applied.
+and preserves an existing ICC profile. No implicit ICC transform is applied. The profile is preserved opaquely, not
+validated as a color transform or scrubbed for identifying text; the encoded
+Zarr payload is bounded to 1 MiB of decoded bytes.
 Independent consumers can read the planes but may not honor that supplemental
 color profile or logical-channel declaration.
 
@@ -209,14 +215,18 @@ array attributes, source filenames, dates, scanner descriptions, free-text patie
 fields, source display settings and arbitrary annotation properties are not
 copied. Selected channel names and explicitly requested collection/ROI names are
 retained. Input names still require review. Only deliberate collection provenance
-is accepted, with a 1 MiB bound; it is not a source-metadata passthrough.
+is accepted, with a 1 MiB UTF-8 bound and finite, acyclic, string-keyed JSON
+requirements shared with TIFF. Claimed crop provenance is additionally checked
+against its packaged schema; this is not a source-metadata passthrough.
 
 Physical geometry needed to interpret the selected product is not private clutter
 to silently discard. Additional geometry requires explicit intrinsic-only export.
-Full source metadata remains visible in `inspect`, which **does not minimize** it.
+Inspected source metadata remains visible in `inspect`, which **does not minimize** it.
 Diagnostic reports can contain sensitive paths and values and should not be
 published casually. Image pixels are not screened for identifying content.
 Metadata minimization is not deidentification or study-wide MITI compliance.
+The [retention policy](reports.md#metadata-retention-and-sharing) explicitly covers
+retained names, caller provenance, opaque ICC bytes and diagnostic reports.
 
 ## Convert, mutate, crop and inspect
 
@@ -263,7 +273,10 @@ and `validation_errors()`, also available through `reader.inspect()`. It never
 decodes pixels or traverses every chunk merely to compute a byte size. The
 metadata-profile result describes the selected image's **attributes**, not a
 whole-store audit or universal NGFF validation. Missing/unsupported interpretation
-remains explicit in diagnostics.
+remains explicit in diagnostics. `metadata_nodes` retains the group attributes
+actually consulted during discovery, including collection-root provenance and
+the `OME/` manifest. It does not list arbitrary sidecars or unvisited ancestors.
+[Inspection scope and current schemas](reports.md#inspection-report-version-2-for-zarr).
 
 Ordinary Zarr metadata intelligence (`inspect -i`) is deliberately not added by
 this change: it errors before any model request. Existing explicit visual preview
@@ -304,6 +317,28 @@ bounds, not a process-wide memory cap or protection against arbitrarily oversize
 chunks from an untrusted source. The transport may receive an object before its
 metadata-size limit can be checked. Read only trusted data and installed codecs.
 
+### S3-backed data and scope
+
+The accepted URI schemes remain **HTTP and HTTPS**, not `s3://`. Omeify does not
+rewrite S3 URLs into anonymous HTTPS requests, infer credentials, or upload
+images. A compatible S3-backed HTTPS object endpoint or an approved HTTP gateway
+can use the existing reader, provided metadata/chunk GETs and missing-key behavior
+work for that endpoint. Authentication requiring AWS request signing is not
+implemented by this HTTP adapter. Presigned query-string store roots remain
+rejected, not copied into logs or interpreted as credentials for every chunk.
+
+Build and verify a new local store, then publish its complete hierarchy through
+a separate authorized deployment process. For private object storage, use the
+institution's access controls rather than making a bucket public as a workaround.
+Publishing to immutable versioned prefixes avoids changing a reader's observation
+underneath its metadata/chunk cache. This documentation does not claim a tested
+production S3 endpoint or make deployment part of Omeify.
+
+Native S3 reading is deferred to a separately tested adapter using an upstream
+object-store backend, with credential/session lifecycle and error semantics
+verified. No additional cloud dependency or alternate image API is introduced in
+this hardening pass.
+
 ## Safe writing and verification
 
 Zarr writes are local and **create-new only**. Existing directories, including
@@ -329,6 +364,24 @@ Image and report publication remain separate transactions. A report failure afte
 a completed image does not delete that image. A shattered batch may retain earlier
 successful stores if a later output fails.
 
+### Stored collection metadata
+
+The canonical collection root uses `ome_zarr_collection.schema.json` for
+`ome.version=0.5`, `ome["bioformats2raw.layout"]=3` and optional deliberate
+`omeify.provenance`. The `OME/` group uses `ome_zarr_manifest.schema.json` for
+`ome.version=0.5` and the ordered `ome.series` paths. The writer generates
+consecutive numeric child paths, checks both schemas before encoding, and checks
+schemas plus exact values/order on readback. Child attributes use
+`ome_zarr_profile.schema.json`. Generic provenance is deliberate caller JSON, not
+unrestricted inheritance from the source. See the single [contract inventory](reports.md#current-external-contracts).
+
+These schemas express the permitted structure. Python retains checks that need
+cross-field or array knowledge: vector rank/axes on foreign input, level geometry,
+consecutive output paths, display-window ordering, encoding, and representative
+pixels. The canonical attribute schema now fixes `yx`/`cyx` ordering, requires
+scale before optional translation, and prevents mixed RGB/label/precision
+extension declarations. No new NGFF writing version is selected by these checks.
+
 ## Migration
 
 0.22 includes Zarr I/O in every installation without changing ordinary TIFF
@@ -339,7 +392,7 @@ parallel image API or file-only wrapper forced onto remote stores.
 Convert report: `omeify.convert/2`; mutation: `omeify.mutate/2`; crop:
 `omeify.crop/4`. Direct TIFF writer report identifiers stay unchanged. New Zarr
 records use `omeify.zarr_write/1`, `omeify.zarr_collection/1`, and
-`omeify.zarr_inspect/1`. Readers of the operation reports should accept the new
+`omeify.zarr_inspect/2`. Readers of the operation reports should accept the new
 explicit format variants. `miti_header` is null for Zarr. Zarr source `size_bytes`
 is null instead of triggering a full store traversal. The output size is measured
 from the locally generated store. Actual array shape, chunks, codecs and native

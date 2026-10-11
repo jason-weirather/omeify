@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/ome_geometry.schema.json",
+  "description": "Linked OME MapAnnotation payload: pixel-center origin (Y,X) in micrometers and rebuilt pyramid sampling method. Finite representable coordinates and the 4096-byte UTF-8 bound are checked in Python; no stage position is asserted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "origin_yx_um",
+    "pyramid_method"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.geometry/1"
+    },
+    "origin_yx_um": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "pyramid_method": {
+      "enum": [
+        "mean",
+        "nearest"
+      ]
+    }
+  }
+}

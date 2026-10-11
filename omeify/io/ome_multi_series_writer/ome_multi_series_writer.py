@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -18,6 +17,7 @@ from omeify.io._writer.configuration import (
     OUTPUT_BYTEORDER,
 )
 from omeify.io.image_planes import protect_source_paths
+from omeify.provenance import canonical_provenance
 from omeify.reports import complete_report
 from omeify.utils.generate_ome_xml import (
     OMEIFY_PROVENANCE_NAMESPACE,
@@ -94,7 +94,7 @@ class OMEMultiSeriesWriter:
         images = self._normalize_series(series)
         for image in images:
             protect_source_paths(image._source, self._settings.output_path)
-        provenance_json, normalized_provenance = _canonical_provenance(provenance)
+        provenance_json, normalized_provenance = canonical_provenance(provenance)
         prepared = tuple(
             prepare_image(
                 image._source,
@@ -202,32 +202,6 @@ def _required_name(prepared: PreparedImage) -> str:
     if prepared.name is None:
         raise RuntimeError("multi-series prepared images require a name")
     return prepared.name
-
-
-def _canonical_provenance(
-    provenance: Mapping[str, object] | None,
-) -> tuple[str | None, dict[str, object] | None]:
-    if provenance is None:
-        return None, None
-    if not isinstance(provenance, Mapping):
-        raise TypeError("provenance must be a mapping or None")
-    value = dict(provenance)
-    try:
-        rendered = json.dumps(
-            value,
-            ensure_ascii=False,
-            allow_nan=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-    except (TypeError, ValueError) as exc:
-        raise TypeError(
-            "provenance must contain only finite JSON-serializable values"
-        ) from exc
-    normalized = json.loads(rendered)
-    if not isinstance(normalized, dict):
-        raise RuntimeError("canonical provenance did not resolve to a JSON object")
-    return rendered, normalized
 
 
 def _series_report(

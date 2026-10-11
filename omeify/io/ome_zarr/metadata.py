@@ -380,9 +380,33 @@ def profile_errors(attributes: Mapping[str, Any]) -> tuple[str, ...]:
     from omeify.reports import report_validator
     try:
         encoded = json.dumps(attributes, allow_nan=False, ensure_ascii=False).encode("utf-8")
-    except (ValueError, TypeError, OverflowError) as exc:
+    except (ValueError, TypeError, OverflowError, RecursionError, UnicodeError) as exc:
         return (f"Metadata must be finite JSON: {type(exc).__name__}",)
     if len(encoded) > MAX_METADATA_BYTES - 4096:
         return ("Generated node metadata exceeds its 8 MiB budget",)
     errors = report_validator("ome_zarr_profile.schema.json").iter_errors(attributes)
-    return tuple(f"{'/'.join(map(str, e.path)) or '$'}: {e.message}" for e in errors)
+    findings = tuple(f"{'/'.join(map(str, e.path)) or '$'}: failed {e.validator}" for e in errors)
+    if findings:
+        return findings
+    ome = attributes["ome"]
+    ms = ome["multiscales"][0]
+    result = []
+    if [d["path"] for d in ms["datasets"]] != [str(i) for i in range(len(ms["datasets"]))]:
+        result.append("ome/multiscales/0/datasets: paths must be consecutive from 0")
+    channels = ome["omero"]["channels"]
+    for i, channel in enumerate(channels):
+        w = channel["window"]
+        if not (w["min"] <= w["start"] <= w["end"] <= w["max"] and w["min"] < w["max"]):
+            result.append(f"ome/omero/channels/{i}/window: invalid display range ordering")
+    extension = attributes.get("omeify", {})
+    if extension.get("image_type") == "label" and extension["channel_name"] != channels[0]["label"]:
+        result.append("omeify/channel_name: must agree with the stored label channel")
+    if "icc_profile_base64" in extension:
+        try:
+            profile = base64.b64decode(extension["icc_profile_base64"], validate=True)
+        except ValueError:
+            result.append("omeify/icc_profile_base64: invalid base64 encoding")
+        else:
+            if len(profile) > 1024 * 1024:
+                result.append("omeify/icc_profile_base64: ICC profile exceeds 1 MiB")
+    return tuple(result)

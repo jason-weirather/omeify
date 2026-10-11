@@ -37,12 +37,21 @@ def _parse_description(description: str | bytes | None) -> ElementTree.Element |
 
 
 def _direct_child(element: ElementTree.Element, name: str) -> ElementTree.Element | None:
-    return next((child for child in element if _local_name(child.tag) == name), None)
+    # Match the parent's vocabulary, not an identically named foreign extension.
+    namespace = element.tag.rsplit("}", 1)[0] + "}" if "}" in element.tag else ""
+    matches = [child for child in element if child.tag == namespace + name]
+    if len(matches) > 1:
+        raise ValueError(f"Ambiguous duplicate Akoya {name} field")
+    return matches[0] if matches else None
 
 
 def _direct_child_text(element: ElementTree.Element, name: str) -> str | None:
     child = _direct_child(element, name)
-    if child is None or child.text is None:
+    if child is None:
+        return None
+    if len(child):
+        raise ValueError(f"Akoya {name} must be a scalar text field")
+    if child.text is None:
         return None
     value = child.text.strip()
     return value or None
@@ -55,6 +64,8 @@ def _path_text(root: ElementTree.Element, path: Sequence[str]) -> str | None:
         if child is None:
             return None
         current = child
+    if len(current):
+        raise ValueError(f"Akoya {path[-1]} must be a scalar text field")
     if current.text is None:
         return None
     value = current.text.strip()

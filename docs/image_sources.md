@@ -342,21 +342,24 @@ ordered channel names, physical calibration, and an RGB ICC profile. `None` keep
 the existing value. Known level scales are recalibrated; unknown scales stay
 unknown. It does not infer or remove missing experimental information.
 
-Writers only take storage settings: compression, tiling, pyramid count, scratch
-location, workers, output precision, software tag, UUID and overwrite policy.
+Writers take storage settings: compression, tiling, pyramid count, workers and
+output precision. TIFF additionally has scratch-location, Software-tag, UUID
+and overwrite options; Zarr has new-directory publication, not store replacement.
 Image axes, dtype, channel names and calibration belong to the Image. Writing an
 uncalibrated image fails; dtype conversion and intensity normalization are not
 implicit. RGB writing remains uint8; labels require lossless storage and nearest
 pyramids. Explicit float32 mantissa trimming remains available.
 
-Since 0.18.4, omitted compression and tile size resolve per image: RGB uses
+For TIFF output, omitted compression and tile size resolve per image: RGB uses
 **lossy JPEG quality 90 / 4:2:2 and 512 × 512 tiles**, while scalar, multiplex,
 and label images use lossless LZW and 1024 × 1024 tiles. This is shared by
 conversion, ordinary/temporary writes, and mixed-series writes, including RGB
 OME-TIFF inputs. Pass `compression="Deflate"` (or another lossless codec) for
 exact RGB samples. In mixed products, per-series compression overrides the
 writer setting; explicit writer settings override automatic defaults.
-Existing examples that explicitly select Deflate stay lossless.
+Existing TIFF examples that explicitly select Deflate stay lossless. Zarr
+output defaults to lossless Zstd and 512-pixel spatial chunks for all supported
+image types; TIFF codecs and defaults are not translated into Zarr settings.
 
 A writer is an operation object; it opens and closes its real file resources
 inside `write()`. It therefore does not need an otherwise empty outer `with`.
@@ -375,11 +378,12 @@ with MultichannelImage.from_array(array, axes="CYX", pixel_size=size) as image:
 Writers borrow images and leave them open on success or failure. They may evict
 source decode caches between passes; eviction must not change pixels or close
 resources. Source pyramids are rebuilt from the selected input level, not copied.
-Temporary reduced TIFFs still consume scratch space. Bounded RAM does not mean
-no temporary files.
+Temporary reduced TIFFs still consume scratch space; Zarr builds its pyramid
+inside the staged output store. Bounded RAM does not mean no temporary files.
 
-Single-image and heterogeneous writers share the existing encoder, pyramid
-arithmetic, metadata validation, precision handling and atomic installation.
+Within each output backend, single-image and heterogeneous writers share the
+encoder, metadata validation and publication policy. Both backends share image
+semantics, numerical pyramid arithmetic and explicit precision handling.
 `convert()` and `mutate()` now use this same Image write path. Their user-facing
 operations remain distinct; CLI destinations use `--output` / `-o`.
 
