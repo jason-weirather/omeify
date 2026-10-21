@@ -321,6 +321,11 @@ print(level.pixel_size, level.downsample_yx)
 `ImageLevel` contains explicit sampling information. A 5-by-7 raster reduced
 2x has shape 3-by-4 and still has a 2x sampling step. Do not calculate sampling
 scale from shape ratios. Unknown third-party level calibration stays `None`.
+For TIFF readers, missing independent physical calibration on a reduced pyramid
+level is logged at **DEBUG**, not as a warning on ordinary opens. The missing
+level `pixel_size` and `downsample_yx` remain `None`; this logging change does
+not infer a scale or alter pixel reads. Use inspection or DEBUG logging when
+missing level declarations matter for analysis.
 Metadata-only file open now validates all advertised levels, without decoding
 pixels. Source levels describe one observation, not different microscope exposures.
 

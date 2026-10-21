@@ -120,7 +120,10 @@ class TiffSource(ImageSource):
                      (height, width, 3) if axes == "YXS" else (height, width))
             size = pixel_size if index == 0 else consistent_tiff_resolution_pixel_size(pages)
             if index and size is None:
-                LOGGER.warning(
+                # Common in vendor pyramids: this is a missing declaration, not a
+                # failed read or proof of inconsistent calibration. Keep the
+                # unknown scale explicit, but do not warn during routine viewing.
+                LOGGER.debug(
                     "Pyramid level %s has no physical calibration; its scale will not be inferred "
                     "from rounded dimensions", index,
                 )
