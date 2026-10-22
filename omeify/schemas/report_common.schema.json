@@ -1614,6 +1614,7 @@
             "ome_tiff",
             "qptiff_he",
             "svs",
+            "scn_he",
             "ome_zarr"
           ]
         },
@@ -2296,6 +2297,7 @@
             "ome_tiff",
             "qptiff_he",
             "svs",
+            "scn_he",
             "ome_zarr"
           ]
         },

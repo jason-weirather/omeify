@@ -16,6 +16,7 @@ from omeify import (
     OMETiffReader, OMETiffWriter, PixelSize, RGBImage, TiffInspector, convert, crop, mutate,
 )
 from omeify import _version
+from omeify.io.source_reader import INPUT_TYPES
 from omeify.preview import build_preview
 from omeify.regions import rectangle_feature
 from omeify.reports import _registry, complete_report, load_schema, validate_report
@@ -44,6 +45,41 @@ def test_all_packaged_schemas_and_references_resolve_locally(name):
     for node in walk(schema):
         if "$ref" in node:
             assert isinstance(resolver.lookup(node["$ref"]).contents, (dict, bool))
+
+
+def test_conversion_report_input_types_track_supported_source_profiles():
+    """Keep both output backends in sync when adding a vendor reader.
+
+    A forgotten enum entry otherwise fails only after a successful image write,
+    when convert() validates its completed operation report.
+    """
+    common = load_schema("report_common.schema.json")["$defs"]
+    for options in ("conversion_options", "zarr_conversion_options"):
+        allowed = common[options]["properties"]["input_type"]["enum"]
+        assert len(allowed) == len(set(allowed))
+        assert set(allowed) == set(INPUT_TYPES)
+
+
+def test_scn_he_options_validate_in_both_conversion_report_variants():
+    """Regression for SCN output installed before conversion-report validation."""
+    schema = load_schema("conversion_report.schema.json")["properties"]["options"]
+    validator = Draft202012Validator(schema, registry=_registry())
+    shared = {
+        "metadata_minimization": True, "input_type": "scn_he", "series": 1,
+        "rename_channels": {}, "rename_channels_by": None,
+        "channel_name_field": None, "pixel_size_override": None,
+        "float32_mantissa_bits": None, "max_workers": 1,
+    }
+    tiff = {
+        **shared, "compression": "JPEG", "jpeg_quality": 90,
+        "jpeg_subsampling": "422", "display_uuid": True, "software": "omeify test",
+    }
+    zarr = {
+        **shared, "compression": "ZSTD", "output_format": "ome_zarr",
+        "ngff_version": "0.5",
+    }
+    validator.validate(tiff)
+    validator.validate(zarr)
 
 
 def test_schema_edits_do_not_change_cached_authority():
