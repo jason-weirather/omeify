@@ -13,6 +13,7 @@ from .vendor_tiff_readers import (
     AkoyaMIFQPTiffReader,
     AperioSVSReader,
     IndicaMIFTiffReader,
+    LeicaSCNHEReader,
 )
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "ImageMetadata",
     "ImageSource",
     "IndicaMIFTiffReader",
+    "LeicaSCNHEReader",
     "LabelImage",
     "MultichannelImage",
     "OMEImageSeries",

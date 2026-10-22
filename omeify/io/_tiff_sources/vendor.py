@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -17,6 +18,9 @@ from ..akoya_qptiff import (
     select_akoya_channel_name,
 )
 from ..image_metadata import ImageMetadata
+from ..leica_scn import (
+    SCNImage, SCNMetadata, build_leica_scn_he_series, parse_leica_scn, scn_he_pixel_size,
+)
 from ..indica_mif import (
     IndicaMIFMetadata,
     build_indica_mif_series,
@@ -34,6 +38,7 @@ SourceProfile = Literal[
     "akoya_fusion_qptiff",
     "akoya_he_qptiff",
     "svs",
+    "scn_he",
     "indica_mif",
 ]
 
@@ -67,13 +72,14 @@ class VendorSource(TiffSource):
         if pixel_size is not None and not isinstance(pixel_size, PixelSize):
             raise TypeError("pixel_size must be PixelSize")
         if profile not in {"akoya_mif_qptiff", "akoya_fusion_qptiff", "akoya_he_qptiff",
-                           "svs", "indica_mif"}:
+                           "svs", "scn_he", "indica_mif"}:
             raise ValueError("Unsupported vendor source profile")
         self.profile = profile
         self.input_type_description = description
         self.pixel_size_override = pixel_size
         self.channel_name_field = channel_name_field
-        self.image_type = "rgb" if profile in {"svs", "akoya_he_qptiff"} else "multichannel"
+        self.image_type = ("rgb" if profile in {"svs", "scn_he", "akoya_he_qptiff"}
+                           else "multichannel")
         self._pages: list[tifffile.TiffPage] = []
         self._level0 = None
         self._pixel_size = None
@@ -81,6 +87,9 @@ class VendorSource(TiffSource):
         self._source_channel_metadata = ()
         self._normalized_names = ()
         self._indica_metadata = None
+        self._scn_metadata: SCNMetadata | None = None
+        self._scn_image: SCNImage | None = None
+        self._origin_yx: tuple[float, float] | None = None
 
     def _load_file(self, tiff: tifffile.TiffFile) -> None:
         if self.profile == "indica_mif":
@@ -90,6 +99,17 @@ class VendorSource(TiffSource):
             self._series = build_indica_mif_series(tiff, self._indica_metadata)
             self._level0 = self._series
             self._pages = [item.aspage() for item in self._series.pages]
+        elif self.profile == "scn_he":
+            self._scn_metadata = parse_leica_scn(tiff)
+            if self.series_index >= len(self._scn_metadata.images):
+                raise IndexError(
+                    f"Series {self.series_index} does not exist; SCN has "
+                    f"{len(self._scn_metadata.images)} images"
+                )
+            self._scn_image = self._scn_metadata.images[self.series_index]
+            self._series = build_leica_scn_he_series(tiff, self._scn_image)
+            self._level0 = self._series
+            self._pages = [self._series.pages[0].aspage()]
         else:
             self._validate_container(tiff)
             self._series, self._level0, self._pages = self._select_series(tiff)
@@ -103,6 +123,9 @@ class VendorSource(TiffSource):
         self._pages = []
         self._level0 = None
         self._indica_metadata = None
+        self._scn_metadata = None
+        self._scn_image = None
+        self._origin_yx = None
         self._source_channel_metadata = ()
         self._normalized_names = ()
         self._pixel_size = None
@@ -112,6 +135,8 @@ class VendorSource(TiffSource):
         axes = "YXS" if self.image_type == "rgb" else "CYX"
         count = len(self._normalized_names)
         levels = self._levels(axes, count, self._pixel_size)
+        if self._origin_yx is not None:
+            levels = (replace(levels[0], origin_yx=self._origin_yx), *levels[1:])
         return ImageMetadata(
             axes=axes, shape=levels[0].shape, dtype=self._pages[0].dtype,
             image_type=self.image_type, channel_names=self._normalized_names,
@@ -124,6 +149,9 @@ class VendorSource(TiffSource):
     def series_names(self) -> tuple[str | None, ...]:
         if self._tiff is None:
             raise RuntimeError("TIFF source is not open")
+        if self.profile == "scn_he":
+            assert self._scn_metadata is not None
+            return tuple(image.name for image in self._scn_metadata.images)
         return (None,) if self.profile == "indica_mif" else (None,) * len(self._tiff.series)
 
     def _validate_container(self, tiff: tifffile.TiffFile) -> None:
@@ -272,6 +300,9 @@ class VendorSource(TiffSource):
             source_pixel_size = self._svs_description_pixel_size(page)
             if source_pixel_size is None:
                 source_pixel_size = self._warn_tiff_resolution_fallback("Aperio MPP")
+        elif self.profile == "scn_he":
+            assert self._scn_image is not None
+            source_pixel_size = scn_he_pixel_size(self._scn_image, page)
         else:
             source_pixel_size = self._akoya_description_pixel_size(page)
             if source_pixel_size is None:
@@ -279,6 +310,8 @@ class VendorSource(TiffSource):
                     "Akoya PixelSizeMicrons"
                 )
         self._pixel_size = self.pixel_size_override or source_pixel_size
+        if self._scn_image is not None:
+            self._origin_yx = self._scn_image.center_origin(self._pixel_size)
         self._icc_profile = bytes(page.iccprofile) if page.iccprofile is not None else None
         self._normalized_names = ("RGB",)
         self._source_channel_metadata = ({"name": "RGB"},)

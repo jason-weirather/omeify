@@ -272,6 +272,7 @@ by default. JSON reports may contain source paths and metadata.
 | Interleaved RGB OME-TIFF | `ome_tiff` | Interleaved RGB | JPEG |
 | Akoya H&E QPTIFF | `qptiff_he` | Interleaved RGB | JPEG |
 | Aperio SVS | `svs` | Interleaved RGB | JPEG |
+| Leica SCN brightfield/H&E | `scn_he` | Interleaved RGB | JPEG |
 
 OME-Zarr input additionally uses `--type ome_zarr`; its supported 0.4/0.5/0.6
 images use the same conversions. Zarr output always has its own lossless defaults.
@@ -279,7 +280,9 @@ The retired `component` profile and `AkoyaComponentTiffReader` are removed in 0.
 without aliases. Legacy inForm component ROI TIFFs need a separately reviewed
 workflow; they are not silently routed through another vendor profile.
 
-Only the selected series is converted; `--series 0` is the default. RGB inputs
+Only the selected series is converted; `--series 0` is the default. For Leica SCN,
+`--series` selects the zero-based `<image>` entry in the SCN collection, not the
+embedded slide label. The SCN XML maps each image pyramid to its TIFF IFDs. RGB inputs
 must have actual RGB samples or a supported JPEG decoding path that yields RGB.
 Raw YCbCr/CIELAB samples are rejected, including on advertised reduced levels,
 rather than silently relabeled. These are

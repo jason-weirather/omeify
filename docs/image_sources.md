@@ -36,7 +36,7 @@ image product. Views cannot silently remove that restriction.
 |---|---|
 | Read an OME intensity/RGB series | `with OMETiffReader(path, series=0) as image:` |
 | Read categorical labels | `with OMETiffLabelReader(path, series=0) as labels:` |
-| Read a vendor image | Its explicit reader, for example `AkoyaFusionQPTiffReader(path)` |
+| Read a vendor image | Its explicit reader, for example `LeicaSCNHEReader(path, series=1)` or `AkoyaFusionQPTiffReader(path)` |
 | Describe an existing intensity array | `MultichannelImage.from_array(array, axes="CYX", ...)` |
 | Describe RGB or labels | `RGBImage.from_array(...)` or `LabelImage.from_array(...)` |
 | Implement a procedural backend | Subclass `ImageSource`; implement `_read_region()` |

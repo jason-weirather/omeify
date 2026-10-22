@@ -10,6 +10,7 @@ from .vendor_tiff_readers import (
     AkoyaMIFQPTiffReader,
     AperioSVSReader,
     IndicaMIFTiffReader,
+    LeicaSCNHEReader,
 )
 
 InputType = Literal[
@@ -17,6 +18,7 @@ InputType = Literal[
     "qptiff_fusion",
     "qptiff_he",
     "svs",
+    "scn_he",
     "ome_tiff",
     "ome_zarr",
     "indica_mif",
@@ -34,6 +36,7 @@ INPUT_TYPES: tuple[str, ...] = (
     "qptiff_fusion",
     "qptiff_he",
     "svs",
+    "scn_he",
     "ome_tiff",
     "ome_zarr",
     "indica_mif",
@@ -94,6 +97,10 @@ def source_reader(
         if channel_name_field is not None:
             raise ValueError("channel_name_field is only valid for qptiff_fusion input")
         return AperioSVSReader(input_path, series=series)
+    if input_type == "scn_he":
+        if channel_name_field is not None:
+            raise ValueError("channel_name_field is only valid for qptiff_fusion input")
+        return LeicaSCNHEReader(input_path, series=series)
     if input_type == "ome_tiff":
         if channel_name_field is not None:
             raise ValueError("channel_name_field is only valid for qptiff_fusion input")

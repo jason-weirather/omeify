@@ -80,6 +80,7 @@ Planar output uses one grayscale top-level IFD per physical plane,
 |---|---|---|---|
 | Akoya H&E QPTIFF | `qptiff_he` | `YXS` interleaved RGB | JPEG |
 | Aperio SVS | `svs` | `YXS` interleaved RGB | JPEG |
+| Leica SCN brightfield/H&E | `scn_he` | `YXS` interleaved RGB | JPEG |
 | Interleaved RGB OME-TIFF | `ome_tiff` | `YXS` interleaved RGB | JPEG |
 
 RGB output is restricted to interleaved `uint8` data with three contiguous samples. The OME model
@@ -106,6 +107,9 @@ Both generated output formats require usable X and Y physical pixel sizes.
 - Akoya mIF and Fusion multiplex calibration is checked across every full-resolution channel page.
 - Indica mIF uses standard TIFF `XResolution`, `YResolution`, and `ResolutionUnit` tags.
 - Aperio SVS uses `MPP` and warns before falling back to TIFF resolution tags.
+- Leica SCN brightfield uses X/Y TIFF resolution tags, cross-checked against the SCN
+  `<view>` physical extent when present. A calibrated `<view>` supplies a fallback
+  when standard TIFF calibration is absent; disagreements larger than 1% fail.
 - OME-TIFF uses OME physical-size metadata, then falls back to TIFF resolution tags only when
   both OME X and Y calibration values are absent.
 
@@ -377,6 +381,29 @@ omeify convert halo-mif.tif --output halo-mif.ome.tif \
 
 The Indica profile reads channel names and full-resolution IFD mappings from its `<indica>`
 ImageDescription. The source pyramid is not copied.
+
+Leica SCN brightfield, selecting the full-resolution 20x image rather than the 1.25x
+slide overview in a two-image file:
+
+```bash
+omeify convert slide.scn --output slide-20x.ome.tif \
+  --type scn_he --series 1 --no-overwrite -v
+```
+
+`scn_he` is a distinct, conservatively scoped Leica profile. It requires Leica SCN
+XML, reads `<collection>/<image>` in document order, and follows each image's
+explicit `<dimension ifd=... r=...>` pyramid mapping. It accepts only a single
+8-bit RGB brightfield plane per resolution (Z=0, C=0); additional channels/Z
+planes, label IFDs, and fluorescence series are not silently converted. The `he` name identifies an
+RGB brightfield conversion profile, not proof of a particular stain. It does
+not stitch multiple tissue regions. The profile accepts JPEG YCbCr input only
+through TIFF's JPEG-to-RGB decoder, without a second color conversion or ICC
+transform. Source 4:4:4 JPEG does **not** override Omeify's ordinary 4:2:2 JPEG
+output default. TIFF output remains quality 90, 4:2:2, 512-pixel tiles, with
+rebuilt pyramids; use `--compression Deflate` for lossless output relative to the
+decoded source. SCN view offsets and extents, expressed in nanometers, produce
+slide-local pixel-center origins when calibrated. The original barcode, device,
+acquisition and scanner XML are not copied into generated OME metadata.
 
 Aperio SVS with an explicit JPEG policy:
 
@@ -1075,7 +1102,7 @@ lists removed interfaces; there is no parallel compatibility API.
 
 Use a format-specific reader in a context manager. The supported constructors are
 `AkoyaMIFQPTiffReader`, `AkoyaFusionQPTiffReader`, `AkoyaHEQPTiffReader`,
-`AperioSVSReader`, `IndicaMIFTiffReader`, `OMETiffReader`, `OMETiffLabelReader`,
+`AperioSVSReader`, `LeicaSCNHEReader`, `IndicaMIFTiffReader`, `OMETiffReader`, `OMETiffLabelReader`,
 `OMEZarrReader`, and `OMEZarrLabelReader`.
 
 The [reading example](image_sources.md#1-read-select-channels-and-write) covers

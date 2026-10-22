@@ -85,3 +85,17 @@ class AperioSVSReader(FileImage, RGBImage):
             path, profile="svs", description=self.input_type_description,
             series=series, pixel_size=pixel_size,
         ))
+
+
+class LeicaSCNHEReader(FileImage, RGBImage):
+    """One Leica SCN brightfield image, selected by its XML <image> index."""
+
+    input_type_description = "Leica SCN H&E/brightfield"
+
+    def __init__(
+        self, path: str | Path, *, series: int = 0, pixel_size: PixelSize | None = None,
+    ) -> None:
+        super().__init__(VendorSource(
+            path, profile="scn_he", description=self.input_type_description,
+            series=series, pixel_size=pixel_size,
+        ))
