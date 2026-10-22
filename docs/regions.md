@@ -204,6 +204,23 @@ omeify inspect slide.ome.tiff -i --geojson \
 omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff --geojson right.geojson -v
 ```
 
+Visual questions and region localization keep the same explicit source-reader
+contract as conversion and cropping. Ordinary TIFF metadata inspection does not
+require selecting a profile, but reading vendor **pixels** does. For example:
+
+```bash
+omeify inspect slide.svs --type svs -i --visual \
+  -q "What does the annotation on this H&E slide indicate?"
+omeify inspect slide.scn --type scn_he --series 1 -i --geojson \
+  -q "Find the right tissue region."
+```
+
+If `--type` is omitted, the visual reader uses `ome_tiff`. When an input lacks
+recognized OME metadata, the command fails with a hint to choose a source profile;
+it does **not** guess from the filename or quietly change readers. A `.svs`, `.scn`,
+or `.qptiff` suffix is only a diagnostic clue in that error message, not proof
+of the actual format.
+
 `inspect --geojson` requires both `-i` and `-q`. Stdout contains **only one
 FeatureCollection**, without the usual inspection tree or prose answer. Progress
 is on stderr. The existing `--output` / `-o` can also save the GeoJSON; an existing

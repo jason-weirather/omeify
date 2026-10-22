@@ -156,6 +156,45 @@ def _render_visual_answer(report: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip()
 
 
+def _visual_read_exception(
+    exc: Exception, *, input_path: str | Path, input_type: str, type_was_defaulted: bool,
+) -> click.ClickException:
+    """Suggest an explicit vendor reader for a missing OME header, never select one.
+
+    The filename extension is only a conditional user-facing hint, not evidence
+    used to dispatch or interpret pixels. Other read/vision errors pass through.
+    """
+    message = str(exc)
+    if (
+        type_was_defaulted
+        and input_type == "ome_tiff"
+        and isinstance(exc, ValueError)
+        and message.startswith("TIFF does not contain recognized OME metadata:")
+    ):
+        suffix = Path(input_path).suffix.lower()
+        if suffix == ".svs":
+            suggestion = "If this is an Aperio SVS image, use --type svs."
+        elif suffix == ".scn":
+            suggestion = "If this is a Leica brightfield SCN image, use --type scn_he."
+        elif suffix == ".qptiff":
+            suggestion = (
+                "For Akoya QPTIFF, choose the applicable profile explicitly: "
+                "--type qptiff_he, qptiff_mif, or qptiff_fusion."
+            )
+        else:
+            suggestion = (
+                "Choose the appropriate --type explicitly (for example, "
+                "--type svs or --type scn_he); see omeify inspect --help."
+            )
+        message = (
+            "The default --type ome_tiff requires recognized OME metadata, "
+            "but none was recognized in this TIFF. Supported vendor images can be used for visual "
+            f"questions without OME metadata. {suggestion} "
+            "The image was not sent to the model."
+        )
+    return click.ClickException(escape_terminal(message))
+
+
 def _pixel_size_override(
     x: float | None,
     y: float | None,
@@ -782,7 +821,8 @@ def crop_command(
 @click.option("--geojson", is_flag=True,
               help="Return visual ROI GeoJSON only; sends a bounded image preview. Requires -i -q.")
 @click.option("--type", "input_type", type=click.Choice(INPUT_TYPES), default="ome_tiff",
-              help="Input profile for visual reads or explicit OME-Zarr inspection; default ome_tiff.")
+              help=("Input profile for visual reads or explicit OME-Zarr inspection; "
+                    "default ome_tiff. Vendor profiles must be selected explicitly."))
 @click.option("--series", type=click.IntRange(min=0), default=0,
               help="Selected series for image reads and OME-Zarr inspection; default 0.")
 @click.option("--preview-size", type=click.IntRange(min=128, max=2048), default=1536,
@@ -879,7 +919,7 @@ def inspect_command(
         from omeify.io.source_reader import source_reader
         from omeify.visual_intelligence import answer_visual_question
 
-        click.echo("Sending bounded preview for visual analysis...", err=True)
+        click.echo("Preparing bounded preview for visual analysis...", err=True)
         try:
             with source_reader(input_path, input_type=input_type, series=series,
                                channel_name_field=None, group=group, z=z, t=t,
@@ -893,7 +933,11 @@ def inspect_command(
                     max_output_tokens=intelligence_max_output_tokens,
                 )
         except Exception as exc:
-            raise click.ClickException(escape_terminal(str(exc))) from exc
+            raise _visual_read_exception(
+                exc, input_path=input_path, input_type=input_type,
+                type_was_defaulted=(ctx.get_parameter_source("input_type")
+                                    == click.core.ParameterSource.DEFAULT),
+            ) from exc
         rendered = (json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False)
                     if as_json else _render_visual_answer(result))
         _write_or_echo(rendered, output, input_path=input_path)
@@ -902,7 +946,7 @@ def inspect_command(
         from omeify.io.source_reader import source_reader
         from omeify.visual_intelligence import locate_regions
 
-        click.echo("Sending bounded preview for region localization...", err=True)
+        click.echo("Preparing bounded preview for region localization...", err=True)
         try:
             with source_reader(input_path, input_type=input_type, series=series,
                                channel_name_field=None, group=group, z=z, t=t,
@@ -916,7 +960,11 @@ def inspect_command(
                     max_output_tokens=intelligence_max_output_tokens,
                 )
         except Exception as exc:
-            raise click.ClickException(escape_terminal(str(exc))) from exc
+            raise _visual_read_exception(
+                exc, input_path=input_path, input_type=input_type,
+                type_was_defaulted=(ctx.get_parameter_source("input_type")
+                                    == click.core.ParameterSource.DEFAULT),
+            ) from exc
         _write_or_echo(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False),
                        output, input_path=input_path)
         return

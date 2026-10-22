@@ -381,3 +381,76 @@ def test_real_vision_attachment_adapter(tmp_path, monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def _aperio_non_ome_fixture(path):
+    """Minimal SVS recognized by tifffile, with a bounded uncompressed RGB raster."""
+    rgb = np.zeros((128, 256, 3), dtype=np.uint8)
+    rgb[:] = (210, 115, 64)
+    description = (
+        "Aperio Image Library v10.0.51 256x128 [0,0 256x128] (16x16) "
+        "JPEG/RGB Q=30|AppMag = 20|MPP = 0.5000"
+    )
+    tifffile.imwrite(path, rgb, photometric="rgb", tile=(16, 16),
+                     metadata=None, description=description)
+    with tifffile.TiffFile(path) as tif:
+        assert tif.is_svs and not tif.is_ome
+    return rgb
+
+
+@pytest.mark.parametrize("mode", ["--visual", "--geojson"])
+def test_missing_visual_type_explains_required_vendor_profile(tmp_path, vision_double, mode):
+    path = tmp_path / "scan.svs"
+    _aperio_non_ome_fixture(path)
+    report = tmp_path / "existing.json"
+    report.write_text("unchanged")
+    result = runner().invoke(main, [
+        "inspect", str(path), "-i", mode, "-q", "What is the handwritten note?",
+        "--output", str(report),
+    ])
+    message = result.stdout + result.stderr
+    assert result.exit_code != 0
+    assert "default --type ome_tiff" in message
+    assert "--type svs" in message
+    assert "image was not sent" in message
+    assert "Preparing bounded preview" in message
+    assert report.read_text() == "unchanged"
+    assert not vision_double["calls"]
+
+
+def test_explicit_visual_type_remains_authoritative(tmp_path, vision_double):
+    path = tmp_path / "scan.svs"
+    pixels = _aperio_non_ome_fixture(path)
+    command = ["inspect", str(path), "-i", "--visual", "-q", "Read the note"]
+    wrong = runner().invoke(main, [*command, "--type", "ome_tiff"])
+    assert wrong.exit_code != 0
+    assert "recognized OME metadata" in (wrong.stdout + wrong.stderr)
+    assert "If this is an Aperio" not in (wrong.stdout + wrong.stderr)
+    assert not vision_double["calls"]
+    vision_double["response"] = visual_answer_response()
+    correct = runner().invoke(main, [*command, "--type", "svs", "--preview-size", "256"])
+    assert correct.exit_code == 0, correct.output
+    assert len(vision_double["calls"]) == 1
+    np.testing.assert_array_equal(vision_double["pixels"][-1], pixels)
+
+
+def test_visual_type_hint_is_only_a_filename_clue(tmp_path, vision_double):
+    # A .svs extension is not a reader selector. The same default still fails.
+    path = tmp_path / "not-an-aperio.svs"
+    tifffile.imwrite(path, np.zeros((128, 256, 3), dtype=np.uint8), photometric="rgb")
+    result = runner().invoke(main, [
+        "inspect", str(path), "-i", "--visual", "-q", "What is this?",
+    ])
+    assert result.exit_code != 0
+    assert "If this is an Aperio SVS image" in (result.stdout + result.stderr)
+    assert not vision_double["calls"]
+
+
+def test_generic_visual_error_is_not_misdiagnosed_as_missing_ome(tmp_path, vision_double):
+    path = tmp_path / "missing.svs"
+    result = runner().invoke(main, [
+        "inspect", str(path), "-i", "--visual", "-q", "What is shown?",
+    ])
+    assert result.exit_code != 0
+    assert "default --type ome_tiff" not in (result.stdout + result.stderr)
+    assert not vision_double["calls"]
