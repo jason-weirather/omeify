@@ -224,6 +224,7 @@ Omeify separates inspecting, writing, and changing pixel values:
 |---|---|
 | `omeify inspect` | Show TIFF or OME-Zarr structure and metadata without reading image pixels. |
 | `omeify convert` | Write normalized OME-TIFF or OME-Zarr, preserving pixel type and scale and rebuilding pyramids. |
+| `omeify concat` | Assemble selected, named OME-TIFF series in argument order, including different pixel types and spatial resolutions. |
 | `omeify crop` | Export rectangles into an OME-TIFF or ordered OME-Zarr image collection, optionally split with `--shatter`. |
 | `omeify mutate` | Intentionally change floating-point pixels or float32 precision, to either output format, with a report. |
 | `omeify version` | Show the version; `--json` also shows image-I/O dependency versions. |
@@ -326,6 +327,45 @@ neutral format conversion or a cohort-normalization method. Float32 mantissa
 trimming is a separate explicit option. See the [command-line reference][commands]
 for the mapping rules, precision controls, channel renaming, and every option;
 `omeify COMMAND --help` provides the installed command's help.
+
+### Combine existing OME-TIFF series
+
+`concat` assembles selected complete **OME Images**, not channels, mosaics or
+registered scenes. These two repeatable flags may be **interleaved freely**;
+their exact occurrence order sets the output series order:
+
+```bash
+omeify concat \
+  --series slide.cells.ome.tiff 0 \
+  --named-series "Nuclei" slide.cells.ome.tiff 1 \
+  --series slide.regions.ome.tiff 2 \
+  --named-series "Embedding painting" slide.regions.ome.tiff 3 \
+  -o slide.all.ome.tiff --no-overwrite
+```
+
+Each selection uses the zero-based TIFF series number. `--series PATH INDEX`
+retains the source Image name; if it lacks one, Omeify uses
+`Series <index>`. `--named-series NAME PATH INDEX` replaces only the
+selected Image name. Names must be unique in the output, and duplicate names
+fail with a suggestion to rename explicitly. The same source file may be used
+more than once.
+
+All level-zero pixels are rewritten **losslessly by default (LZW, including RGB)**
+without numeric conversion. Omeify retains dtypes, channel names, spatial
+calibration/origins, existing significant-bit declarations, and RGB ICC
+profiles. Every selected image remains a separate OME series, so a native
+nuclear label and a coarser float32 embedding field need not share a pixel grid.
+The operation does not assert that the images are registered or biologically
+related.
+
+Pyramids are **reconstructed**, not copied bit-for-bit. Omeify uses a known
+source sampling policy where recoverable through its geometry annotation;
+otherwise, scalar integer series use nearest-neighbor sampling to avoid
+averaging potential label IDs and other images use mean. If a source's categorical
+semantics were not declared, `concat` does not invent such a declaration.
+Inputs are never overwritten, including through symlink/hard-link aliases;
+output is verified before atomic publication. `--output-json` saves the
+normal multi-series writer report. No model or additional dependency is needed.
 
 ### Crop regions, or ask for their coordinates
 

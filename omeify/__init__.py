@@ -1,5 +1,6 @@
 from ._version import __version__, get_version_info
 from .conversion import convert
+from .concatenation import ConcatSeries, concat
 from .cropping import crop
 from .inspection import TiffInspector
 from .io import (
@@ -61,6 +62,8 @@ __all__ = [
     "TiffInspector",
     "__version__",
     "convert",
+    "ConcatSeries",
+    "concat",
     "crop",
     "get_version_info",
     "mutate",

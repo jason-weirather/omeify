@@ -10,6 +10,7 @@ import click
 from omeify import __version__, get_version_info
 from omeify.cli_logging import configure_logging
 from omeify.cli_reporting import emit_operation_report, preflight_report
+from omeify.concatenation import ConcatSeries, concat
 from omeify.conversion import RenameChannelsBy, convert
 from omeify.cropping import crop, load_crop_document
 from omeify.dtype_mutation import (
@@ -210,7 +211,114 @@ def _pixel_size_override(
 
 @click.group(cls=_SubcommandOnlyGroup, context_settings=_CONTEXT_SETTINGS)
 def main() -> None:
-    """Convert, crop, mutate, and inspect calibrated OME-TIFF and OME-Zarr images."""
+    """Convert, concatenate, crop, mutate, and inspect calibrated OME images."""
+
+
+class _ConcatCommand(click.Command):
+    """Retain option occurrence order before Click groups repeatable values.
+
+    Click's parser reports each recognized option in its original encounter order,
+    but a ``multiple=True`` callback receives a grouped tuple. Parse the tiny
+    argument list once without callbacks to recover that order, then delegate all
+    conversion, validation and error handling to the normal Click path.
+    """
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        _, _, order = self.make_parser(ctx).parse_args(args=list(args))
+        ctx.meta["_omeify_concat_order"] = tuple(
+            option.name for option in order
+            if option.name in {"source_series", "named_source_series"}
+        )
+        return super().parse_args(ctx, args)
+
+
+@main.command("concat", cls=_ConcatCommand, context_settings=_CONTEXT_SETTINGS)
+@click.option(
+    "--series", "source_series", multiple=True,
+    type=(click.Path(file_okay=True, dir_okay=False, path_type=Path),
+          click.IntRange(min=0)),
+    metavar="OME_PATH INDEX",
+    help="Append the selected source OME-TIFF series, retaining its name. Repeatable.",
+)
+@click.option(
+    "--named-series", "named_source_series", multiple=True,
+    type=(str, click.Path(file_okay=True, dir_okay=False, path_type=Path),
+          click.IntRange(min=0)),
+    metavar="NAME OME_PATH INDEX",
+    help="Append a source OME-TIFF series using NAME in the output. Repeatable.",
+)
+@click.option(
+    "-o", "--output", "output_path", required=True,
+    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    help="Exact destination multi-series OME-TIFF filename.",
+)
+@click.option(
+    "--compression",
+    type=click.Choice(["LZW", "Deflate", "ZSTD", "Uncompressed"], case_sensitive=False),
+    default="LZW", show_default=True,
+    help="Lossless for all series, including RGB; base pixels are preserved.",
+)
+@click.option("--tile-size", type=click.IntRange(min=16), default=None,
+              help="Optional square TIFF tile edge; default 512 RGB / 1024 scalar.")
+@click.option("--pyramid-levels", type=click.IntRange(min=0), default=None,
+              help="Output reduced levels; rebuilt, not copied from the inputs.")
+@click.option("--cache-directory", type=click.Path(file_okay=False, path_type=Path),
+              default=None, help="Temporary pyramid scratch directory.")
+@click.option("--workers", type=click.IntRange(min=1), default=None,
+              help="Maximum TIFF encoding workers.")
+@click.option("--output-json", type=click.Path(dir_okay=False, path_type=Path),
+              help="Write the construction report to FILE, or - for JSON-only stdout.")
+@click.option("--overwrite/--no-overwrite", default=True, show_default=True)
+@click.option("-v", "--verbose", count=True,
+              help="-v: compact progress; -vv: diagnostic logs; -vvv: full report.")
+def concat_command(
+    source_series: tuple[tuple[Path, int], ...],
+    named_source_series: tuple[tuple[str, Path, int], ...],
+    output_path: Path, compression: str, tile_size: int | None,
+    pyramid_levels: int | None, cache_directory: Path | None,
+    workers: int | None, output_json: Path | None, overwrite: bool, verbose: int,
+) -> None:
+    """Concatenate selected OME-TIFF Images in the exact order supplied.
+
+    --series OME_PATH INDEX and --named-series NAME OME_PATH INDEX can be freely
+    mixed. INDEX is zero-based. Each occurrence contributes one independent OME
+    image, not a channel, mosaic or registered scene. Original image dimensions,
+    physical calibration and base values are retained; pyramids are rebuilt.
+    """
+    configure_logging(verbose)
+    ctx = click.get_current_context()
+    plain, named = iter(source_series), iter(named_source_series)
+    selections = []
+    for option in ctx.meta.get("_omeify_concat_order", ()):
+        if option == "source_series":
+            path, index = next(plain)
+            selections.append(ConcatSeries(path, index))
+        else:
+            name, path, index = next(named)
+            if not name.strip():
+                raise click.UsageError("--named-series NAME must not be empty")
+            selections.append(ConcatSeries(path, index, name))
+    if len(selections) != len(source_series) + len(named_source_series):
+        raise click.UsageError("Unable to determine source option order")
+    if not selections:
+        raise click.UsageError("Provide at least one --series or --named-series")
+    protected = [entry.path for entry in selections]
+    try:
+        check_output_path(output_path, protected=protected, overwrite=overwrite)
+        preflight_report(output_json, protected=[*protected, output_path], overwrite=overwrite)
+        report = concat(
+            selections, output_path, compression=compression, tile_size=tile_size,
+            pyramid_levels=pyramid_levels, max_workers=workers,
+            cache_directory=cache_directory, overwrite=overwrite,
+        )
+    except Exception as exc:
+        if verbose >= 2:
+            raise
+        raise click.ClickException(escape_terminal(str(exc))) from exc
+    emit_operation_report(
+        report, output_path=output_path, destination=output_json, verbose=verbose,
+        overwrite=overwrite, protected=[*protected, output_path],
+    )
 
 
 @main.command("convert", context_settings=_CONTEXT_SETTINGS)

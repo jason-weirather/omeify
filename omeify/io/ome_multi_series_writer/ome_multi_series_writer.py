@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from omeify.io._writer import (
@@ -95,21 +96,22 @@ class OMEMultiSeriesWriter:
         for image in images:
             protect_source_paths(image._source, self._settings.output_path)
         provenance_json, normalized_provenance = canonical_provenance(provenance)
-        prepared = tuple(
-            prepare_image(
-                image._source,
-                image._source.output_spec(),
-                name=image.name,
-                downsample=image.downsample,
+        prepared = []
+        for image in images:
+            spec = image._source.output_spec()
+            if image.significant_bits is not None:
+                # Already-quantized input may declare fewer meaningful bits.
+                # A concat operation must not repeat a lossy precision transform.
+                spec = replace(spec, significant_bits_override=image.significant_bits)
+            prepared.append(prepare_image(
+                image._source, spec, name=image.name, downsample=image.downsample,
                 compression_name=(
                     self._settings.compression_name
                     if image.compression is None else image.compression
                 ),
-                settings=self._settings,
-                lossy_policy="non-label",
-            )
-            for image in images
-        )
+                settings=self._settings, lossy_policy="non-label",
+            ))
+        prepared = tuple(prepared)
         xml_info = generate_multi_series_ome_xml(
             tuple(
                 (_required_name(item), item.spec, item.level_shapes)

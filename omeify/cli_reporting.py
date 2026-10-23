@@ -32,6 +32,8 @@ def completion_summary(report: Mapping[str, Any], output_path: Path) -> str:
         count = sum(len(item["regions"]) for item in outputs)
         return f"Wrote {count} region(s) in {len(outputs)} file(s) | sampled verification passed"
     fields = [f"Wrote {output_path}"]
+    if "series" in report and "series_count" in report.get("output_file", {}):
+        fields.append(f"{report['output_file']['series_count']} series")
     output = report.get("output_file", {})
     if "dtype" in output and "axes" in output:
         fields.append(f"{output['dtype']} {output['axes']}")

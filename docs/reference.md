@@ -318,6 +318,7 @@ Omeify uses explicit subcommands:
 
 ```text
 omeify convert   Normalize a supported source into OME-TIFF or OME-Zarr
+omeify concat    Combine explicitly selected OME-TIFF Images into one OME-TIFF
 omeify mutate    Create an explicitly pixel-mutated OME-TIFF or OME-Zarr
 omeify crop      Export rectangles into an ordered OME image collection
 omeify inspect   Inspect TIFF or OME-Zarr structure and metadata
@@ -488,6 +489,52 @@ TIFF JPEG options, cache directories and UUID flags are not Zarr settings.
 Explicit incompatible options fail rather than silently being ignored. Zarr
 writing requires a new local destination regardless of general TIFF overwrite
 permission. [Zarr examples](ome_zarr.md#convert-mutate-crop-and-inspect).
+
+### `omeify concat`
+
+Concatenate any ordered sequence of complete OME-TIFF Images using zero-based
+input series indices. These options are repeatable and can alternate without
+losing command-line ordering:
+
+```bash
+omeify concat \
+  --series sample.tissue.ome.tif 0 \
+  --named-series "Nuclear segmentation" sample.cells.ome.tif 1 \
+  --series sample.regions.ome.tif 2 \
+  --named-series "Appearance" sample.regions.ome.tif 3 \
+  -o sample.combined.ome.tif --no-overwrite
+```
+
+`--series PATH INDEX` retains the existing source OME Image name. An unnamed
+series receives `Series <index>`; names must be unique, and
+`--named-series NAME PATH INDEX` sets an explicit output name. A series may be
+selected multiple times, but each output name must still be distinct. The
+command requires at least one selection and one exact `-o` destination path.
+
+All inputs must be supported OME-TIFF Images with X/Y calibration. Different
+physical scales, shapes, channel counts, origins and dtypes are allowed. Series
+are not rescaled, aligned, registered, stitched, merged into channels, or
+reinterpreted as biological objects. Lossless TIFF compression is mandatory for
+all series, **including RGB**. `LZW` is the default; `Deflate`, `ZSTD`, and
+`Uncompressed` are optional. Previously JPEG-compressed inputs preserve their
+*decoded* samples, not the original JPEG bytes. Float32 values and the source
+OME `SignificantBits` declaration are preserved without additional rounding.
+
+Source pyramid SubIFDs cannot simply be appended as file bytes while generating
+one new valid OME Image/TiffData mapping. Omeify rebuilds them with its existing
+bounded, verified writer. It retains a sampling policy when the source's linked
+Omeify geometry record identifies it. For unannotated input, single-channel
+integer images use nearest-neighbor pyramids to avoid synthesizing potential
+label IDs; other images use mean. No categorical or stain semantics are inferred
+from names. The output's pixel-center origins, when declared, survive without
+assuming all series share one source coordinate frame.
+
+The destination is checked against all input paths, symlinks and hard links;
+`--no-overwrite` refuses preexisting outputs, while default TIFF replacement
+is atomic after validation. `--cache-directory` controls temporary pyramid
+storage, `--tile-size`/`--pyramid-levels`/`--workers` customize construction,
+`--output-json FILE|-` exports the existing multi-series report, and `-v`
+controls progress. There is no separate runtime or new dependency.
 
 ### `omeify mutate`
 
@@ -967,6 +1014,25 @@ report = mutate(
 
 print(report["float_precision_mutation"])
 ```
+
+### Ordered OME-TIFF concatenation
+
+```python
+from omeify import ConcatSeries, concat
+
+report = concat([
+    ConcatSeries("slide.cells.ome.tif", 1),
+    ConcatSeries("slide.regions.ome.tif", 2, "Appearance field"),
+    ConcatSeries("slide.regions.ome.tif", 3),
+], "slide.combined.ome.tif", overwrite=False)
+```
+
+The shared `OMEMultiSeriesWriter` reads each selected image regionally; the
+sources stay open until the verified write completes. `OMEImageSeries` also
+accepts `significant_bits=N` for metadata-only retention when an image's
+actual float32 samples already have the stated precision. This does **not**
+quantize pixels. `concat` copies the selected input OME `SignificantBits` value
+without automatically applying a new mantissa transform.
 
 ### Metadata intelligence
 

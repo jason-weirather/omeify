@@ -23,7 +23,7 @@ See [the Zarr contract](ome_zarr.md) for publication, version, and capability li
 
 ## CLI presentation
 
-These rules apply equally to `convert`, `mutate`, and `crop`:
+These rules apply equally to `convert`, `concat`, `mutate`, and `crop`:
 
 | Selection | Output |
 |---|---|
@@ -64,7 +64,7 @@ References resolve against packaged resources, never by fetching their `$id` URL
 | Schema resource | Product / current identifier |
 |---|---|
 | `write_report.schema.json` | Single image or temporary writer: `omeify.write/1` |
-| `multi_series_report.schema.json` | Named heterogeneous images: `omeify.multi_series/1` |
+| `multi_series_report.schema.json` | Named heterogeneous images, including `concat`: `omeify.multi_series/1` |
 | `conversion_report.schema.json` | Conversion: `omeify.convert/2` |
 | `mutation_report.schema.json` | Integer or float32 precision mutation: `omeify.mutate/2` |
 | `crop_report.schema.json` | Crop export, including nested writer reports: `omeify.crop/4` |

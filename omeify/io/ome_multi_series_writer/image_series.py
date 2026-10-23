@@ -14,6 +14,7 @@ class OMEImageSeries:
 
     Keep the image open until the write completes. No pixels are read here; this
     entry pins the current image session, not a future reopening of its source.
+    significant_bits is a metadata declaration only, not a precision transform.
     """
 
     name: str
@@ -21,6 +22,7 @@ class OMEImageSeries:
     level: int = 0
     compression: str | None = None
     downsample: DownsampleMethod | None = None
+    significant_bits: int | None = None
     _source: ImagePlaneSource = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
