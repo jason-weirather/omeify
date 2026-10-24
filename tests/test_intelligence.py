@@ -369,7 +369,8 @@ def test_plain_inspection_rejects_unrequested_intelligence_on_other_commands():
     for command in ("convert", "mutate", "version"):
         result = CliRunner().invoke(main, [command, "-i"])
         assert result.exit_code != 0
-        assert "No such option: -i" in result.output
+        # Click may quote the unknown flag instead of using colon punctuation.
+        assert "No such option" in result.output and "-i" in result.output
 
 
 def test_large_xml_late_identifier_and_input_budget(tmp_path):

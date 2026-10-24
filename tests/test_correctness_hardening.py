@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import errno
 import json
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -25,6 +26,7 @@ from omeify.io._writer.single_verification import verify_single_output
 from plane_fixture import ArrayPlanes
 from omeify.io.spec import OMEImageSpec
 from omeify.io.image_planes import ImagePlaneSource
+from omeify.io.rgb_color import SRGB_ICC
 from omeify.io.tiff import TiffPlaneReader
 from omeify.utils.generate_ome_xml import generate_multi_series_ome_xml, generate_ome_xml
 from omeify.utils.miti_header_validator import validate_miti_ome_tiff_header
@@ -301,9 +303,11 @@ def test_third_party_levels_are_not_assumed_to_be_twofold(tmp_path, calibrated, 
         writer.write(base[::3, ::3], subfiletype=1, tile=(16, 16), metadata=None,
                      resolution=(10000/1.5, 10000/1.8) if calibrated else (1, 1),
                      resolutionunit=3 if calibrated else 1)
-    with OMETiffReader(path) as reader:
-        actual = reader.levels[1].pixel_size
-        assert actual == (PixelSize(1.5, 1.8, "µm") if calibrated else None)
+    # Missing third-party pyramid calibration is DEBUG, not a routine warning.
+    with caplog.at_level("DEBUG", logger="omeify.io._tiff_sources.base"):
+        with OMETiffReader(path) as reader:
+            actual = reader.levels[1].pixel_size
+            assert actual == (PixelSize(1.5, 1.8, "µm") if calibrated else None)
     if not calibrated:
         assert "not be inferred" in caplog.text
 
@@ -581,12 +585,19 @@ def test_shared_multi_series_verification_and_reader_contract(tmp_path, lossy_pr
         ("Labels", labels, "label", ("Objects",), "Uncompressed"),
         ("RGB preview", rgb, "rgb", ("RGB",), "JPEG" if lossy_preview else "Uncompressed"),
     ]
-    images = tuple(prepare_image(
-        ArrayPlanes(data, _spec(data, image_type=kind, names=names)),
-        _spec(data, image_type=kind, names=names),
-        name=name, downsample=None, compression_name=compression,
-        settings=writer._settings, lossy_policy="non-label",
-    ) for name, data, kind, names, compression in records)
+    def plan_record(name, data, kind, names, compression):
+        spec = _spec(data, image_type=kind, names=names)
+        # This private-engine test supplies already-sRGB pixels. Public writers
+        # normally establish this profile with canonical_rgb() before planning.
+        if kind == "rgb":
+            spec = replace(spec, icc_profile=SRGB_ICC)
+        return prepare_image(
+            ArrayPlanes(data, spec), spec,
+            name=name, downsample=None, compression_name=compression,
+            settings=writer._settings, lossy_policy="non-label",
+        )
+
+    images = tuple(plan_record(*record) for record in records)
     xml = generate_multi_series_ome_xml(tuple(
         (item.name, item.spec, item.level_shapes) for item in images
     ))["xml_string"]

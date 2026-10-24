@@ -427,7 +427,10 @@ def test_mutation_cli_emits_structured_per_channel_report(tmp_path: Path) -> Non
     )
 
     assert result.exit_code == 0, result.output
-    assert result.output == ""
+    # Explicit --output-json keeps the detailed report in the file; routine CLI
+    # output is now one short completion line rather than silent success.
+    assert result.output.startswith("Wrote ")
+    assert "sampled verification passed" in result.output
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["operation"] == "dtype"
     assert report["dtype_mutation"]["protocol_version"] == "1.0"
@@ -487,7 +490,8 @@ def test_mutation_python_api_supports_convert_channel_rename_semantics(
         pyramid_levels=0,
     )
     assert index_report["image"]["channel_names"] == ["First", "B", "Third"]
-    assert index_report["options"]["rename_channels"] == {0: "First", 2: "Third"}
+    # JSON-compatible operation reports serialize rename mapping keys as strings.
+    assert index_report["options"]["rename_channels"] == {"0": "First", "2": "Third"}
     assert index_report["options"]["rename_channels_by"] == "index"
 
     with pytest.raises(ValueError, match="explicitly set"):

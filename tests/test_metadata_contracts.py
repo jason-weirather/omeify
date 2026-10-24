@@ -252,11 +252,18 @@ def test_malformed_source_name_is_diagnostic_not_blindly_stringified(tmp_path):
     validate_report(report, "zarr_inspection.schema.json")
 
 
-@pytest.mark.parametrize("url", ["s3://bucket/path", "https://name:secret@example.org/store",
+@pytest.mark.parametrize("url", ["https://name:secret@example.org/store",
                                   "https://example.org/store?token=secret"])
 def test_unsupported_authentication_is_not_silently_rewritten(url):
     with pytest.raises(ValueError):
         location(url)
+
+
+def test_s3_store_root_is_supported_without_embedding_credentials():
+    # Native S3 input is supported in 0.22, unlike authenticated URL strings.
+    assert location("s3://bucket/path/") == "s3://bucket/path"
+    with pytest.raises(ValueError):
+        location("s3://bucket/../other")
 
 
 def test_schema_inventory_is_documented():

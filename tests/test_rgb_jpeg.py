@@ -30,6 +30,7 @@ from omeify.io._writer.model import PreparedImage
 from omeify.io._writer.verification import verify_page_layout, verify_storage
 from omeify.io._writer.writing import common_write_options
 from omeify.io.image_planes import ImagePlaneSource
+from omeify.io.rgb_color import SRGB_ICC
 
 _SAMPLING = {"444": (1, 1), "422": (2, 1), "420": (2, 2), "411": (4, 1)}
 _SIZE = PixelSize(0.5048, 0.5048, "µm")
@@ -119,7 +120,7 @@ def test_storage_checks_subifd_color_policy_not_only_base(image_factory) -> None
                              (image.shape, (97, 161, 3)), 64)
     sub = SimpleNamespace(is_tiled=True, tilewidth=64, tilelength=64,
                           compression=7, samplesperpixel=3, photometric=6,
-                          planarconfig=1, subfiletype=1,
+                          planarconfig=1, subfiletype=1, iccprofile=SRGB_ICC,
                           tags={"YCbCrSubSampling": SimpleNamespace(value=(1, 1))})
     sub.aspage = lambda: sub
     base = SimpleNamespace(**{k: v for k, v in vars(sub).items() if k != "aspage"})

@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import json
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,6 +26,7 @@ from omeify.cli import main
 from omeify.io._writer.preparation import prepare_image
 from omeify.io._writer.verification import verify_storage
 from omeify.io.image_planes import ImagePlaneSource
+from omeify.io.rgb_color import SRGB_ICC
 
 _SIZE = PixelSize(0.5, 0.5, "µm")
 
@@ -142,6 +144,7 @@ def test_verification_enforces_per_image_tile_size(image_factory, tmp_path, wron
         value = SimpleNamespace(
             is_tiled=True, tilewidth=512, tilelength=512, compression=7,
             samplesperpixel=3, photometric=6, planarconfig=1, subfiletype=int(reduced),
+            iccprofile=SRGB_ICC,
             tags={"YCbCrSubSampling": SimpleNamespace(value=(2, 1))},
         )
         value.aspage = lambda: value
@@ -310,8 +313,13 @@ def test_mixed_tile_sizes_reach_real_staging_and_final_ifds(image_factory, tmp_p
     prepared = []
     for index, image in enumerate(images):
         source = ImagePlaneSource(image)
+        spec = source.output_spec()
+        # The private engine receives RGB values that are already sRGB here.
+        # Public writers normally add this canonical profile at their boundary.
+        if spec.is_rgb:
+            spec = replace(spec, icc_profile=SRGB_ICC)
         prepared.append(prepare_image(
-            source, source.output_spec(), name=f"Image {index}", downsample=None,
+            source, spec, name=f"Image {index}", downsample=None,
             compression_name=settings.compression_name, settings=settings, lossy_policy="non-label",
         ))
     xml = generate_multi_series_ome_xml(tuple((p.name, p.spec, p.level_shapes) for p in prepared))

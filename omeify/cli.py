@@ -209,9 +209,14 @@ def _pixel_size_override(
     return PixelSize(x, y, unit or "µm")
 
 
-@click.group(cls=_SubcommandOnlyGroup, context_settings=_CONTEXT_SETTINGS)
-def main() -> None:
+@click.group(
+    cls=_SubcommandOnlyGroup, context_settings=_CONTEXT_SETTINGS, invoke_without_command=True,
+)
+@click.pass_context
+def main(ctx: click.Context) -> None:
     """Convert, concatenate, crop, mutate, and inspect calibrated OME images."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
 class _ConcatCommand(click.Command):
@@ -256,7 +261,7 @@ class _ConcatCommand(click.Command):
     "--compression",
     type=click.Choice(["LZW", "Deflate", "ZSTD", "Uncompressed"], case_sensitive=False),
     default="LZW", show_default=True,
-    help="Lossless for all series, including RGB; base pixels are preserved.",
+    help="Lossless encoding for all series; non-sRGB RGB pixels are color-converted.",
 )
 @click.option("--tile-size", type=click.IntRange(min=16), default=None,
               help="Optional square TIFF tile edge; default 512 RGB / 1024 scalar.")
@@ -283,7 +288,8 @@ def concat_command(
     --series OME_PATH INDEX and --named-series NAME OME_PATH INDEX can be freely
     mixed. INDEX is zero-based. Each occurrence contributes one independent OME
     image, not a channel, mosaic or registered scene. Original image dimensions,
-    physical calibration and base values are retained; pyramids are rebuilt.
+    physical calibration and scalar values are retained; RGB may be mapped to sRGB.
+    Pyramids are rebuilt.
     """
     configure_logging(verbose)
     ctx = click.get_current_context()

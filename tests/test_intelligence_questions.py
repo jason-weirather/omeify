@@ -481,4 +481,5 @@ def test_question_cannot_write_report_over_image(image_path, model_double, runne
 def test_question_is_only_an_inspect_option(command, runner):
     result = runner.invoke(main, [command, "--question", "Channels?"])
     assert result.exit_code == 2
-    assert "No such option: --question" in result.stderr
+    # Click versions vary in quotation and suggestion formatting.
+    assert "No such option" in result.stderr and "--question" in result.stderr
