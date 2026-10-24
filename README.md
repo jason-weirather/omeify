@@ -8,6 +8,15 @@ supported vendor TIFFs, OME-TIFF, and OME-Zarr, and writes calibrated, pyramidal
 **OME-TIFF** or **OME-Zarr** with consistent pixel interpretation, controlled
 metadata, and verified construction. OME-TIFF is the default output.
 
+Microscopy metadata can carry loose text in vendor descriptions, scanner fields,
+file paths, and annotations, sometimes including patient or specimen identifiers.
+Copying it uncritically can propagate that information into later derivatives.
+Omeify **rebuilds output metadata from a documented, constrained set of fields**
+instead of forwarding arbitrary source descriptions alongside the pixels.
+**Controlling this propagation is an essential step in deidentification pipelines**,
+but not deidentification on its own: retained channel and ROI names, deliberate
+provenance, opaque ICC profiles, and image pixels still require independent review.
+
 The goal is a dependable home base for images from different instruments and
 workflows. Omeify produces documented profiles of open formats, not private
 Omeify files: an OME-aware application such as **QuPath** can use a compatible
@@ -243,7 +252,9 @@ compatibility boundaries, and the output-version rationale.
 Microscopy files may contain names, paths, specimen identifiers, vendor XML,
 and other acquisition metadata that do not belong in every derived image.
 Omeify builds **new OME-XML or NGFF JSON** from a controlled set of fields instead
-of copying those descriptions wholesale.
+of copying those descriptions wholesale. This limits the paths through which
+unreviewed free text can spread into downstream image products, while keeping
+metadata needed to interpret the pixels.
 
 Its OME-TIFF minimum-information policy draws on:
 
