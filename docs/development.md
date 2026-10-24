@@ -108,7 +108,7 @@ python -m pytest -q tests/test_metadata_retention.py tests/test_metadata_contrac
 ```
 
 Synthetic sentinels exercise forbidden vendor/NGFF metadata versus deliberately
-retained channel/ROI names, opaque ICC bytes and explicit provenance. Tests cover
+retained channel/ROI names, canonical ICC replacement and explicit provenance. Tests cover
 all three NGFF input versions, both output formats, conversion/mutation, crop
 metadata, local schema references, and collection inspection without pixel reads.
 Stored collection corruption must fail before publication. Missing required TIFF

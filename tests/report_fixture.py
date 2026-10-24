@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from omeify import OMEImageSeries
+from omeify.io.rgb_color import SRGB_SHA256
 from omeify.reports import complete_report
 from omeify.utils.generate_ome_xml import OMEIFY_PROVENANCE_NAMESPACE
 
@@ -32,6 +33,12 @@ def multi_report_fixture(
             "compression": "Uncompressed", "tile_size": 16,
             "downsample_method": "nearest" if image.image_type == "label" else "mean",
             "level_shapes": [list(image.shape)], "subresolution_count": 0,
+            "color_management": (
+                {"output_space": "sRGB", "output_profile_sha256": SRGB_SHA256,
+                 "source_profile": "assumed_srgb", "source_profile_present": False,
+                 "pixels_transformed": False, "rendering_intent": None}
+                if image.image_type == "rgb" else None
+            ),
         })
     planes = sum(item["logical_channel_count"] for item in series)
     verification = dict.fromkeys((

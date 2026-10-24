@@ -1,4 +1,4 @@
-"""Assemble selected OME-TIFF images without changing their base pixels.
+"""Assemble selected OME-TIFF images into a verified OME-TIFF collection.
 
 Concatenation is an ordered image-collection operation, not planar channel
 concatenation, registration, or binary TIFF IFD splicing. Each source stays open
@@ -89,12 +89,13 @@ def concat(
     cache_directory: str | Path | None = None,
     overwrite: bool = True,
 ) -> dict[str, object]:
-    """Write an ordered, lossless-base-pixel collection of selected OME-TIFF series.
+    """Write an ordered collection using lossless TIFF compression.
 
     ``ConcatSeries(path, index)`` retains the source OME Image name when present;
     ``ConcatSeries(path, index, name)`` overrides it. Source files may repeat and
     have different shapes, dtypes, channel counts, resolutions, or origins. Pixels
-    are never registered, resampled, cast, or quantized at level zero. Pyramids
+    are never registered, spatially resampled, cast, or quantized at level zero.
+    Noncanonical RGB ICC profiles are mapped to sRGB before lossless encoding. Pyramids
     are reconstructed under the existing writer's bounded I/O/verification policy.
 
     Only lossless codecs are accepted; even RGB is lossless by default. An unnamed

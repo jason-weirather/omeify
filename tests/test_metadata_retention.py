@@ -232,17 +232,22 @@ def test_explicit_provenance_is_bounded_and_snapshotted():
         canonical_provenance({"schema": "omeify.crop_provenance/1", "patient": PRIVATE})
 
 
-def test_icc_is_an_explicit_opaque_retention_exception_not_a_privacy_check():
-    # This intentionally is NOT a valid profile. There is no implied ICC certification.
-    payload = b"EXPLICIT_OPAQUE_PROFILE_WITH_REVIEW_TEXT"
-    with RGBImage.from_array(np.zeros((16, 16, 3), dtype=np.uint8),
-                             pixel_size=SIZE, icc_profile=payload) as image:
-        assert ImagePlaneSource(image).output_spec().icc_profile == payload
-        attrs = output_attributes(image._metadata, image.levels, method="mean",
-                                  windows=[dict(min=0, max=255, start=0, end=255)] * 3)
+def test_icc_is_a_canonicalized_output_boundary():
     import base64
-    assert base64.b64decode(attrs["omeify"]["icc_profile_base64"]) == payload
-    assert profile_errors(attrs) == ()
+    from omeify.io.rgb_color import SRGB_ICC, canonical_rgb
+
+    with RGBImage.from_array(np.zeros((16, 16, 3), dtype=np.uint8),
+                             pixel_size=SIZE, icc_profile=b"bad source ICC") as image:
+        with pytest.raises(ValueError, match="source RGB ICC"):
+            with canonical_rgb(image):
+                pass
+    with RGBImage.from_array(np.zeros((16, 16, 3), dtype=np.uint8),
+                             pixel_size=SIZE) as image:
+        with canonical_rgb(image) as normalized:
+            attrs = output_attributes(normalized._metadata, normalized.levels, method="mean",
+                                      windows=[dict(min=0, max=255, start=0, end=255)] * 3)
+        assert base64.b64decode(attrs["omeify"]["icc_profile_base64"]) == SRGB_ICC
+        assert profile_errors(attrs) == ()
 
 
 @pytest.mark.parametrize("reader", [AkoyaMIFQPTiffReader, AkoyaFusionQPTiffReader])

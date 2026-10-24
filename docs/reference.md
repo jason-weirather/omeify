@@ -251,8 +251,8 @@ header-only relabel of YCbCr data. Source arrays and the logical OME channel
 model stay RGB. Mean pyramids are still built from uncompressed RGB samples,
 then every final base/SubIFD uses the same explicit encoder policy. Lossless
 RGB remains TIFF RGB; scalar JPEG previews remain grayscale; label images
-remain lossless. ICC profiles are preserved without an implicit color-management
-transform. Quality remains 90 by default, but the RGB encoding can change file
+remain lossless. RGB pixels are transformed to sRGB (when necessary) before JPEG encoding and
+pyramid construction. Quality remains 90 by default, but the RGB encoding can change file
 size and lossy quantization relative to the previous YCbCr encoding.
 
 Verification now requires the exact photometric for the selected encoding on
@@ -306,11 +306,15 @@ library may supply `software=` to identify the product generator. The command li
 does not expose this override. Changing the TIFF Software tag does not change the OME root
 `Creator`, which continues to identify the omeify version that generated the OME metadata.
 
-A source ICC profile is retained **opaquely** for RGB output when present; no
-implicit color transform, internal-text stripping, or ICC/privacy certification
-is performed. Its contents can include descriptive text and require review.
-This is a deliberate retention exception, not arbitrary vendor-description
-copying. See [metadata retention](reports.md#metadata-retention-and-sharing).
+Every RGB image written by Omeify contains one fixed, audited sRGB ICC profile,
+with exactly the same bytes in TIFF and Zarr. Source ICC profiles are used only
+to transform pixels to sRGB through LittleCMS/Pillow; their binary contents are
+never copied. An absent source profile is interpreted as sRGB without changing
+samples. Malformed or unsupported profiles fail before publication. A valid
+non-sRGB profile changes numerical RGB values even with lossless compression.
+Color management is regional, precedes pyramids, and is recorded in the image
+or series report. This controls ICC-derived metadata propagation; it does not
+inspect pixels for identifying text. See [metadata retention](reports.md#metadata-retention-and-sharing).
 
 ## Command-line reference
 
@@ -1295,7 +1299,7 @@ Before a temporary TIFF replaces the destination, omeify checks:
 - re-read OME physical pixel sizes against the intended X/Y calibration, with explicit units
 - re-read TIFF resolution/unit tags on every base and SubIFD plane against the intended calibration
   and the writer's known `2**level` sampling scale, including odd-sized pyramids
-- ICC profile preservation when supplied
+- exact canonical sRGB profile bytes in every RGB base plane and SubIFD
 - representative-pixel decoding at the base and every pyramid level, including lossy output
 - bitwise representative full-resolution values for lossless output, after byte-order normalization
 - representative lossless pyramid values against downsampling of the preceding decoded level
@@ -1330,7 +1334,9 @@ verification as distinct structured sections.
 This section describes TIFF writing and decoding. [Zarr storage and remote access](ome_zarr.md#remote-access)
 have separate cache, staging and no-replace publication rules.
 
-Full-resolution sources are read through bounded strips or tiles. Omeify does not materialize a
+Full-resolution sources are read through bounded strips or tiles. ICC transforms
+operate on RGB regions with a compiled LittleCMS transform, never by materializing
+a whole-slide RGB array. Omeify does not materialize a
 whole slide merely to convert or write it. Temporary reduced levels are uncompressed tiled BigTIFF
 files built one level at a time. Peak RAM is governed primarily by a small number of image tiles
 plus the largest source segment decoded by tifffile.

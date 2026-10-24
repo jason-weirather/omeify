@@ -352,8 +352,10 @@ output precision. TIFF additionally has scratch-location, Software-tag, UUID
 and overwrite options; Zarr has new-directory publication, not store replacement.
 Image axes, dtype, channel names and calibration belong to the Image. Writing an
 uncalibrated image fails; dtype conversion and intensity normalization are not
-implicit. RGB writing remains uint8; labels require lossless storage and nearest
-pyramids. Explicit float32 mantissa trimming remains available.
+implicit. RGB writing remains uint8 and maps source ICC colors to canonical sRGB before
+pyramid construction; no source ICC bytes are stored. Invalid source ICC data
+fails. A missing profile assumes sRGB without altering samples. Labels require
+lossless storage and nearest pyramids. Explicit float32 mantissa trimming remains available.
 
 For TIFF output, omitted compression and tile size resolve per image: RGB uses
 **lossy JPEG quality 90 / 4:2:2 and 512 × 512 tiles**, while scalar, multiplex,

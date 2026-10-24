@@ -61,4 +61,5 @@ def get_version_info() -> dict[str, Any]:
         "lxml": _distribution_version("lxml"),
         "jsonschema": _distribution_version("jsonschema"),
         "ome-schema": _distribution_version("ome-schema"),
+        "Pillow": _distribution_version("Pillow"),
     }

@@ -363,11 +363,11 @@ def output_attributes(metadata: ImageMetadata, levels: Sequence[ImageLevel], *,
     if kind in {"rgb", "label"}:
         extension: dict[str, Any] = {"image_type": kind}
         if kind == "rgb":
+            from ..rgb_color import check_canonical_icc
+
+            check_canonical_icc(metadata.icc_profile)
             extension["logical_channel_name"] = metadata.channel_names[0]
-            if metadata.icc_profile is not None:
-                if len(metadata.icc_profile) > 1024 * 1024:
-                    raise ValueError("ICC profile exceeds 1 MiB")
-                extension["icc_profile_base64"] = base64.b64encode(metadata.icc_profile).decode("ascii")
+            extension["icc_profile_base64"] = base64.b64encode(metadata.icc_profile).decode("ascii")
         else:
             extension.update(background_label=metadata.background_label,
                              channel_name=metadata.channel_names[0])
@@ -401,12 +401,16 @@ def profile_errors(attributes: Mapping[str, Any]) -> tuple[str, ...]:
     extension = attributes.get("omeify", {})
     if extension.get("image_type") == "label" and extension["channel_name"] != channels[0]["label"]:
         result.append("omeify/channel_name: must agree with the stored label channel")
+    if extension.get("image_type") == "rgb" and "icc_profile_base64" not in extension:
+        result.append("omeify/icc_profile_base64: canonical sRGB profile is required")
     if "icc_profile_base64" in extension:
         try:
             profile = base64.b64decode(extension["icc_profile_base64"], validate=True)
         except ValueError:
             result.append("omeify/icc_profile_base64: invalid base64 encoding")
         else:
-            if len(profile) > 1024 * 1024:
-                result.append("omeify/icc_profile_base64: ICC profile exceeds 1 MiB")
+            from ..rgb_color import SRGB_ICC
+
+            if profile != SRGB_ICC:
+                result.append("omeify/icc_profile_base64: not the canonical sRGB profile")
     return tuple(result)

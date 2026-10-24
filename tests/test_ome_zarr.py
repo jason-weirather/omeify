@@ -122,11 +122,13 @@ def test_float_payloads_and_signed_zero(tmp_path, dtype):
 
 def test_rgb_and_labels_have_explicit_meaning(tmp_path):
     rgb = (np.arange(33*47*3) % 255).astype("uint8").reshape(33,47,3)
-    with RGBImage.from_array(rgb, pixel_size=PixelSize(.5,.5,"µm"), icc_profile=b"test-icc") as im:
+    from omeify.io.rgb_color import SRGB_ICC
+
+    with RGBImage.from_array(rgb, pixel_size=PixelSize(.5,.5,"µm")) as im:
         OMEZarrWriter(tmp_path / "rgb", tile_size=16).write(im)
     with OMEZarrReader(tmp_path / "rgb") as im:
         assert im.image_type == "rgb" and im.channel_count == 1
-        assert im._metadata.icc_profile == b"test-icc"
+        assert im._metadata.icc_profile == SRGB_ICC
         np.testing.assert_array_equal(im.asarray(), rgb)
     for dtype, background in [("int32", -1), ("uint32", 0)]:
         data = np.full((33,47), background, dtype=dtype)

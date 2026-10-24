@@ -148,8 +148,8 @@ def convert(
         effective_tile_size = (resolve_tile_size(reader.image_type, tile_size)
                                if output_format == "ome_tiff" else 512 if tile_size is None else tile_size)
         LOGGER.info(
-            "Convert fidelity boundary: source samples enter the writer with dtype %s and "
-            "without an intensity rescale or explicit numeric cast",
+            "Convert fidelity boundary: source samples retain dtype %s and intensity scale; "
+            "RGB output is color-managed to sRGB before compression",
             reader.dtype,
         )
         if effective_compression.strip().lower() in {"jpeg", "jpg"}:

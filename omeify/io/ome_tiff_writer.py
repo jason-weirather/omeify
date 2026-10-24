@@ -22,6 +22,7 @@ from omeify.io._writer.configuration import (
 from omeify.io._writer.single_verification import verify_single_output
 from omeify.io.base import Image
 from omeify.io.image_planes import ImagePlaneSource, protect_source_paths
+from omeify.io.rgb_color import canonical_rgb, color_management_report, check_canonical_icc
 from omeify.reports import complete_report
 from omeify.utils.generate_ome_xml import generate_ome_xml
 
@@ -43,7 +44,7 @@ class OMETiffWriter:
     Automatic storage (``compression=None``, ``tile_size=None``) is lossy JPEG
     quality 90 / 4:2:2 with 512-pixel tiles for RGB, and lossless LZW with
     1024-pixel tiles for scalar/multichannel/label images. Explicit settings win.
-    Choose a lossless codec explicitly when exact RGB sample values are needed.
+    Choose a lossless codec to avoid JPEG changes after optional sRGB conversion.
     """
 
     def __init__(
@@ -90,8 +91,14 @@ class OMETiffWriter:
         Metadata belongs to the image. Storage settings belong to this writer.
         Pyramids are rebuilt from the selected level; source arrays are not mutated.
         """
+        with canonical_rgb(image) as normalized:
+            return self._write_normalized(normalized, level=level)
+
+    def _write_normalized(self, image: Image, *, level: int) -> dict[str, object]:
         source = ImagePlaneSource(image, level=level)
         spec = source.output_spec()
+        if spec.is_rgb:
+            check_canonical_icc(spec.icc_profile)
         protect_source_paths(source, self._settings.output_path)
         prepared = prepare_image(
             source,
@@ -163,6 +170,7 @@ class OMETiffWriter:
                     else prepared.float32_mantissa_bits + 1
                 ),
                 "icc_profile_present": spec.icc_profile is not None,
+                "color_management": color_management_report(image),
             },
             "pyramid": {
                 "tile_size": prepared.tile_size,

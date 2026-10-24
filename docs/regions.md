@@ -31,14 +31,15 @@ omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff \
 This writes exactly `Scratch/regions.ome.tiff`, a 2048 by 2048 rectangle. CLI bounds are
 **X0 Y0 X1 Y1**, integer, half-open, in the selected series' **level-zero pixels**.
 They are not `x,y,width,height`, physical units, or pyramid-level coordinates.
-No source pixels are rescaled or masked. Output encoding can still be lossy.
+No spatial resampling or polygon masking occurs. RGB output may be color-mapped
+to sRGB before encoding, and JPEG remains lossy.
 
 `--type` defaults to `ome_tiff`; supported vendor profiles are the same as
 `convert`. `--series` defaults to zero. All channels of the selected series are
 exported. For TIFF destinations, scalar/label output retains lossless LZW /
 1024-pixel tiles; RGB retains
-JPEG quality 90 / 4:2:2 / 512-pixel tiles. Use `--compression Deflate` for exact
-RGB sample values. Zarr destinations instead default to lossless Zstd and
+JPEG quality 90 / 4:2:2 / 512-pixel tiles. Use `--compression Deflate` to avoid JPEG loss after any required sRGB
+color transform. Zarr destinations instead default to lossless Zstd and
 512-pixel spatial chunks. Each output pyramid is rebuilt from the cropped base.
 
 Physical pixel calibration is preserved and remains required for export.
@@ -345,7 +346,8 @@ split_report = crop(
 
 `Image.crop` constructs an unopened borrowed view, requiring strict integer,
 in-bounds level-zero coordinates. It owns no parent resources and inherits
-image type, dtype, channels, calibration, and RGB ICC profile. It has one level;
+image type, dtype, channels, calibration, and the source RGB ICC for the writer's
+sRGB conversion. It has one level;
 writers rebuild crop-local pyramids. Keep the parent open through all uses of the
 view. The parent remains open after the view closes; stale views cannot reconnect
 to a later parent session. A view alone does not store the source offset in OME

@@ -403,7 +403,8 @@
           "additionalProperties": false,
           "required": [
             "image_type",
-            "logical_channel_name"
+            "logical_channel_name",
+            "icc_profile_base64"
           ],
           "properties": {
             "image_type": {
@@ -415,8 +416,8 @@
             },
             "icc_profile_base64": {
               "type": "string",
-              "minLength": 4,
-              "maxLength": 1398104,
+              "minLength": 784,
+              "maxLength": 784,
               "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
             }
           }

@@ -195,11 +195,12 @@ UUID flags do not silently become Zarr settings.
 Ordinary intensity output needs no private metadata. NGFF stores RGB as three
 component planes with red/green/blue display colors. A small supplemental `omeify`
 attribute records that they belong to one logical RGB channel, retains its name,
-and preserves an existing ICC profile. No implicit ICC transform is applied. The profile is preserved opaquely, not
-validated as a color transform or scrubbed for identifying text; the encoded
-Zarr payload is bounded to 1 MiB of decoded bytes.
-Independent consumers can read the planes but may not honor that supplemental
-color profile or logical-channel declaration.
+and embeds Omeify's known sRGB ICC profile. Any source RGB ICC is interpreted
+through a regional color transform and then discarded; source ICC bytes never
+enter the output metadata. Missing source ICC implies sRGB without changing
+samples. Invalid ICC data fails rather than being published, and the canonical
+profile is checked on readback. Independent consumers can read the planes but
+may not honor the supplemental color profile or logical-channel declaration.
 
 Standalone label rasters have integer pixels, nearest pyramids, and a supplemental
 categorical declaration including the background value. They are not automatically
@@ -226,7 +227,7 @@ Diagnostic reports can contain sensitive paths and values and should not be
 published casually. Image pixels are not screened for identifying content.
 Metadata minimization is not deidentification or study-wide MITI compliance.
 The [retention policy](reports.md#metadata-retention-and-sharing) explicitly covers
-retained names, caller provenance, opaque ICC bytes and diagnostic reports.
+retained names, caller provenance, canonical color metadata and diagnostic reports.
 
 ## Convert, mutate, crop and inspect
 

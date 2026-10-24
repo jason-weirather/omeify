@@ -41,7 +41,7 @@ def verify_single_output(
         "jpeg_subsampling_matches_requested": None,
         "subifd_layout_matches": False,
         "all_levels_tiled": False,
-        "icc_profile_preserved": None,
+        "icc_profile_is_canonical_srgb": None,
         "output_pixels_decodable": False,
         "base_pixel_values_checked": False,
         "base_pixel_values_match": None,
@@ -160,7 +160,7 @@ def verify_single_output(
         )
         verification["subifd_layout_matches"] = True
         verification["all_levels_tiled"] = True
-        verification["icc_profile_preserved"] = raster.icc_profiles_checked
+        verification["icc_profile_is_canonical_srgb"] = raster.icc_profiles_checked
         verification["output_pixels_decodable"] = True
         verification["base_pixel_values_checked"] = prepared.compression.lossless
         verification["base_pixel_values_match"] = (

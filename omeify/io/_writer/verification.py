@@ -351,6 +351,7 @@ def verify_storage(
         )
     for plane_index, frame in enumerate(frames):
         page = frame.aspage()
+        verify_output_icc(page, spec=spec)
         verify_page_layout(
             page,
             spec=spec,
@@ -367,6 +368,7 @@ def verify_storage(
                 f"{len(subpages)} SubIFDs; expected {expected_subifds}"
             )
         for level_index, subframe in enumerate(subpages, start=1):
+            verify_output_icc(subframe.aspage(), spec=spec)
             verify_page_layout(
                 subframe.aspage(),
                 spec=spec,
@@ -379,12 +381,18 @@ def verify_storage(
                     f"level {level_index}"
                 ),
             )
-    if spec.icc_profile is not None:
-        output_icc = frames[0].aspage().iccprofile
-        if output_icc is None or bytes(output_icc) != spec.icc_profile:
-            raise ValueError(
-                f"{prepared.display_name.capitalize()} did not preserve its ICC profile"
-            )
+
+
+def verify_output_icc(page: tifffile.TiffPage, *, spec: OMEImageSpec) -> None:
+    """Reject foreign ICC bytes at every output base/SubIFD, not just page zero."""
+    from ..rgb_color import SRGB_ICC
+
+    present = page.iccprofile
+    if spec.is_rgb:
+        if present is None or bytes(present) != SRGB_ICC:
+            raise ValueError("RGB output lacks Omeify's canonical sRGB ICC profile")
+    elif present is not None:
+        raise ValueError("Non-RGB output unexpectedly contains an ICC profile")
 
 
 def frame_readers(

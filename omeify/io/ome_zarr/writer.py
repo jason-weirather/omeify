@@ -24,6 +24,7 @@ from .._writer.pyramid import auto_level_shapes, mean_downsample_2x
 from ..base import Image
 from ..image_metadata import ImageLevel, integer
 from ..image_planes import ImagePlaneSource
+from ..rgb_color import canonical_rgb, color_management_report
 from ..ome_multi_series_writer import OMEImageSeries
 from .metadata import PROFILE, WRITE_VERSION, output_attributes, profile_errors
 from .reader import OMEZarrReader
@@ -124,7 +125,8 @@ def _display_windows(array, *, rgb):
 class OMEZarrWriter:
     """Write one Image to a NEW local NGFF 0.5 / Zarr v3 directory.
 
-    Storage is explicitly little-endian, unsharded and lossless. `tile_size` is the
+    Storage is explicitly little-endian, unsharded and lossless. RGB input
+    is color-managed to canonical sRGB before storing pixels and pyramids. `tile_size` is the
     spatial chunk edge; each stored scalar channel has its own chunks. Existing
     destinations are never replaced. No network publishing or arbitrary attributes.
     """
@@ -263,7 +265,8 @@ class OMEZarrWriter:
                       "pixel_size": list(metadata.pixel_size.to_tuple()),
                       "significant_bits": metadata.dtype.itemsize * 8 if bits is None else float32_significant_bits(bits),
                       "float32_mantissa_bits": bits, "float_precision_bits": None if bits is None else bits + 1,
-                      "icc_profile_present": metadata.icc_profile is not None},
+                      "icc_profile_present": metadata.icc_profile is not None,
+                      "color_management": color_management_report(image)},
             "pyramid": {"tile_size": self.tile_size, "axes": metadata.axes, "downsample_method": method,
                         "level_shapes": [list(d.shape) for d in levels], "subresolution_count": len(levels) - 1},
             "verification": verification,
@@ -353,6 +356,10 @@ class OMEZarrWriter:
             plain.store.close()
 
     def write(self, image: Image, *, level: int = 0):
+        with canonical_rgb(image) as normalized:
+            return self._write_normalized(normalized, level=level)
+
+    def _write_normalized(self, image: Image, *, level: int):
         self._prepare(image, level)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".omeify-zarr-", dir=self.path.parent))
@@ -369,6 +376,21 @@ class OMEZarrWriter:
 class OMEZarrCollectionWriter(OMEZarrWriter):
     """Ordered heterogeneous images using NGFF's transitional collection layout."""
     def write(self, images: Sequence[OMEImageSeries], *, provenance=None):
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            entries = tuple(images)
+            if (not 1 <= len(entries) <= 4096
+                    or any(not isinstance(item, OMEImageSeries) for item in entries)):
+                raise TypeError("Collection writing requires OMEImageSeries entries")
+            normalized = tuple(OMEImageSeries(
+                item.name, stack.enter_context(canonical_rgb(item.image)),
+                level=item.level, compression=item.compression,
+                downsample=item.downsample, significant_bits=item.significant_bits,
+            ) for item in entries)
+            return self._write_normalized_collection(normalized, provenance=provenance)
+
+    def _write_normalized_collection(self, images: Sequence[OMEImageSeries], *, provenance=None):
         import zarr
 
         entries = tuple(images)

@@ -631,7 +631,9 @@ def test_aperio_svs_reads_mpp_and_drops_vendor_description(tmp_path: Path) -> No
     ).astype(np.uint8)
     source = tmp_path / "source.svs"
     output = tmp_path / "output.ome.tif"
-    icc_profile = b"synthetic-icc-profile"
+    from omeify.io.rgb_color import SRGB_ICC
+
+    icc_profile = SRGB_ICC
     _write_synthetic_svs(source, data, mpp=0.4990, icc_profile=icc_profile)
 
     with tifffile.TiffFile(source) as tif:
@@ -649,7 +651,7 @@ def test_aperio_svs_reads_mpp_and_drops_vendor_description(tmp_path: Path) -> No
     assert report["input_file"]["source_axes"] == "YXS"
     assert report["image"]["pixel_size"] == [0.499, 0.499, "µm"]
     assert report["image"]["icc_profile_present"] is True
-    assert report["verification"]["icc_profile_preserved"] is True
+    assert report["verification"]["icc_profile_is_canonical_srgb"] is True
     assert report["verification"]["base_pixel_values_match"] is True
 
     with tifffile.TiffFile(output) as tif:
@@ -660,7 +662,7 @@ def test_aperio_svs_reads_mpp_and_drops_vendor_description(tmp_path: Path) -> No
         assert "secret-slide" not in tif.ome_metadata
         assert "not-for-output" not in tif.ome_metadata
         assert "ImageID = 1004486" not in tif.pages[0].description
-        assert bytes(tif.pages[0].iccprofile) == icc_profile
+        assert bytes(tif.pages[0].iccprofile) == SRGB_ICC
 
 
 def test_aperio_missing_mpp_uses_tiff_resolution_with_warning(

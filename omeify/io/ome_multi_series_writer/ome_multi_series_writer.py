@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from omeify.io._writer.configuration import (
     OUTPUT_BYTEORDER,
 )
 from omeify.io.image_planes import protect_source_paths
+from omeify.io.base import Image
+from omeify.io.rgb_color import canonical_rgb, color_management_report, check_canonical_icc
 from omeify.provenance import canonical_provenance
 from omeify.reports import complete_report
 from omeify.utils.generate_ome_xml import (
@@ -93,12 +96,27 @@ class OMEMultiSeriesWriter:
         """Write all series and return one structured construction report."""
 
         images = self._normalize_series(series)
+        with ExitStack() as stack:
+            normalized = tuple(OMEImageSeries(
+                item.name, stack.enter_context(canonical_rgb(item.image)),
+                level=item.level, compression=item.compression,
+                downsample=item.downsample, significant_bits=item.significant_bits,
+            ) for item in images)
+            return self._write_normalized(normalized, provenance=provenance)
+
+    def _write_normalized(
+        self, series: Sequence[OMEImageSeries], *,
+        provenance: Mapping[str, object] | None,
+    ) -> dict[str, object]:
+        images = self._normalize_series(series)
         for image in images:
             protect_source_paths(image._source, self._settings.output_path)
         provenance_json, normalized_provenance = canonical_provenance(provenance)
         prepared = []
         for image in images:
             spec = image._source.output_spec()
+            if spec.is_rgb:
+                check_canonical_icc(spec.icc_profile)
             if image.significant_bits is not None:
                 # Already-quantized input may declare fewer meaningful bits.
                 # A concat operation must not repeat a lossy precision transform.
@@ -156,7 +174,7 @@ class OMEMultiSeriesWriter:
                 ),
             },
             "series": [
-                _series_report(index, item)
+                _series_report(index, item, images[index].image)
                 for index, item in enumerate(prepared)
             ],
             "provenance": (
@@ -209,6 +227,7 @@ def _required_name(prepared: PreparedImage) -> str:
 def _series_report(
     index: int,
     prepared: PreparedImage,
+    source_image: Image,
 ) -> dict[str, object]:
     spec = prepared.spec
     if prepared.name is None:
@@ -237,4 +256,5 @@ def _series_report(
         "downsample_method": prepared.downsample,
         "level_shapes": [list(shape) for shape in prepared.level_shapes],
         "subresolution_count": len(prepared.level_shapes) - 1,
+        "color_management": color_management_report(source_image),
     }

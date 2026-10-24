@@ -14,8 +14,9 @@ Copying it uncritically can propagate that information into later derivatives.
 Omeify **rebuilds output metadata from a documented, constrained set of fields**
 instead of forwarding arbitrary source descriptions alongside the pixels.
 **Controlling this propagation is an essential step in deidentification pipelines**,
-but not deidentification on its own: retained channel and ROI names, deliberate
-provenance, opaque ICC profiles, and image pixels still require independent review.
+but not deidentification on its own: retained channel and ROI names, explicitly
+supplied provenance, and image pixels still require review. RGB output uses
+a fixed sRGB profile instead of copying the scanner's ICC metadata.
 
 The goal is a dependable home base for images from different instruments and
 workflows. Omeify produces documented profiles of open formats, not private
@@ -86,7 +87,7 @@ omeify convert slide.ome.tif -o slide.ome.zarr \
 The selected input profile (`--type`) determines how pixels and calibration are
 interpreted; a filename suffix alone is not enough. `convert` preserves the
 source's numerical type and intensity scale, although lossy output compression
-can change decoded RGB values. Existing OME-TIFF and supported OME-Zarr images
+and sRGB color conversion can change RGB values. Existing OME-TIFF and supported OME-Zarr images
 can also be converted into a fresh, normalized output.
 
 ### Supported file conversions
@@ -152,8 +153,9 @@ omeify concat \
 `--series` and `--named-series` arguments is the output order; the indices are
 zero-based and output names must be unique. Different dimensions, pixel types,
 and physical resolutions are allowed, with each image kept as its own series.
-Full-resolution decoded pixels are rewritten losslessly by default, including
-RGB; pyramids are rebuilt. The operation does not register or align images.
+Full-resolution decoded pixels are rewritten with lossless compression; RGB
+samples are first mapped to sRGB if the input carries another ICC profile.
+Pyramids are rebuilt. The operation does not register or align images.
 `concat` currently writes OME-TIFF only.
 
 ### Make an intentional numeric change
@@ -208,18 +210,18 @@ compression, and content can differ, but the construction is predictable.
 | Container | Self-contained, little-endian BigTIFF with OME 2016-06 XML. Explicit image origins use a linked, controlled geometry annotation. |
 | Image layout | Grayscale (`YX`), multiplex channel stacks (`CYX`), or interleaved RGB (`YXS`). RGB is three samples within one logical channel, not three fluorescence channels. |
 | Pixel types | Scalar images support 8-, 16-, and 32-bit signed or unsigned integers and 32- or 64-bit floats. RGB requires `uint8`. |
-| Pixel values | `convert` preserves dtype and intensity scale. Lossless encoding retains full-resolution numeric values; JPEG is lossy. `mutate` makes requested numerical changes. |
+| Pixel values | `convert` preserves scalar dtype and intensity scale; RGB is mapped to sRGB, which can change color samples. Lossless encoding retains output values; JPEG is lossy. `mutate` makes requested numerical changes. |
 | Calibration | X and Y physical pixel sizes are required, stored in **µm**, and checked against TIFF resolution tags. Supply them explicitly if missing. |
 | Pyramids | Tiled SubIFDs are rebuilt, not copied from the source. Intensity images default to 2× mean reduction; declared label images use nearest-neighbor reduction. |
 | Metadata | Fresh, controlled OME-XML instead of arbitrary vendor descriptions; crop outputs also retain region names and source-image coordinates. |
-| Verification | Generated metadata, TIFF organization, encoding, and sampled pixels are checked before the temporary output replaces the destination. |
+| Verification | Generated metadata, TIFF organization, canonical ICC bytes, encoding, and sampled pixels are checked before the temporary output replaces the destination. |
 
 By default, reduced-resolution levels are built until the image fits in one
 tile. **RGB OME-TIFF** defaults to JPEG quality 90, 4:2:2 chroma sampling, and
 512 × 512 tiles. **Grayscale, multiplex, and label images** default to lossless
 LZW and 1024 × 1024 tiles. These defaults apply to CLI and Python writers;
 explicit settings take precedence. Choose a lossless codec such as
-`--compression Deflate` when exact RGB values matter.
+`--compression Deflate` to avoid JPEG loss after sRGB conversion.
 
 The contract governs construction, **not scientific accuracy**. Calibration can
 be faithfully recorded without having been correctly measured at acquisition.
@@ -276,7 +278,7 @@ study-wide MITI compliance**.
 | Pixel dtype and image geometry | Preserved by `convert`; numerical changes require explicit mutation | Defines the numeric image being interpreted. |
 | Channel names | Read from recognized source fields and optionally renamed | Retains logical channel identities without guessing biomarkers. |
 | Physical pixel size | Taken from supported calibration declarations or an explicit override | Required for quantitative spatial interpretation. |
-| RGB ICC profile | Preserved opaquely when present on supported RGB input | May affect color interpretation; internal text is not sanitized. |
+| RGB ICC profile | Interpreted to convert RGB pixels to sRGB, then discarded | Output carries only Omeify's fixed, audited sRGB profile, never source ICC metadata. |
 | Vendor descriptions, filenames, scanner fields, dates, user names, unrelated free text | Not copied into generated OME-XML or NGFF JSON | Avoids an uncontrolled metadata passthrough. |
 | Biospecimen, reagent, acquisition, processing, and analysis metadata | Not inferred or manufactured | Belongs in deliberate accompanying study records. |
 
@@ -299,12 +301,12 @@ The generated header is checked against
 | Root `Creator` | Generated from the Omeify version | Identifies the software constructing the header. |
 | Empty `LightPath` | Generated without acquisition claims | Meets the supported OME channel structure without inventing instrument details. |
 | Pyramid `MapAnnotation` | Generated when reduced levels exist | Describes the rebuilt resolution hierarchy. |
-| ICC profile | Preserved when supplied for RGB | Retains available color-management information. |
+| ICC profile | A fixed sRGB profile is generated for every RGB image | Source profile data cannot pass into the output. |
 | Multi-image annotations | Added for explicit provenance or crop records | Describes intentional output context. |
 
 Passing the header check establishes these minimum fields, not a privacy
 certificate. In particular, **metadata minimization is not deidentification**:
-retained channel/ROI names, caller provenance, ICC profiles, source coordinates,
+retained channel/ROI names, caller-supplied provenance, source coordinates,
 and pixels (including burned-in labels) still need independent review before
 sharing. `inspect` exposes original metadata; it does not minimize or rewrite
 it. The [metadata retention and sharing policy](docs/reports.md#metadata-retention-and-sharing)
@@ -392,7 +394,8 @@ is implied. See [QuPath's TIFF guidance][qupath-formats] and the
 classifying the image as Fluorescence. For known H&E images, choose Brightfield
 (H&E) when needed. Omeify does not invent stain identities or acquisition
 metadata, and the receiving application's display choice does not alter stored
-pixels. Use a lossless codec for exact RGB values; the [JPEG policy][jpeg-policy]
+pixels. Use lossless compression to avoid further RGB changes after sRGB
+conversion; the [JPEG policy][jpeg-policy]
 documents encoding choices and older-file considerations.
 
 ## Reproducibility and verification
