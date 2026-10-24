@@ -5,7 +5,8 @@
 Omeify converts supported tissue-imaging formats into calibrated, pyramidal
 **OME-TIFF** files or **OME-Zarr 0.5 / Zarr v3** stores with explicit pixel
 interpretation and deliberately controlled metadata. The same regional Image API
-also reads OME-Zarr **0.4, 0.5 and 0.6**, locally or over HTTP(S).
+also reads OME-Zarr **0.4, 0.5 and 0.6**, locally or over HTTP(S), or
+over S3 with the optional `omeify[s3]` extra.
 
 The Zarr reader supports selected 2D images and explicit Z/T plane selection,
 not arbitrary registered scenes. OME-TIFF remains the default output.
@@ -85,7 +86,7 @@ See [reproducibility and verification](#reproducibility-and-verification).
 ## The OME-Zarr home base
 
 OME-Zarr is included in the normal installation, alongside OME-TIFF. Both require
-**Python 3.11 or newer**. No extra is needed for local or HTTP(S) image reads.
+**Python 3.11 or newer**. No extra is needed for local or HTTP(S) image reads; native S3 requires `omeify[s3]`.
 Ordinary image I/O does not require a viewer, segmentation framework, Dask, or an
 AI client.
 

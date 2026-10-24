@@ -66,6 +66,9 @@ Issues = "https://github.com/jason-weirather/omeify/issues"
 omeify = "omeify.cli:main"
 
 [project.optional-dependencies]
+# Native S3 input is explicit. Standard credentials/roles are resolved by s3fs;
+# no keys are embedded in URI strings or persisted in generated image metadata.
+s3 = ["s3fs>=2024.6,<2027"]
 # Independent format models are tests, not a runtime model/validation framework.
 # This extra currently requires Python 3.12+ through the upstream models package.
 interop = ["ome-zarr-models>=1.8.1,<2"]

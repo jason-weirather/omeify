@@ -7,7 +7,7 @@ import os
 import sys
 from collections import OrderedDict
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from omeify.path_safety import paths_overlap
 
@@ -22,10 +22,13 @@ def location(path: str | Path) -> str | Path:
     if not is_remote(path):
         return Path(path)
     parsed = urlsplit(str(path))
-    if parsed.scheme not in {"https", "http"}:
-        raise ValueError("Remote OME-Zarr input currently supports HTTP and HTTPS stores only")
+    if parsed.scheme not in {"https", "http", "s3"}:
+        raise ValueError("Remote OME-Zarr input supports HTTP(S) and S3 store roots only")
     if not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise ValueError("Use a plain HTTP(S) store root; credentials belong in storage_options")
+        raise ValueError("Use a plain HTTP(S) or s3:// store root without URL credentials or queries")
+    if parsed.scheme == "s3" and (any(part in {".", ".."} for part in unquote(parsed.path).split("/"))
+                                   or not parsed.netloc.strip()):
+        raise ValueError("S3 store roots require a bucket and safe key prefix")
     return str(path).rstrip("/")
 
 
@@ -43,6 +46,11 @@ def read_store(path: str | Path, *, storage_options: dict | None = None,
             raise FileNotFoundError(f"OME-Zarr directory does not exist: {path}")
         backend = zarr.storage.LocalStore(path, read_only=True)
     else:
+        if path.startswith("s3://"):
+            try:
+                import s3fs  # noqa: F401; explicit optional extra, not bundled AWS credentials
+            except ImportError as error:
+                raise RuntimeError('S3 OME-Zarr requires: python -m pip install "omeify[s3]"') from error
         backend = zarr.storage.FsspecStore.from_url(
             path, storage_options={**dict(storage_options or {}), "skip_instance_cache": True}, read_only=True,
         )
@@ -103,9 +111,8 @@ def read_store(path: str | Path, *, storage_options: dict | None = None,
         def close(self):
             self.clear_cache()
             self._store.close()
-            if not isinstance(path, Path):
-                # This wrapper owns an uncached HTTP filesystem, not a shared session.
-                # FsspecStore.close itself only marks the Zarr store closed.
+            if isinstance(path, str) and path.startswith(("http://", "https://")):
+                # The uncached HTTP filesystem's aiohttp session belongs to this reader.
                 session = getattr(self._store.fs, "_session", None)
                 if session is not None and not session.closed:
                     from zarr.core.sync import sync

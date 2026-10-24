@@ -67,7 +67,7 @@ a dependency alone must not change the format being written.
 | Intrinsic geometry | Positive scale and optional translation; 0.6 identity and scale/translation sequence |
 | Image types | Scalar/multichannel, explicitly declared uint8 RGB, categorical integer labels |
 | Scalar pixel types | uint8/16/32, int8/16/32, float32/64; no inferred numeric cast |
-| Stores | Local directories and plain HTTP(S) store roots; transport options are library-only |
+| Stores | Local directories, plain HTTP(S) store roots; `s3://` with the `s3` extra; transport options are library-only |
 | Input encoding | Zarr-supported installed codecs, including Zarr v3 sharded arrays; no codec implementation is copied into Omeify |
 | Regional reads | Preserve channel ordering and duplicates, half-open bounds, native dtype and owned output arrays |
 
@@ -319,13 +319,24 @@ metadata-size limit can be checked. Read only trusted data and installed codecs.
 
 ### S3-backed data and scope
 
-The accepted URI schemes remain **HTTP and HTTPS**, not `s3://`. Omeify does not
-rewrite S3 URLs into anonymous HTTPS requests, infer credentials, or upload
-images. A compatible S3-backed HTTPS object endpoint or an approved HTTP gateway
-can use the existing reader, provided metadata/chunk GETs and missing-key behavior
-work for that endpoint. Authentication requiring AWS request signing is not
-implemented by this HTTP adapter. Presigned query-string store roots remain
-rejected, not copied into logs or interpreted as credentials for every chunk.
+Install `python -m pip install 'omeify[s3]'` to read `s3://bucket/prefix.ome.zarr`.
+The same regional `OMEZarrReader` uses Zarr's upstream fsspec/s3fs backend;
+normal AWS credential discovery, roles, and anonymous/public buckets are handled
+by s3fs. No credentials belong in the URI. An S3-compatible endpoint can be
+supplied through `storage_options={"client_kwargs": {"endpoint_url": "http://localhost:9000"}}`.
+For example:
+
+```python
+from omeify import OMEZarrReader
+with OMEZarrReader("s3://my-bucket/slide.ome.zarr", storage_options={
+    "client_kwargs": {"endpoint_url": "http://localhost:9000"},
+}) as image:
+    patch = image.read_region(0, 128, 0, 128)
+```
+
+S3 stores are read-only in Omeify. Neither `s3://` nor HTTP store-root URLs
+accept query-string credentials. The reader does not list an entire bucket,
+download the complete store, write objects, or guess an authenticated HTTPS URL.
 
 Build and verify a new local store, then publish its complete hierarchy through
 a separate authorized deployment process. For private object storage, use the
@@ -334,10 +345,8 @@ Publishing to immutable versioned prefixes avoids changing a reader's observatio
 underneath its metadata/chunk cache. This documentation does not claim a tested
 production S3 endpoint or make deployment part of Omeify.
 
-Native S3 reading is deferred to a separately tested adapter using an upstream
-object-store backend, with credential/session lifecycle and error semantics
-verified. No additional cloud dependency or alternate image API is introduced in
-this hardening pass.
+The optional S3 adapter does not implement new codecs or alternative image semantics.
+Integration against a real S3 endpoint should verify its authorization and missing-key policy.
 
 ## Safe writing and verification
 
