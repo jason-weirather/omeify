@@ -59,8 +59,13 @@ def test_missing_reduced_level_calibration_is_debug_only(tmp_path, caplog, kind)
             assert image.pixel_size == PixelSize(0.5, 0.5, "µm")
             assert len(image.levels) == expected_levels
             for level in image.levels[1:]:
-                assert level.pixel_size is None
-                assert level.downsample_yx is None
+                if kind == "ome_tiff":
+                    assert level.pixel_size == PixelSize(1.0, 1.0, "µm")
+                    assert level.downsample_yx == (2.0, 2.0)
+                    assert level.offset_yx is None
+                else:
+                    assert level.pixel_size is None
+                    assert level.downsample_yx is None
             np.testing.assert_array_equal(
                 image.read_region(0, 8, 0, 9, level=1), levels[1][:8, :9],
             )
@@ -75,4 +80,5 @@ def test_missing_reduced_level_calibration_is_debug_only(tmp_path, caplog, kind)
                    and "Pyramid level" in record.getMessage()]
     assert len(diagnostics) == expected_levels - 1
     assert all(record.levelno == logging.DEBUG for record in diagnostics)
-    assert all("scale will not be inferred" in record.getMessage() for record in diagnostics)
+    assert all("no independent TIFF physical calibration" in record.getMessage()
+               for record in diagnostics)

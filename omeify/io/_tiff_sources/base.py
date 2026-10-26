@@ -120,12 +120,10 @@ class TiffSource(ImageSource):
                      (height, width, 3) if axes == "YXS" else (height, width))
             size = pixel_size if index == 0 else consistent_tiff_resolution_pixel_size(pages)
             if index and size is None:
-                # Common in vendor pyramids: this is a missing declaration, not a
-                # failed read or proof of inconsistent calibration. Keep the
-                # unknown scale explicit, but do not warn during routine viewing.
+                # This generic TIFF layer does not infer scales. The OME reader
+                # may subsequently recognize an exact, linked SubIFD pyramid.
                 LOGGER.debug(
-                    "Pyramid level %s has no physical calibration; its scale will not be inferred "
-                    "from rounded dimensions", index,
+                    "Pyramid level %s has no independent TIFF physical calibration", index,
                 )
             scale = (1., 1.) if index == 0 else None
             if index and pixel_size is not None and size is not None:

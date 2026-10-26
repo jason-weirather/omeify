@@ -318,15 +318,31 @@ print(level.shape, level.axes, level.spatial_shape)
 print(level.pixel_size, level.downsample_yx)
 ```
 
-`ImageLevel` contains explicit sampling information. A 5-by-7 raster reduced
-2x has shape 3-by-4 and still has a 2x sampling step. Do not calculate sampling
-scale from shape ratios. Unknown third-party level calibration stays `None`.
-For TIFF readers, missing independent physical calibration on a reduced pyramid
-level is logged at **DEBUG**, not as a warning on ordinary opens. The missing
-level `pixel_size` and `downsample_yx` remain `None`; this logging change does
-not infer a scale or alter pixel reads. Use inspection or DEBUG logging when
-missing level declarations matter for analysis.
-Metadata-only file open now validates all advertised levels, without decoding
+`ImageLevel` contains sampling information. A 5-by-7 raster reduced 2x has
+shape 3-by-4 and still has a 2x sampling step: a rounded shape ratio is **not**
+that sampling step. Reader-declared physical calibration takes precedence.
+
+**Conservative OME-TIFF SubIFD recovery:** when reduced TIFF pages lack usable
+independent pixel sizes, the OME reader can recover a scale from the actual
+per-channel `SubIFDs` (tag 330) pointers, not from a collection of similarly
+sized TIFF images. Every reduced page must carry the reduced-image flag; the
+full pyramid must have an **exact** constant isotropic integer reduction in X/Y
+at every level. Any conflicting TIFF pixel-size/scale declaration blocks
+recovery for the whole pyramid. Rounded/odd-size reductions, incomplete SubIFD
+links, and ambiguous layouts keep their unknown scales. The conservative rule
+is intentionally narrower than the range of legal OME-TIFF pyramids.
+
+For recovered levels, `downsample_yx` and the physical `pixel_size` (when the
+base level is calibrated) are calculated, but **`offset_yx=None`**: the TIFF
+hierarchy does not prove the subpixel phase or pixel-edge offset. A renderer
+requiring known, common-origin edges must not treat `None` as zero. No pixels
+are decoded to recover metadata, and no source TIFF is changed. This reader
+fallback does not relax Omeify's writer/verification profile or override a
+linked, explicit Omeify geometry annotation. Other TIFF/vendor readers retain
+their existing behavior. Missing TIFF calibration is DEBUG-only during ordinary
+opens; recovered OME levels are logged at INFO.
+
+Metadata-only file open validates all advertised levels, without decoding
 pixels. Source levels describe one observation, not different microscope exposures.
 
 `level_arrays=` and `levels=` on array construction describe existing multiscale
