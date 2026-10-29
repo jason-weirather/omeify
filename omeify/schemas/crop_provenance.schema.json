@@ -11,11 +11,12 @@
     "source_series",
     "source_size",
     "crop_mode",
-    "regions"
+    "regions",
+    "channel_mapping"
   ],
   "properties": {
     "schema": {
-      "const": "omeify.crop_provenance/1"
+      "const": "omeify.crop_provenance/2"
     },
     "coordinate_system": {
       "const": "level0_pixels"
@@ -42,6 +43,9 @@
     },
     "crop_mode": {
       "const": "bounding_rectangle"
+    },
+    "channel_mapping": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/crop_channel_mapping"
     },
     "regions": {
       "type": "array",

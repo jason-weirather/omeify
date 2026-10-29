@@ -11,11 +11,12 @@
     "output_path",
     "shatter",
     "clip",
-    "outputs"
+    "outputs",
+    "channel_mapping"
   ],
   "properties": {
     "schema": {
-      "const": "omeify.crop/4"
+      "const": "omeify.crop/5"
     },
     "input_path": {
       "type": "string",
@@ -38,6 +39,9 @@
     },
     "clip": {
       "type": "boolean"
+    },
+    "channel_mapping": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/crop_channel_mapping"
     },
     "outputs": {
       "type": "array",

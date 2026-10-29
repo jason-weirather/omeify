@@ -59,7 +59,7 @@ Each command has a distinct job:
 |---|---|
 | `omeify inspect` | Examine TIFF or OME-Zarr structure, channels, calibration, and metadata without decoding image pixels. |
 | `omeify convert` | Normalize a supported image into OME-TIFF or OME-Zarr, preserving dtype and intensity scale. |
-| `omeify crop` | Export pixel-coordinate rectangles or GeoJSON regions, together or as separate files. |
+| `omeify crop` | Export pixel-coordinate rectangles or GeoJSON regions, optionally selecting/relabeling channels. |
 | `omeify concat` | Combine selected, optionally renamed **OME-TIFF image series** in a chosen order. |
 | `omeify mutate` | Intentionally change floating-point image values or float32 precision, with a report. |
 | `omeify version` | Show the package version; `--json` also reports image-I/O dependency versions. |
@@ -125,6 +125,23 @@ output**; `-o` names that exact output, not a prefix. Use `--shatter by_index` t
 write one file per region, or `--shatter by_name` to group regions into files by
 name. Polygons select their bounding rectangles: cropping does **not** mask
 polygon interiors. OME-Zarr collections use the same ordered-region model.
+
+Select a subset of logical channels, reorder them, or assign new channel names in
+one crop without making an intermediate image:
+
+```bash
+omeify crop slide.ome.tif -o two-markers.ome.tif --bounds 0 0 2048 2048 \
+  --channel DAPI --named-channel CD8a CD8
+```
+
+`--channel SOURCE` and `--named-channel OUTPUT_NAME SOURCE` can be intermixed
+and repeated in output order. `SOURCE` is an exact channel name or a zero-based
+index; use `name:0` for a channel literally named `0`. With no selection flags,
+all channels are retained. For renaming without selecting, `crop` also supports
+the same `--rename-channels-json` and `--rename-channels-by name|index` options
+as `convert`. The output report and embedded provenance record the ordered source
+to output channel mapping. RGB is one indivisible logical channel, not three
+separate color planes. See the [cropping guide](docs/regions.md).
 
 With the optional intelligence integration, a vision-capable model can propose
 GeoJSON rectangles from a bounded preview. This explicitly sends image pixels

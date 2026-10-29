@@ -45,6 +45,8 @@ def writer_spy(monkeypatch):
             calls.append({"path": self.path, "options": self.options, "provenance": provenance,
                           "pixels": [s.image.asarray() for s in entries],
                           "names": [s.name for s in entries],
+                          "channels": [s.image.channel_names for s in entries],
+                          "types": [s.image.image_type for s in entries],
                           "sizes": [s.image.pixel_size for s in entries]})
             return multi_report_fixture(self.path, entries, provenance)
 
@@ -158,7 +160,7 @@ def test_grouped_exports_use_real_lazy_crops(input_file, tmp_path, writer_spy, s
         feature["properties"]["index"] = 10 - i
     output = tmp_path / "out.he.ome.tiff"
     report = crop(path, output_path=output, geojson=collection(*features), shatter=shatter)
-    assert report["schema"] == "omeify.crop/4" and report["shatter"] == shatter
+    assert report["schema"] == "omeify.crop/5" and report["shatter"] == shatter
     assert report["output_path"] == str(output) and "naming" not in report
     assert len(writer_spy) == len(report["outputs"]) == len(groups)
     if shatter is None:
@@ -167,7 +169,7 @@ def test_grouped_exports_use_real_lazy_crops(input_file, tmp_path, writer_spy, s
         assert call["names"] == [f"{i + 1:02d} - {names[i] or 'ROI'}" for i in indices]
         assert call["sizes"] == [PixelSize(.5, .7, "µm")] * len(indices)
         assert call["options"]["compression"] is None and call["options"]["tile_size"] is None
-        assert call["provenance"]["schema"] == "omeify.crop_provenance/1"
+        assert call["provenance"]["schema"] == "omeify.crop_provenance/2"
         assert call["provenance"]["shatter"] == shatter
         assert call["provenance"]["regions"] == result["regions"]
         for series, i in enumerate(indices):
@@ -178,6 +180,194 @@ def test_grouped_exports_use_real_lazy_crops(input_file, tmp_path, writer_spy, s
             assert record["input_index"] == i + 1 and record["output_series"] == series
             assert record["name"] == (names[i] or None)
             assert record["output_name"] == call["names"][series]
+
+
+def test_selected_channels_are_ordered_renamed_and_audited(input_file, tmp_path, writer_spy):
+    path, pixels = input_file
+    doc = collection(rectangle_feature([2, 3, 14, 19], name="left"),
+                     rectangle_feature([11, 7, 25, 20], name="right"))
+    report = crop(path, tmp_path / "selected.ome.tif", geojson=doc,
+                  channels=[("CD3", "CD3e"), 0], shatter="by_index")
+    mapping = [
+        {"source_index": 1, "source_name": "CD3", "output_index": 0,
+         "output_name": "CD3e"},
+        {"source_index": 0, "source_name": "DAPI", "output_index": 1,
+         "output_name": "DAPI"},
+    ]
+    assert report["schema"] == "omeify.crop/5"
+    assert report["channel_mapping"] == mapping
+    assert len(writer_spy) == 2
+    for call, output, bounds in zip(writer_spy, report["outputs"],
+                                    ((2, 3, 14, 19), (11, 7, 25, 20))):
+        assert call["channels"] == [("CD3e", "DAPI")]
+        assert call["types"] == ["multichannel"]
+        assert call["provenance"]["schema"] == "omeify.crop_provenance/2"
+        assert call["provenance"]["channel_mapping"] == mapping
+        assert output["write_report"]["provenance"]["value"]["channel_mapping"] == mapping
+        x0, y0, x1, y1 = bounds
+        np.testing.assert_array_equal(call["pixels"][0], pixels[[1, 0], y0:y1, x0:x1])
+
+
+def test_rename_all_or_subset_without_writing_intermediates(input_file, tmp_path, writer_spy):
+    path, pixels = input_file
+    output = tmp_path / "renamed.ome.tif"
+    report = crop(path, output, bounds=(2, 3, 15, 17),
+                  rename_channels={"DAPI": "DNA"}, rename_channels_by="name")
+    assert writer_spy[0]["channels"] == [("DNA", "CD3")]
+    np.testing.assert_array_equal(writer_spy[0]["pixels"][0], pixels[:, 3:17, 2:15])
+    assert [c["source_index"] for c in report["channel_mapping"]] == [0, 1]
+    writer_spy.clear()
+    report = crop(path, output, bounds=(2, 3, 15, 17), channels=[1],
+                  rename_channels={1: "CD3e"}, rename_channels_by="index")
+    assert writer_spy[0]["channels"] == [("CD3e",)]
+    assert report["channel_mapping"][0]["source_index"] == 1
+    np.testing.assert_array_equal(writer_spy[0]["pixels"][0][0], pixels[1, 3:17, 2:15])
+
+
+def test_duplicate_channel_selection_is_deliberate_and_ordered(input_file, tmp_path, writer_spy):
+    path, pixels = input_file
+    report = crop(path, tmp_path / "two.ome.tif", bounds=(0, 0, 8, 9),
+                  channels=[("DAPI", "DNA 1"), (0, "DNA 2")])
+    assert writer_spy[0]["channels"] == [("DNA 1", "DNA 2")]
+    np.testing.assert_array_equal(writer_spy[0]["pixels"][0], pixels[[0, 0], :9, :8])
+    assert [c["source_index"] for c in report["channel_mapping"]] == [0, 0]
+
+
+@pytest.mark.parametrize("channels, error", [
+    ([], "must not be empty"),
+    ([99], "outside"),
+    (["NotAChannel"], "Unknown channel"),
+    ([True], "integer indices"),
+    ([-1], "at least 0"),
+    ([0.5], "integer indices"),
+    ([0, (1, "  ")], "non-empty"),
+    ("DAPI", "must be a sequence"),
+])
+def test_bad_channel_selections_fail_before_any_product(input_file, tmp_path, writer_spy,
+                                                        channels, error):
+    path, _ = input_file
+    with pytest.raises((TypeError, ValueError, IndexError), match=error):
+        crop(path, tmp_path / "output.ome.tif", bounds=(0, 0, 8, 9), channels=channels)
+    assert not writer_spy
+
+
+def test_ambiguous_duplicate_names_and_rename_conflicts(input_file, tmp_path, writer_spy):
+    path, _ = input_file
+    with pytest.raises(ValueError, match="either named channel selections or a rename mapping"):
+        crop(path, tmp_path / "out.ome.tif", bounds=(0, 0, 8, 9),
+             channels=[(0, "DNA")], rename_channels={0: "New"}, rename_channels_by="index")
+    with pytest.raises(ValueError, match="unknown source names"):
+        crop(path, tmp_path / "out.ome.tif", bounds=(0, 0, 8, 9),
+             rename_channels={"missing": "New"}, rename_channels_by="name")
+    source = tmp_path / "duplicates.ome.tif"
+    data = np.zeros((2, 16, 16), dtype=np.uint16)
+    tifffile.imwrite(source, data, ome=True, metadata={
+        "axes": "CYX", "Channel": {"Name": ["dup", "dup"]},
+        "PhysicalSizeX": .5, "PhysicalSizeY": .7,
+        "PhysicalSizeXUnit": "µm", "PhysicalSizeYUnit": "µm",
+    })
+    with pytest.raises(ValueError, match="ambiguous"):
+        crop(source, tmp_path / "out.ome.tif", bounds=(0, 0, 8, 9), channels=["dup"])
+    report = crop(source, tmp_path / "out.ome.tif", bounds=(0, 0, 8, 9),
+                  channels=[(1, "second")])
+    assert report["channel_mapping"][0]["source_index"] == 1
+    assert not any(c["source_index"] == 0 for c in report["channel_mapping"])
+
+
+def test_cli_channel_order_across_both_options(input_file, tmp_path, writer_spy):
+    path, pixels = input_file
+    args = ["crop", str(path), "-o", str(tmp_path / "out.ome.tif"),
+            "--bounds", "0", "0", "10", "11", "--channel", "index:1",
+            "--named-channel", "DNA", "DAPI", "--channel", "1", "--output-json", "-"]
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.stdout)
+    assert [c["source_index"] for c in report["channel_mapping"]] == [1, 0, 1]
+    assert [c["output_name"] for c in report["channel_mapping"]] == ["CD3", "DNA", "CD3"]
+    assert writer_spy[0]["channels"] == [("CD3", "DNA", "CD3")]
+    np.testing.assert_array_equal(writer_spy[0]["pixels"][0], pixels[[1, 0, 1], :11, :10])
+
+
+def test_cli_numeric_source_name_and_json_renames(input_file, tmp_path, writer_spy):
+    path, _ = input_file
+    rename_file = tmp_path / "rename.json"
+    rename_file.write_text('{"0": "DNA", "1": "CD3e"}')
+    base = ["crop", str(path), "-o", str(tmp_path / "out.ome.tif"),
+            "--bounds", "0", "0", "10", "11", "--output-json", "-"]
+    result = CliRunner().invoke(main, base + ["--channel", "1", "--channel", "0",
+                                              "--rename-channels-json", str(rename_file),
+                                              "--rename-channels-by", "index"])
+    assert result.exit_code == 0, result.output
+    assert writer_spy[0]["channels"] == [("CD3e", "DNA")]
+    writer_spy.clear()
+    result = CliRunner().invoke(main, base + ["--rename-channels-json", str(rename_file),
+                                              "--rename-channels-by", "index"])
+    assert result.exit_code == 0, result.output
+    assert writer_spy[0]["channels"] == [("DNA", "CD3e")]
+    writer_spy.clear()
+    result = CliRunner().invoke(main, base + ["--named-channel", "DNA", "DAPI",
+                                              "--rename-channels-json", str(rename_file),
+                                              "--rename-channels-by", "index"])
+    assert result.exit_code == 2 and not writer_spy
+    assert "either --named-channel or --rename-channels-json" in result.output
+    result = CliRunner().invoke(main, base + ["--channel", "index:01"])
+    assert result.exit_code == 2 and "canonical zero-based integer" in result.output
+    assert not writer_spy
+
+
+def test_cli_renames_file_cannot_be_image_or_report_output(input_file, tmp_path, writer_spy):
+    path, _ = input_file
+    renames = tmp_path / "renames.json"
+    renames.write_text('{"DAPI":"DNA"}')
+    args = ["crop", str(path), "-o", str(renames), "--bounds", "0", "0", "8", "9",
+            "--rename-channels-json", str(renames), "--rename-channels-by", "name"]
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code != 0 and not writer_spy
+    assert renames.read_text() == '{"DAPI":"DNA"}'
+    args[3] = str(tmp_path / "output.ome.tif")
+    result = CliRunner().invoke(main, args + ["--output-json", str(renames)])
+    assert result.exit_code != 0 and not writer_spy
+    assert renames.read_text() == '{"DAPI":"DNA"}'
+
+
+def test_cli_explicit_name_selects_numeric_name(tmp_path, writer_spy):
+    path = tmp_path / "numeric.ome.tif"
+    values = np.arange(2 * 16 * 16, dtype=np.uint16).reshape(2, 16, 16)
+    tifffile.imwrite(path, values, ome=True, metadata={
+        "axes": "CYX", "Channel": {"Name": ["0", "DAPI"]},
+        "PhysicalSizeX": .5, "PhysicalSizeY": .5,
+        "PhysicalSizeXUnit": "µm", "PhysicalSizeYUnit": "µm",
+    })
+    result = CliRunner().invoke(main, ["crop", str(path), "-o", str(tmp_path / "out.ome.tif"),
+                                       "--bounds", "0", "0", "8", "9",
+                                       "--channel", "name:0", "--named-channel", "DNA", "index:1"])
+    assert result.exit_code == 0, result.output
+    assert writer_spy[0]["channels"] == [("0", "DNA")]
+    np.testing.assert_array_equal(writer_spy[0]["pixels"][0], values[:, :9, :8])
+
+
+@pytest.mark.parametrize("kind", ["rgb", "label"])
+def test_rgb_and_label_remain_indivisible_logical_channels(tmp_path, writer_spy, kind):
+    path = tmp_path / f"{kind}.ome.tif"
+    values = (np.arange(16 * 16 * 3, dtype=np.uint8).reshape(16, 16, 3)
+              if kind == "rgb" else np.arange(16 * 16, dtype=np.uint16).reshape(16, 16))
+    tifffile.imwrite(path, values, ome=True,
+                     photometric="rgb" if kind == "rgb" else "minisblack",
+                     metadata={"axes": "YXS" if kind == "rgb" else "YX",
+                               "PhysicalSizeX": .5, "PhysicalSizeY": .5,
+                               "PhysicalSizeXUnit": "µm", "PhysicalSizeYUnit": "µm"})
+    kw = {"labels": kind == "label"}
+    r = crop(path, tmp_path / "out.ome.tif", bounds=(0, 0, 9, 10),
+             channels=[(0, "Renamed")], **kw)
+    assert writer_spy[0]["channels"] == [("Renamed",)]
+    assert writer_spy[0]["types"] == [kind]
+    np.testing.assert_array_equal(writer_spy[0]["pixels"][0], values[:10, :9])
+    assert len(r["channel_mapping"]) == 1
+    writer_spy.clear()
+    with pytest.raises(ValueError, match="indivisible"):
+        crop(path, tmp_path / "out.ome.tif", bounds=(0, 0, 9, 10),
+             channels=[0, 0], **kw)
+    assert not writer_spy
 
 
 @pytest.mark.parametrize("shatter, suffix", [(None, ""), ("by_index", "-02"), ("by_name", "-b")])
@@ -244,6 +434,24 @@ def test_real_crop_tiff_readback(input_file, tmp_path):
         np.testing.assert_array_equal(actual.asarray(), a[:, 3:30, 2:40])
         assert actual.pixel_size == PixelSize(.5, .7, "µm")
         assert len(actual.levels) > 1
+
+
+def test_real_selected_channel_crop_tiff_roundtrip(input_file, tmp_path):
+    path, pixels = input_file
+    target = tmp_path / "selected.ome.tif"
+    report = crop(path, target, bounds=(3, 4, 27, 21),
+                  channels=[("CD3", "CD3e"), "DAPI"],
+                  compression="Uncompressed", tile_size=16)
+    assert report["outputs"][0]["path"] == str(target)
+    assert [entry["output_name"] for entry in report["channel_mapping"]] == ["CD3e", "DAPI"]
+    with OMETiffReader(target) as image:
+        assert image.channel_names == ("CD3e", "DAPI")
+        assert image.pixel_size == PixelSize(.5, .7, "µm")
+        np.testing.assert_array_equal(image.asarray(), pixels[[1, 0], 4:21, 3:27])
+        assert image.series_name == "01 - ROI"
+    assert report["outputs"][0]["write_report"]["provenance"]["value"]["channel_mapping"] == (
+        report["channel_mapping"]
+    )
 
 
 @pytest.mark.parametrize("output, shattered", [

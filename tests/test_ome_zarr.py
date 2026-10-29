@@ -243,6 +243,31 @@ def test_collection_crop_shatter_and_temporary_writer(tmp_path):
     assert not path.exists()
 
 
+@pytest.mark.parametrize("version", ["0.4", "0.5", "0.6"])
+def test_zarr_crop_channel_selection_and_renaming_roundtrip(tmp_path, version):
+    source = tmp_path / "source"
+    data, _, _ = fixture(source, version=version, levels=1)
+    output = tmp_path / "selected.ome.zarr"
+    report = crop(
+        source, output, input_type="ome_zarr", output_format="ome_zarr",
+        bounds=(7, 9, 39, 41), channels=[("Marker 2", "Sox10"), 0], tile_size=16,
+    )
+    assert report["channel_mapping"] == [
+        {"source_index": 2, "source_name": "Marker 2", "output_index": 0,
+         "output_name": "Sox10"},
+        {"source_index": 0, "source_name": "Marker 0", "output_index": 1,
+         "output_name": "Marker 0"},
+    ]
+    validate_report(report, "crop_report.schema.json")
+    with OMEZarrReader(output) as actual:
+        assert actual.channel_names == ("Sox10", "Marker 0")
+        assert actual.origin_yx == (11.25 + 9 * .6, -9.5 + 7 * .5)
+        np.testing.assert_array_equal(actual.asarray(), data[[2, 0], 9:41, 7:39])
+    inspection = ZarrInspector(output).report
+    root = next(n["attributes"] for n in inspection["metadata_nodes"] if n["group"] == "")
+    assert root["omeify"]["provenance"]["channel_mapping"] == report["channel_mapping"]
+
+
 @pytest.mark.parametrize("args", [
     ["convert", "--output-format", "ome_zarr"],
     ["mutate", "--output-format", "ome_zarr", "--dtype", "uint16", "--range-mode", "preserve"],

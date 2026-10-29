@@ -92,7 +92,10 @@ def test_schema_edits_do_not_change_cached_authority():
 def provenance():
     return {
         "coordinate_system": "level0_pixels", "shatter": None, "source_series": 0,
-        "source_size": [64, 48], "crop_mode": "bounding_rectangle", "regions": [{
+        "source_size": [64, 48], "crop_mode": "bounding_rectangle",
+        "channel_mapping": [{"source_index": 0, "source_name": "DAPI",
+                             "output_index": 0, "output_name": "DNA"}],
+        "regions": [{
             "input_index": 1, "name": None, "output_name": "01 - ROI",
             "output_series": 0, "requested_bounds": [0., 0., 16., 16.],
             "bounds": [0, 0, 16, 16], "clipped": False, "source_offset_xy": [0, 0],
@@ -103,10 +106,17 @@ def provenance():
 def test_report_identifier_is_current_and_input_record_is_not_mutated(provenance):
     original = deepcopy(provenance)
     result = complete_report(provenance, "crop_provenance.schema.json")
-    assert result["schema"] == "omeify.crop_provenance/1" and provenance == original
+    assert result["schema"] == "omeify.crop_provenance/2" and provenance == original
     result["schema"] = "omeify.crop/2"
     with pytest.raises(ValueError, match="const"):
         validate_report(result, "crop_provenance.schema.json")
+
+
+def test_legacy_reserved_crop_provenance_cannot_bypass_current_validation():
+    from omeify.provenance import canonical_provenance
+
+    with pytest.raises(ValueError, match="Unsupported crop provenance version"):
+        canonical_provenance({"schema": "omeify.crop_provenance/1", "patient": "private"})
 
 
 @pytest.mark.parametrize("key", ["deidentify_ome", "significant_bits_matches_dtype",
@@ -225,7 +235,7 @@ def test_real_workflow_reports_and_pixels(tmp_path, real_stack, operation):
             rectangle_feature([20, 5, 36, 21], name="second"),
         ]}, shatter="by_index" if operation == "shatter" else None, **settings)
         schema = "crop_report.schema.json"
-        assert report["schema"] == "omeify.crop/4"
+        assert report["schema"] == "omeify.crop/5"
         for product in report["outputs"]:
             for region in product["regions"]:
                 x0, y0, x1, y1 = region["bounds"]

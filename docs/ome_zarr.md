@@ -269,6 +269,12 @@ its existing GeoJSON rectangles, naming/grouping and per-output transaction rule
 `OMEZarrCollectionWriter` accepts the same `OMEImageSeries` entries used for TIFF
 collections. `TemporaryOMEZarrWriter` handles temporary-directory lifetime.
 
+Crop can also select, reorder and rename logical channels for Zarr input/output,
+using the same flags as TIFF: `--channel DAPI --named-channel CD8a CD8`.
+This is a lazy per-ROI projection, not a separate Zarr pixel-processing stack.
+Ordered source/output channel identities are recorded in the report and retained
+crop provenance. Omitted channel selectors still export every logical channel.
+
 Inspection has its own `ZarrInspector` with `report`, `render_text()`, `to_json()`
 and `validation_errors()`, also available through `reader.inspect()`. It never
 decodes pixels or traverses every chunk merely to compute a byte size. The
@@ -400,7 +406,7 @@ and level offsets; existing callers need not supply them. There is no long/wide
 parallel image API or file-only wrapper forced onto remote stores.
 
 Convert report: `omeify.convert/2`; mutation: `omeify.mutate/2`; crop:
-`omeify.crop/4`. Direct TIFF writer report identifiers stay unchanged. New Zarr
+`omeify.crop/5`. Direct TIFF writer report identifiers stay unchanged. New Zarr
 records use `omeify.zarr_write/1`, `omeify.zarr_collection/1`, and
 `omeify.zarr_inspect/2`. Readers of the operation reports should accept the new
 explicit format variants. `miti_header` is null for Zarr. Zarr source `size_bytes`

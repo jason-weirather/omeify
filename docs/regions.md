@@ -18,8 +18,8 @@ The same crop command accepts `--type ome_zarr` and the Zarr source selectors.
 instead of a TIFF suffix. Names and crop provenance are intentional retained
 metadata; `by_index` does not remove names from metadata. Known physical origins
 are shifted with the crop. See [OME-Zarr](ome_zarr.md) for complete examples and
-new-directory publication restrictions. Current crop report: `omeify.crop/4`;
-embedded provenance: `omeify.crop_provenance/1`.
+new-directory publication restrictions. Current crop report: `omeify.crop/5`;
+embedded provenance: `omeify.crop_provenance/2`.
 
 ## Crop known coordinates
 
@@ -36,7 +36,7 @@ to sRGB before encoding, and JPEG remains lossy.
 
 `--type` defaults to `ome_tiff`; supported vendor profiles are the same as
 `convert`. `--series` defaults to zero. All channels of the selected series are
-exported. For TIFF destinations, scalar/label output retains lossless LZW /
+exported unless a channel selection is supplied. For TIFF destinations, scalar/label output retains lossless LZW /
 1024-pixel tiles; RGB retains
 JPEG quality 90 / 4:2:2 / 512-pixel tiles. Use `--compression Deflate` to avoid JPEG loss after any required sRGB
 color transform. Zarr destinations instead default to lossless Zstd and
@@ -47,6 +47,52 @@ Physical pixel calibration is preserved and remains required for export.
 explicit override. Declare a categorical OME series with `--labels` so the
 writer uses lossless storage and nearest-neighbor pyramids. Labels are not
 renumbered. Storage, scratch, workers, and verbosity options appear in `crop --help`.
+
+
+### Select and rename channels while cropping
+
+By default, `crop` exports **all logical channels** from the chosen image series.
+To keep fewer channels, use repeatable `--channel NAME|INDEX` in **output order**;
+intermix `--named-channel OUTPUT_NAME NAME|INDEX` to select and rename in one step:
+
+```bash
+omeify crop slide.ome.tiff -o selected.ome.tiff --bounds 100 200 612 712 \
+  --channel DAPI --named-channel CD8a CD8 --channel 3
+
+# Rename channels without filtering any out (same mapping syntax as convert/mutate).
+omeify crop slide.ome.tiff -o renamed.ome.tiff --geojson regions.geojson \
+  --rename-channels-json renames.json --rename-channels-by name
+
+# Select, reorder, and rename with a JSON mapping of original source indices.
+omeify crop slide.ome.tiff -o roi.ome.tiff --bounds 100 200 612 712 \
+  --channel 2 --channel 0 --rename-channels-json renames.json \
+  --rename-channels-by index
+```
+
+A bare CLI decimal (`0`, `1`, `2`, ...) selects a **zero-based index**. Other
+unprefixed values select an **exact, case-sensitive source name**. Explicit
+`index:2` and `name:0` disambiguate indices and literally numeric channel names;
+noncanonical index spellings such as `index:02` are rejected. Ambiguous duplicate
+source names must be selected by index. Multiple selections, including duplicates,
+are deliberate and are never sorted or deduplicated. `--named-channel` and
+`--rename-channels-json` are mutually exclusive, rather than having a hidden
+precedence policy. JSON rename keys use the full original source indices/names,
+not newly assigned output positions, and `--rename-channels-by` is required.
+
+A label raster or interleaved RGB image has **one logical channel**, index zero.
+You can rename it, but cannot select individual RGB samples or duplicate it as
+separate logical channels. Spatial cropping and channel filtering/renaming are
+lazy borrowed views; neither copies the full slide nor alters scalar intensity
+values. Any selected channel set applies to **every ROI** in a combined or
+shattered product, including OME-Zarr output.
+
+The report's ordered `channel_mapping` and each output's embedded crop provenance
+record `source_index`, `source_name`, `output_index`, and `output_name`. These
+records include default all-channel exports too. The new crop report contract is
+`omeify.crop/5` and embedded provenance is `omeify.crop_provenance/2`; prior
+report versions are not silently rewritten. The source names in this record
+are deliberate retained metadata and must be reviewed before sharing.
+
 
 ## Crop GeoJSON
 
@@ -63,7 +109,7 @@ is added. Prefer an explicit `.ome.tif` or `.ome.tiff` filename for viewers.
 Crop prints a short completion line by default; progress goes to stderr.
 Use `--output-json FILE` to save its full report, `--output-json -` for JSON-only
 stdout, or `-vvv` for the diagnostic report. [Current report contracts](reports.md)
-use crop report `omeify.crop/4` and embedded provenance `omeify.crop_provenance/1`.
+use crop report `omeify.crop/5` and embedded provenance `omeify.crop_provenance/2`.
 
 Supported inputs are a Feature, FeatureCollection, bare Polygon/MultiPolygon,
 polygon GeometryCollection, or a Feature array. `--geojson -` reads stdin.
@@ -177,10 +223,11 @@ no compatibility alias can silently retain the old default. Use
 
 Python's second parameter is now `output_path` rather than `output_base`.
 Positional calls still work, but without shatter they write the exact requested
-path. Change bare prefixes to complete filenames for combined output. At the time of the 0.20 change, crop reports and embedded provenance both
-used `omeify.crop/2`; the report gained `output_path` and `shatter` instead of
-`naming`, and each region gained `output_name`. The current 0.22 report/provenance
-identifiers are `omeify.crop/4` and `omeify.crop_provenance/1`, respectively.
+path. Change bare prefixes to complete filenames for combined output. At the
+0.20 change, crop reports and embedded provenance both used `omeify.crop/2`; the report gained `output_path` and `shatter` instead of
+`naming`, and each region gained `output_name`. This checkout's current identifiers
+are `omeify.crop/5` and `omeify.crop_provenance/2`, including explicit
+source-to-output channel mappings.
 No image, geometry, or previously written file is modified by upgrading.
 
 ## Ask for visual GeoJSON
@@ -294,8 +341,9 @@ an explicit display range for one-channel previews only. Otherwise Omeify uses a
 display-only minimum-to-upper-quantile mapping, with `--preview-quantile` defaulting
 to **0.999** so the brightest 0.1% of overview bins do not dominate the preview.
 Non-finite samples are omitted and reported. None of these display controls change
-pixels later exported by `crop`; crops still contain all channels. A DAPI overview
-shows nuclear signal, **not a definitive tissue mask**.
+pixels later exported by `crop`; crops contain all channels by default, or the
+explicitly selected channels when `--channel`/`--named-channel` is supplied.
+A DAPI overview shows nuclear signal, **not a definitive tissue mask**.
 
 The model returns a compact, schema-constrained selection: names, normalized
 `[x0,y0,x1,y1]` boxes on a **0..1000 scale per axis**, and optional fixed pixel
@@ -341,6 +389,17 @@ report = crop("slide.ome.tiff", "Scratch/regions.ome.tiff", geojson=regions)
 # Optional per-ROI files, still using the same writer and source coordinates:
 split_report = crop(
     "slide.ome.tiff", "Scratch/split.ome.tiff", geojson=regions, shatter="by_index",
+)
+
+# Select and optionally rename without materializing a whole-slide array.
+selected_report = crop(
+    "slide.ome.tiff", "Scratch/selected.ome.tiff", geojson=regions,
+    channels=["DAPI", (2, "CD8a")],
+)
+# Leave every channel in place and rename just one by original source index.
+renamed_report = crop(
+    "slide.ome.tiff", "Scratch/renamed.ome.tiff", geojson=regions,
+    rename_channels={2: "CD8a"}, rename_channels_by="index",
 )
 ```
 

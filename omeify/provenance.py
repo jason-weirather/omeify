@@ -47,8 +47,13 @@ def canonical_provenance(
                           sort_keys=True, separators=(",", ":"))
     if len(rendered.encode("utf-8")) > MAX_PROVENANCE_BYTES:
         raise ValueError("Collection provenance exceeds 1 MiB")
-    if value.get("schema") == "omeify.crop_provenance/1":
+    declared_schema = value.get("schema")
+    if declared_schema == "omeify.crop_provenance/2":
         validate_report(value, "crop_provenance.schema.json")
+    elif isinstance(declared_schema, str) and declared_schema.startswith(
+        "omeify.crop_provenance/"
+    ):
+        raise ValueError("Unsupported crop provenance version; regenerate with the current crop")
     return rendered, value
 
 

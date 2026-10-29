@@ -769,7 +769,36 @@ def mutate_command(
     )
 
 
-@main.command("crop", context_settings=_CONTEXT_SETTINGS)
+def _crop_channel_selector(value: str) -> int | str:
+    """Parse an explicit index or an exact name without guessing numeric names."""
+    if value.startswith("name:"):
+        name = value[len("name:"):]
+        if not name:
+            raise click.UsageError("name: channel selectors require a non-empty source name")
+        return name
+    index = value[len("index:"):] if value.startswith("index:") else value
+    if _INDEX_KEY.fullmatch(index):
+        return int(index)
+    if value.startswith("index:"):
+        raise click.UsageError("index: selectors require a canonical zero-based integer")
+    if not value:
+        raise click.UsageError("Channel selectors must not be empty")
+    return value
+
+
+class _CropCommand(click.Command):
+    """Preserve ordering across repeated --channel and --named-channel flags."""
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        _, _, order = self.make_parser(ctx).parse_args(args=list(args))
+        ctx.meta["_omeify_crop_channel_order"] = tuple(
+            option.name for option in order
+            if option.name in {"selected_channels", "named_channels"}
+        )
+        return super().parse_args(ctx, args)
+
+
+@main.command("crop", cls=_CropCommand, context_settings=_CONTEXT_SETTINGS)
 @source_options
 @output_options
 @click.argument("input_path", type=str)
@@ -792,6 +821,15 @@ def mutate_command(
 @click.option("--labels", is_flag=True,
               help="Declare a categorical label image; use lossless/nearest storage.")
 @click.option("--channel-name-field", type=click.Choice(["name", "biomarker", "auto"]), default=None)
+@click.option("--channel", "selected_channels", multiple=True, metavar="NAME|INDEX",
+              help="Select a source logical channel by name or zero-based index; repeat in output order.")
+@click.option("--named-channel", "named_channels", type=(str, str), multiple=True,
+              metavar="OUTPUT_NAME NAME|INDEX",
+              help="Select and rename one channel, preserving order with --channel.")
+@click.option("--rename-channels-json", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Rename selected or all channels using a source-name/index JSON mapping.")
+@click.option("--rename-channels-by", type=click.Choice(["name", "index"]), default=None,
+              help="Interpret rename JSON keys explicitly as names or indices.")
 @click.option("--pixel-size-x", type=click.FloatRange(min=0, min_open=True), default=None)
 @click.option("--pixel-size-y", type=click.FloatRange(min=0, min_open=True), default=None)
 @click.option("--pixel-size-unit", type=str, default=None)
@@ -814,7 +852,10 @@ def crop_command(
     output_format: str,
     input_path: Path, output_path: Path, bounds: tuple[int, ...] | None, geojson_path: str | None,
     shatter: str | None, clip: bool, input_type: str, series: int, labels: bool,
-    channel_name_field: str | None, pixel_size_x: float | None, pixel_size_y: float | None,
+    channel_name_field: str | None, selected_channels: tuple[str, ...],
+    named_channels: tuple[tuple[str, str], ...],
+    rename_channels_json: Path | None, rename_channels_by: str | None,
+    pixel_size_x: float | None, pixel_size_y: float | None,
     pixel_size_unit: str | None, compression: str | None, jpeg_quality: int,
     jpeg_subsampling: str, tile_size: int | None, pyramid_levels: int | None,
     workers: int | None, cache_directory: Path | None, overwrite: bool, verbose: int,
@@ -828,12 +869,29 @@ def crop_command(
     names. Shattered paths add a suffix before the selected format's extension.
 
     GeoJSON uses full-resolution XY pixel coordinates, not geographic coordinates.
-    Polygons are exported as bounding rectangles, without masking.
+    Polygons are exported as bounding rectangles, without masking. Repeated
+    --channel and --named-channel choose/reorder logical channels; omitted
+    selectors retain all channels. Rename JSON uses the convert/mutate policy.
     """
     configure_logging(verbose)
     input_path = str(input_path) if is_remote(input_path) else Path(input_path)
     if (bounds is None) == (geojson_path is None):
         raise click.UsageError("Choose exactly one of --bounds or --geojson")
+    if named_channels and rename_channels_json is not None:
+        raise click.UsageError("Choose either --named-channel or --rename-channels-json")
+    renames, rename_mode = _load_channel_renames(
+        rename_channels_json, rename_channels_by,  # type: ignore[arg-type]
+    )
+    channel_selections = []
+    plain, named = iter(selected_channels), iter(named_channels)
+    for name in click.get_current_context().meta.get("_omeify_crop_channel_order", ()):
+        if name == "selected_channels":
+            channel_selections.append(_crop_channel_selector(next(plain)))
+        else:
+            output_name, source = next(named)
+            channel_selections.append((_crop_channel_selector(source), output_name))
+    if len(channel_selections) != len(selected_channels) + len(named_channels):
+        raise click.UsageError("Unable to determine source channel selection order")
     try:
         if geojson_path == "-":
             from omeify.regions import MAX_GEOJSON_CHARS, load_geojson
@@ -844,9 +902,13 @@ def crop_command(
         document, auxiliary = load_crop_document(bounds=bounds, geojson=geojson)
         outputs = group_outputs(parse_regions(document), output_path, shatter=shatter, output_format=output_format)
         image_paths = [path for path, _ in outputs]
-        protected = [input_path, *auxiliary, *image_paths]
+        rename_sources = [] if rename_channels_json is None else [rename_channels_json]
+        protected = [input_path, *auxiliary, *rename_sources, *image_paths]
         for path in image_paths:
-            preflight_storage(path, output_format, protected=(input_path, *auxiliary), overwrite=overwrite)
+            preflight_storage(
+                path, output_format, protected=(input_path, *auxiliary, *rename_sources),
+                overwrite=overwrite,
+            )
         preflight_report(output_json, protected=protected, overwrite=overwrite)
         report = crop(
             input_path, output_path, geojson=document,
@@ -854,6 +916,8 @@ def crop_command(
             output_format=output_format, group=group, z=z, t=t, image_type=image_type,
             intrinsic_only=intrinsic_only,
             channel_name_field=channel_name_field,
+            channels=channel_selections if channel_selections else None,
+            rename_channels=renames, rename_channels_by=rename_mode,
             pixel_size=_pixel_size_override(pixel_size_x, pixel_size_y, pixel_size_unit),
             compression=compression, jpeg_quality=jpeg_quality, jpeg_subsampling=jpeg_subsampling,
             tile_size=tile_size, pyramid_levels=pyramid_levels, max_workers=workers,

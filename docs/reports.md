@@ -11,8 +11,9 @@ it tightens interpretation/metadata checks and makes inspection scope explicit.
 OME-Zarr has its own storage and inspection records, not fabricated TIFF IFDs.
 `omeify.zarr_write/1`, `omeify.zarr_collection/1`, and `omeify.zarr_inspect/2`
 are validated by packaged schemas. Convert/mutate report version 2 selects the
-appropriate TIFF or Zarr output/verification variant. Crop version 4 accepts both
-collection writers; the embedded crop provenance stays `omeify.crop_provenance/1`.
+appropriate TIFF or Zarr output/verification variant. Crop version 5 supports
+both collection writers and records source-to-output channel identities;
+embedded crop provenance version 2 stores the same mapping for each file.
 `miti_header` is null for Zarr, never a false claim of TIFF-header compliance.
 Input Zarr `size_bytes` is null: discovery does not traverse an entire store to
 measure it. Source selectors and physical origins are explicit. A source store
@@ -67,8 +68,8 @@ References resolve against packaged resources, never by fetching their `$id` URL
 | `multi_series_report.schema.json` | Named heterogeneous images, including `concat`: `omeify.multi_series/1` |
 | `conversion_report.schema.json` | Conversion: `omeify.convert/2` |
 | `mutation_report.schema.json` | Integer or float32 precision mutation: `omeify.mutate/2` |
-| `crop_report.schema.json` | Crop export, including nested writer reports: `omeify.crop/4` |
-| `crop_provenance.schema.json` | Embedded crop geometry/provenance: `omeify.crop_provenance/1` |
+| `crop_report.schema.json` | Crop export, including nested writer reports: `omeify.crop/5` |
+| `crop_provenance.schema.json` | Embedded crop geometry/provenance: `omeify.crop_provenance/2` |
 | `tiff_inspection.schema.json` | TIFF inspection: `schema_version="2.0"` |
 | `zarr_inspection.schema.json` | Zarr inspection, including discovery metadata snapshots: `omeify.zarr_inspect/2` |
 | `zarr_write_report.schema.json` | Zarr single-image/temporary writer: `omeify.zarr_write/1` |
@@ -132,10 +133,11 @@ Retired schema/prompt combinations are not silently upgraded or reinterpreted.
 TIFF inspection schema version 2.0 reflects that nested contract change, not a restriction to
 writer-supported TIFF layouts. Ordinary inspection remains useful on unsupported inputs.
 
-The 0.21 cleanup introduced crop report version 3; **current output is version 4**
-to support either TIFF or Zarr collection reports. Embedded crop provenance
-retains its separate `omeify.crop_provenance/1` identifier. Old reports are not
-silently rewritten into current schemas.
+The 0.21 cleanup introduced crop report version 3, version 4 added Zarr
+collection support, and **current output is version 5** to include the required
+ordered source-to-output `channel_mapping`. Embedded crop provenance is now
+`omeify.crop_provenance/2` for the same reason. Old reports are not silently
+rewritten into current schemas.
 
 ## Stored metadata checks
 
@@ -161,7 +163,8 @@ schemas validate the image product's own controlled records:
 Explicit collection provenance in either backend must be a mapping of finite,
 acyclic plain Python JSON data with string keys (no object/key coercion), at most
 64 nested containers and 1 MiB encoded
-UTF-8. A declared `omeify.crop_provenance/1` object must also satisfy its schema.
+UTF-8. A declared `omeify.crop_provenance/2` object must also satisfy its schema,
+including the ordered logical channel selection and rename mapping.
 Other caller-supplied provenance objects are intentionally not given invented
 biological semantics; they are copied deliberately and need sharing review.
 

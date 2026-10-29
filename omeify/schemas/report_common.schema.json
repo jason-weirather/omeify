@@ -1943,6 +1943,26 @@
         }
       }
     },
+    "crop_channel_mapping": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_index",
+          "source_name",
+          "output_index",
+          "output_name"
+        ],
+        "properties": {
+          "source_index": {"type": "integer", "minimum": 0},
+          "source_name": {"type": "string", "minLength": 1},
+          "output_index": {"type": "integer", "minimum": 0},
+          "output_name": {"type": "string", "minLength": 1}
+        }
+      }
+    },
     "crop_region": {
       "type": "object",
       "additionalProperties": false,

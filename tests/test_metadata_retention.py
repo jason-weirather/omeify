@@ -229,7 +229,7 @@ def test_explicit_provenance_is_bounded_and_snapshotted():
         with pytest.raises(ValueError):
             canonical_provenance(bad)
     with pytest.raises(ValueError, match="crop_provenance.schema.json"):
-        canonical_provenance({"schema": "omeify.crop_provenance/1", "patient": PRIVATE})
+        canonical_provenance({"schema": "omeify.crop_provenance/2", "patient": PRIVATE})
 
 
 def test_icc_is_a_canonicalized_output_boundary():

@@ -651,6 +651,30 @@ one file per ROI or `--shatter by_name` to group equal names into separate files
 See [cropping and visual region questions](regions.md) for filename rules, indexed
 series labels, coordinates, clipping, streaming, provenance, and migration examples.
 
+Channel selection and renaming are available for both TIFF and Zarr outputs:
+
+```bash
+omeify crop slide.ome.tiff -o region.ome.tiff --bounds 100 200 612 712 \
+  --channel DAPI --named-channel CD8a CD8
+
+omeify crop slide.ome.tiff -o renamed.ome.tiff --bounds 100 200 612 712 \
+  --rename-channels-json renames.json --rename-channels-by index
+```
+
+The repeatable `--channel SOURCE` and `--named-channel OUTPUT_NAME SOURCE`
+flags can be intermixed, preserving CLI occurrence order. Unprefixed decimal
+sources are zero-based indices; all other unprefixed sources are exact names.
+Use `name:0` or `index:0` to force interpretation. Omit both flags to keep all
+channels, even when using the separate rename JSON mapping. Output channel names
+and original source indices/names are recorded in the crop report and embedded
+provenance (`omeify.crop/5`, `omeify.crop_provenance/2`).
+
+Python `crop(..., channels=["DAPI", (2, "CD8a")])` uses exact names for strings,
+zero-based integers for indices, and `(source, output_name)` pairs for explicit
+one-channel renames. Alternatively, `rename_channels={2: "CD8a"}` and
+`rename_channels_by="index"` apply the same global mapping as conversion. RGB and
+labels each remain one logical channel; they cannot be split into scalar samples.
+
 ### `omeify inspect`
 
 Ordinary inspection reads TIFF directories and metadata without materializing the complete raster. It works
