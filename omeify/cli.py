@@ -814,7 +814,14 @@ class _CropCommand(click.Command):
 @click.option("--shatter", type=click.Choice(["by_index", "by_name"]), default=None,
               help=("Split into files by input index or by name (equal names share a file). "
                     "Default: all ROIs in one file, in input order."))
-@click.option("--clip", is_flag=True, help="Explicitly clip out-of-bounds rectangles to the image.")
+@click.option("--clip", is_flag=True, help="Trim requested crop bounds to the source image.")
+@click.option("--padding", type=click.IntRange(min=0), default=0, show_default=True,
+              help="Additional pixels around every ROI envelope, filled outside the polygon.")
+@click.option("--pad-outside", is_flag=True,
+              help="Keep crop bounds outside the image and pad with background; conflicts with --clip.")
+@click.option("--mask-background", type=click.Choice(["auto", "black", "white", "keep"]),
+              default="auto", show_default=True,
+              help="Outside polygon: RGB white / scalar black (auto), black, white, or keep bbox pixels.")
 @click.option("--type", "input_type", type=click.Choice(INPUT_TYPES),
               default="ome_tiff", show_default=True)
 @click.option("--series", type=click.IntRange(min=0), default=0, show_default=True)
@@ -851,7 +858,8 @@ def crop_command(
     group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
     output_format: str,
     input_path: Path, output_path: Path, bounds: tuple[int, ...] | None, geojson_path: str | None,
-    shatter: str | None, clip: bool, input_type: str, series: int, labels: bool,
+    shatter: str | None, clip: bool, padding: int, pad_outside: bool,
+    mask_background: str, input_type: str, series: int, labels: bool,
     channel_name_field: str | None, selected_channels: tuple[str, ...],
     named_channels: tuple[tuple[str, str], ...],
     rename_channels_json: Path | None, rename_channels_by: str | None,
@@ -869,14 +877,18 @@ def crop_command(
     names. Shattered paths add a suffix before the selected format's extension.
 
     GeoJSON uses full-resolution XY pixel coordinates, not geographic coordinates.
-    Polygons are exported as bounding rectangles, without masking. Repeated
-    --channel and --named-channel choose/reorder logical channels; omitted
+    Polygons are masked at pixel centers within rectangular output rasters;
+    --mask-background keep retains legacy whole-bounding-box pixels. --padding
+    adds pixels around the polygon. --pad-outside allows off-slide background.
+    Repeated --channel and --named-channel choose/reorder logical channels; omitted
     selectors retain all channels. Rename JSON uses the convert/mutate policy.
     """
     configure_logging(verbose)
     input_path = str(input_path) if is_remote(input_path) else Path(input_path)
     if (bounds is None) == (geojson_path is None):
         raise click.UsageError("Choose exactly one of --bounds or --geojson")
+    if clip and pad_outside:
+        raise click.UsageError("--clip and --pad-outside are mutually exclusive")
     if named_channels and rename_channels_json is not None:
         raise click.UsageError("Choose either --named-channel or --rename-channels-json")
     renames, rename_mode = _load_channel_renames(
@@ -913,6 +925,7 @@ def crop_command(
         report = crop(
             input_path, output_path, geojson=document,
             input_type=input_type, series=series, shatter=shatter, clip=clip, labels=labels,
+            padding=padding, pad_outside=pad_outside, mask_background=mask_background,
             output_format=output_format, group=group, z=z, t=t, image_type=image_type,
             intrinsic_only=intrinsic_only,
             channel_name_field=channel_name_field,

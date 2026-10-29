@@ -68,8 +68,8 @@ References resolve against packaged resources, never by fetching their `$id` URL
 | `multi_series_report.schema.json` | Named heterogeneous images, including `concat`: `omeify.multi_series/1` |
 | `conversion_report.schema.json` | Conversion: `omeify.convert/2` |
 | `mutation_report.schema.json` | Integer or float32 precision mutation: `omeify.mutate/2` |
-| `crop_report.schema.json` | Crop export, including nested writer reports: `omeify.crop/5` |
-| `crop_provenance.schema.json` | Embedded crop geometry/provenance: `omeify.crop_provenance/2` |
+| `crop_report.schema.json` | Crop export, including nested writer reports: `omeify.crop/6` |
+| `crop_provenance.schema.json` | Embedded crop geometry/provenance: `omeify.crop_provenance/3` |
 | `tiff_inspection.schema.json` | TIFF inspection: `schema_version="2.0"` |
 | `zarr_inspection.schema.json` | Zarr inspection, including discovery metadata snapshots: `omeify.zarr_inspect/2` |
 | `zarr_write_report.schema.json` | Zarr single-image/temporary writer: `omeify.zarr_write/1` |
@@ -134,9 +134,10 @@ TIFF inspection schema version 2.0 reflects that nested contract change, not a r
 writer-supported TIFF layouts. Ordinary inspection remains useful on unsupported inputs.
 
 The 0.21 cleanup introduced crop report version 3, version 4 added Zarr
-collection support, and **current output is version 5** to include the required
-ordered source-to-output `channel_mapping`. Embedded crop provenance is now
-`omeify.crop_provenance/2` for the same reason. Old reports are not silently
+collection support, version 5 added ordered source-to-output `channel_mapping`,
+and **current output is version 6** for polygon geometry masking, fill policy and
+padding. Embedded crop provenance is now `omeify.crop_provenance/3` to capture
+the same settings and per-ROI geometry digests. Old reports are not silently
 rewritten into current schemas.
 
 ## Stored metadata checks
@@ -163,7 +164,7 @@ schemas validate the image product's own controlled records:
 Explicit collection provenance in either backend must be a mapping of finite,
 acyclic plain Python JSON data with string keys (no object/key coercion), at most
 64 nested containers and 1 MiB encoded
-UTF-8. A declared `omeify.crop_provenance/2` object must also satisfy its schema,
+UTF-8. A declared `omeify.crop_provenance/3` object must also satisfy its schema,
 including the ordered logical channel selection and rename mapping.
 Other caller-supplied provenance objects are intentionally not given invented
 biological semantics; they are copied deliberately and need sharing review.

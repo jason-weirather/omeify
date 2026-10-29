@@ -265,7 +265,10 @@ omeify inspect normalized.ome.zarr --detail 3 --json -o inspection.json
 
 `convert` and `mutate` have the same keyword `output_format="ome_zarr"` in Python.
 The same source selectors apply to all image workflows. Native `crop()` retains
-its existing GeoJSON rectangles, naming/grouping and per-output transaction rules.
+its existing GeoJSON ROI naming/grouping and per-output transaction rules, but now
+masks pixels outside GeoJSON polygon exteriors (including holes and multipolygon
+gaps) by default. `--mask-background keep` restores the legacy full bounding box;
+`--padding` and `--pad-outside` control optional background margins.
 `OMEZarrCollectionWriter` accepts the same `OMEImageSeries` entries used for TIFF
 collections. `TemporaryOMEZarrWriter` handles temporary-directory lifetime.
 
@@ -406,7 +409,7 @@ and level offsets; existing callers need not supply them. There is no long/wide
 parallel image API or file-only wrapper forced onto remote stores.
 
 Convert report: `omeify.convert/2`; mutation: `omeify.mutate/2`; crop:
-`omeify.crop/5`. Direct TIFF writer report identifiers stay unchanged. New Zarr
+`omeify.crop/6`. Direct TIFF writer report identifiers stay unchanged. New Zarr
 records use `omeify.zarr_write/1`, `omeify.zarr_collection/1`, and
 `omeify.zarr_inspect/2`. Readers of the operation reports should accept the new
 explicit format variants. `miti_header` is null for Zarr. Zarr source `size_bytes`

@@ -1,4 +1,4 @@
-"""Pixel-coordinate GeoJSON and rectangular crop planning (not GIS or masking)."""
+"""Pixel-coordinate GeoJSON, ROI geometry, and crop output planning."""
 from __future__ import annotations
 
 import json
@@ -7,6 +7,7 @@ import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from hashlib import sha256
 from numbers import Real
 from pathlib import Path
 from typing import Any, Literal
@@ -83,7 +84,12 @@ def rectangle_feature(bounds: Sequence[Real], *, name: str, **properties: Any) -
     }
 
 
-def _geometry_points(geometry: Any, *, depth: int = 0) -> list[tuple[float, float]]:
+# A region contains a union of polygons, each with one exterior and zero or more
+# holes. Immutable rings keep the validated geometry independent of caller changes.
+PolygonGeometry = tuple[tuple[tuple[tuple[float, float], ...], ...], ...]
+
+
+def _geometry_polygons(geometry: Any, *, depth: int = 0) -> PolygonGeometry:
     if depth > 16 or not isinstance(geometry, dict) or "crs" in geometry:
         raise ValueError("Expected bounded pixel-coordinate geometry without a CRS")
     kind = geometry.get("type")
@@ -92,26 +98,29 @@ def _geometry_points(geometry: Any, *, depth: int = 0) -> list[tuple[float, floa
         if not isinstance(children, list) or not children:
             raise ValueError("Empty or invalid geometry collection")
         if kind == "MultiPolygon":
-            children = [{"type": "Polygon", "coordinates": c} for c in children]
-        return [p for child in children for p in _geometry_points(child, depth=depth + 1)]
+            children = [{"type": "Polygon", "coordinates": item} for item in children]
+        return tuple(
+            polygon for child in children
+            for polygon in _geometry_polygons(child, depth=depth + 1)
+        )
     if kind != "Polygon":
         raise ValueError("Cropping supports Polygon, MultiPolygon, and polygon GeometryCollection")
     rings = geometry.get("coordinates")
     if not isinstance(rings, list) or not rings:
         raise ValueError("Polygon requires at least one ring")
-    points = []
+    prepared = []
     for ring in rings:
         if not isinstance(ring, list) or len(ring) < 4:
             raise ValueError("Polygon rings require at least four positions, including closure")
         positions = []
-        for p in ring:
-            if not isinstance(p, list) or len(p) != 2:
+        for point in ring:
+            if not isinstance(point, list) or len(point) != 2:
                 raise ValueError("Positions must be two-dimensional [x, y] pixel coordinates")
-            positions.append((_number(p[0]), _number(p[1])))
+            positions.append((_number(point[0]), _number(point[1])))
         if positions[0] != positions[-1]:
             raise ValueError("Polygon rings must be closed")
-        points.extend(positions)
-    return points
+        prepared.append(tuple(positions))
+    return (tuple(prepared),)
 
 
 @dataclass(frozen=True)
@@ -119,10 +128,29 @@ class Region:
     index: int  # One-based input order, never a model-assigned identifier.
     name: str | None
     bounds: tuple[float, float, float, float]
+    polygons: PolygonGeometry
+    geometry_type: str
+    geometry_sha256: str
+
+    @property
+    def is_integer_rectangle(self) -> bool:
+        """Whether masking is provably a no-op for the unpadded pixel envelope."""
+        if len(self.polygons) != 1 or len(self.polygons[0]) != 1:
+            return False
+        ring = self.polygons[0][0]
+        if len(ring) != 5 or ring[0] != ring[-1]:
+            return False
+        x0, y0, x1, y1 = self.bounds
+        if any(not value.is_integer() for value in self.bounds):
+            return False
+        return (set(ring[:-1]) == {
+            (x0, y0), (x1, y0), (x1, y1), (x0, y1),
+        } and all(a[0] == b[0] or a[1] == b[1]
+                  for a, b in zip(ring, ring[1:])))
 
 
 def parse_regions(value: Mapping[str, Any] | list[Any]) -> tuple[Region, ...]:
-    """Extract envelopes, not masks. A multipart Feature stays one ROI.
+    """Extract envelopes AND validated polygon rings. A multipart Feature stays one ROI.
 
     A top-level GeometryCollection or Feature array supplies one ROI per member.
     Only properties.name (or a bare geometry's name) controls grouping, never class labels.
@@ -157,12 +185,16 @@ def parse_regions(value: Mapping[str, Any] | list[Any]) -> tuple[Region, ...]:
             raise ValueError(f"Region {index} name must be a string")
         name = name.strip() if name else None
         geometry = item.get("geometry") if item.get("type") == "Feature" else item
-        points = _geometry_points(geometry)
+        polygons = _geometry_polygons(geometry)
+        points = [point for polygon in polygons for ring in polygon for point in ring]
         xs, ys = zip(*points)
         bounds = (min(xs), min(ys), max(xs), max(ys))
         if bounds[0] >= bounds[2] or bounds[1] >= bounds[3]:
             raise ValueError(f"Region {index} has an empty bounding rectangle")
-        result.append(Region(index, name or None, bounds))
+        digest = sha256(json.dumps(polygons, separators=(",", ":"),
+                                    allow_nan=False).encode("utf-8")).hexdigest()
+        result.append(Region(index, name or None, bounds, polygons,
+                             geometry.get("type"), digest))
     return tuple(result)
 
 

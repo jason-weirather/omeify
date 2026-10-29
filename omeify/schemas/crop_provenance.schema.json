@@ -12,11 +12,15 @@
     "source_size",
     "crop_mode",
     "regions",
-    "channel_mapping"
+    "channel_mapping",
+    "mask_background",
+    "fill_value",
+    "padding",
+    "pad_outside"
   ],
   "properties": {
     "schema": {
-      "const": "omeify.crop_provenance/2"
+      "const": "omeify.crop_provenance/3"
     },
     "coordinate_system": {
       "const": "level0_pixels"
@@ -42,7 +46,10 @@
       "maxItems": 2
     },
     "crop_mode": {
-      "const": "bounding_rectangle"
+      "enum": [
+        "bounding_rectangle",
+        "polygon_mask"
+      ]
     },
     "channel_mapping": {
       "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/crop_channel_mapping"
@@ -53,6 +60,24 @@
         "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/crop_region"
       },
       "minItems": 1
+    },
+    "mask_background": {
+      "enum": [
+        "auto",
+        "black",
+        "white",
+        "keep"
+      ]
+    },
+    "fill_value": {
+      "type": "number"
+    },
+    "padding": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pad_outside": {
+      "type": "boolean"
     }
   }
 }

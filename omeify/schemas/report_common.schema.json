@@ -1956,10 +1956,22 @@
           "output_name"
         ],
         "properties": {
-          "source_index": {"type": "integer", "minimum": 0},
-          "source_name": {"type": "string", "minLength": 1},
-          "output_index": {"type": "integer", "minimum": 0},
-          "output_name": {"type": "string", "minLength": 1}
+          "source_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "output_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "output_name": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -1974,7 +1986,10 @@
         "bounds",
         "requested_bounds",
         "clipped",
-        "source_offset_xy"
+        "source_offset_xy",
+        "geometry_type",
+        "geometry_sha256",
+        "mask_applied"
       ],
       "properties": {
         "input_index": {
@@ -1998,8 +2013,7 @@
         "bounds": {
           "type": "array",
           "items": {
-            "type": "integer",
-            "minimum": 0
+            "type": "integer"
           },
           "minItems": 4,
           "maxItems": 4
@@ -2018,11 +2032,24 @@
         "source_offset_xy": {
           "type": "array",
           "items": {
-            "type": "integer",
-            "minimum": 0
+            "type": "integer"
           },
           "minItems": 2,
           "maxItems": 2
+        },
+        "geometry_type": {
+          "enum": [
+            "Polygon",
+            "MultiPolygon",
+            "GeometryCollection"
+          ]
+        },
+        "geometry_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "mask_applied": {
+          "type": "boolean"
         }
       }
     },

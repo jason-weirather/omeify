@@ -48,7 +48,7 @@ def canonical_provenance(
     if len(rendered.encode("utf-8")) > MAX_PROVENANCE_BYTES:
         raise ValueError("Collection provenance exceeds 1 MiB")
     declared_schema = value.get("schema")
-    if declared_schema == "omeify.crop_provenance/2":
+    if declared_schema == "omeify.crop_provenance/3":
         validate_report(value, "crop_provenance.schema.json")
     elif isinstance(declared_schema, str) and declared_schema.startswith(
         "omeify.crop_provenance/"

@@ -667,7 +667,19 @@ sources are zero-based indices; all other unprefixed sources are exact names.
 Use `name:0` or `index:0` to force interpretation. Omit both flags to keep all
 channels, even when using the separate rename JSON mapping. Output channel names
 and original source indices/names are recorded in the crop report and embedded
-provenance (`omeify.crop/5`, `omeify.crop_provenance/2`).
+provenance (`omeify.crop/6`, `omeify.crop_provenance/3`).
+
+GeoJSON polygons now mask **pixels outside their exact shape**, including
+holes and MultiPolygon gaps, inside the required rectangular OME raster.
+`--mask-background auto` uses white RGB and black scalar (the label background ID
+for labels), `--mask-background black|white` overrides the fill, and
+`--mask-background keep` restores the former unmasked bounding rectangle.
+`--padding N` adds pixels around the envelope. The default rejects extents
+outside the source; `--clip` trims them, while `--pad-outside` retains those
+pixels with background fill. Masked RGB TIFF defaults to lossless Deflate to
+avoid JPEG blending at the mask edge unless an explicit codec overrides it.
+Masks are evaluated per requested image block, not materialized as entire slides.
+Geometry digests, padding and fill choices are recorded with the crop provenance.
 
 Python `crop(..., channels=["DAPI", (2, "CD8a")])` uses exact names for strings,
 zero-based integers for indices, and `(source, output_name)` pairs for explicit

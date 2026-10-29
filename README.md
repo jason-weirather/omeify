@@ -123,8 +123,10 @@ omeify crop slide.ome.tif -o regions.ome.tif --geojson regions.geojson
 By default, every region becomes a separately named **image series in one
 output**; `-o` names that exact output, not a prefix. Use `--shatter by_index` to
 write one file per region, or `--shatter by_name` to group regions into files by
-name. Polygons select their bounding rectangles: cropping does **not** mask
-polygon interiors. OME-Zarr collections use the same ordered-region model.
+name. GeoJSON polygons now mask pixels outside their true shapes, including
+holes and disjoint MultiPolygon parts, inside their minimal rectangular raster.
+`--mask-background keep` restores the former full-bounding-box behavior.
+OME-Zarr collections use the same ordered-region model.
 
 Select a subset of logical channels, reorder them, or assign new channel names in
 one crop without making an intermediate image:
@@ -139,7 +141,11 @@ and repeated in output order. `SOURCE` is an exact channel name or a zero-based
 index; use `name:0` for a channel literally named `0`. With no selection flags,
 all channels are retained. For renaming without selecting, `crop` also supports
 the same `--rename-channels-json` and `--rename-channels-by name|index` options
-as `convert`. The output report and embedded provenance record the ordered source
+as `convert`. For a polygon, `--mask-background auto` (the default) writes white
+outside RGB/H&E and black outside scalar signals. Use `--mask-background black|white|keep`
+explicitly when needed; `--padding N` adds a colored margin, and `--pad-outside`
+allows the crop to extend beyond the scanned image (otherwise use `--clip` to trim).
+The output report and embedded provenance record the ordered source
 to output channel mapping. RGB is one indivisible logical channel, not three
 separate color planes. See the [cropping guide](docs/regions.md).
 

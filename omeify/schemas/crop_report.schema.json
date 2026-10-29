@@ -12,11 +12,16 @@
     "shatter",
     "clip",
     "outputs",
-    "channel_mapping"
+    "channel_mapping",
+    "crop_mode",
+    "mask_background",
+    "fill_value",
+    "padding",
+    "pad_outside"
   ],
   "properties": {
     "schema": {
-      "const": "omeify.crop/5"
+      "const": "omeify.crop/6"
     },
     "input_path": {
       "type": "string",
@@ -78,6 +83,30 @@
         }
       },
       "minItems": 1
+    },
+    "crop_mode": {
+      "enum": [
+        "bounding_rectangle",
+        "polygon_mask"
+      ]
+    },
+    "mask_background": {
+      "enum": [
+        "auto",
+        "black",
+        "white",
+        "keep"
+      ]
+    },
+    "fill_value": {
+      "type": "number"
+    },
+    "padding": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pad_outside": {
+      "type": "boolean"
     }
   }
 }

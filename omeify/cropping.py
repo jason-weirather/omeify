@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
@@ -29,6 +30,7 @@ from .regions import (
     rectangle_feature,
 )
 from .reports import complete_report
+from .roi_raster import MaskBackground, geometry_crop, mask_fill_value
 from .workflow import (
     ChannelRenameMapping,
     RenameChannelsBy,
@@ -142,6 +144,8 @@ def crop(
     z: int | None = None, t: int | None = None, image_type: str | None = None,
     intrinsic_only: bool = False, storage_options: dict | None = None,
     shatter: ShatterMode | None = None, clip: bool = False, labels: bool = False,
+    mask_background: MaskBackground = "auto", padding: int = 0,
+    pad_outside: bool = False,
     pixel_size: PixelSize | None = None, channel_name_field: str | None = None,
     channels: Sequence[CropChannel] | None = None,
     rename_channels: ChannelRenameMapping | None = None,
@@ -156,7 +160,9 @@ def crop(
 
     Supply exactly one of integer ``bounds=(x0,y0,x1,y1)`` or pixel-coordinate
     ``geojson`` (a dict/list or a JSON file path). Float geometry edges are rounded
-    outward. No polygon masking, resampling, stitching, or label renumbering occurs.
+    outward. GeoJSON polygons are masked at pixel centers, retaining holes and
+    multipart unions; use mask_background='keep' for the legacy bounding box.
+    No resampling, stitching or label renumbering occurs.
     Input coordinates are never interpreted as physical units or longitude/latitude.
 
     ``output_path`` is the exact destination, with one series per ROI in input
@@ -176,10 +182,22 @@ def crop(
     channel. Omitting channels exports all source channels, optionally renamed
     with the same explicit name/index mapping as ``convert``. RGB and labels each
     have one indivisible logical channel. Selection and renaming remain lazy.
+
+    ``padding`` adds source-resolution pixels on all sides of the polygon envelope.
+    Out-of-image requests fail unless ``clip=True`` (trim the canvas) or
+    ``pad_outside=True`` (fill areas beyond the source). The latter two are
+    mutually exclusive. ``mask_background='auto'`` uses white for RGB, zero for
+    intensity images and the declared background ID for labels. White on float
+    channels is literal 1.0, not a normalized display value.
     """
     series = integer(series, "series")
-    if any(not isinstance(v, bool) for v in (clip, labels, overwrite)):
-        raise TypeError("clip, labels, and overwrite must be booleans")
+    if any(not isinstance(v, bool) for v in (clip, labels, overwrite, pad_outside)):
+        raise TypeError("clip, labels, overwrite, and pad_outside must be booleans")
+    padding = integer(padding, "padding")
+    if clip and pad_outside:
+        raise ValueError("clip and pad_outside are mutually exclusive")
+    if mask_background not in ("auto", "black", "white", "keep"):
+        raise ValueError("mask_background must be auto, black, white, or keep")
     if labels:
         if image_type not in {None, "label"}:
             raise ValueError("labels=True conflicts with image_type")
@@ -228,10 +246,44 @@ def crop(
         effective_size = pixel_size or reader.pixel_size
         if effective_size is None:
             raise ValueError("Crop export requires pixel calibration; supply pixel_size explicitly")
-        rectangles = {
-            r.index: pixel_bounds(r.bounds, width, height, clip=clip) for r in regions
+        # Preflight every padded extent before opening ANY output writer.
+        rectangles = {}
+        for region in regions:
+            x0, y0, x1, y1 = region.bounds
+            padded = (x0 - padding, y0 - padding, x1 + padding, y1 + padding)
+            if pad_outside:
+                # Require at least some source overlap; never write a completely
+                # invented region even when the user permits off-slide padding.
+                pixel_bounds(padded, width, height, clip=True)
+                rectangle = (math.floor(padded[0]),
+                             math.floor(padded[1]),
+                             math.ceil(padded[2]),
+                             math.ceil(padded[3]))
+            else:
+                rectangle = pixel_bounds(padded, width, height, clip=clip)
+            # Prevent an untrusted GeoJSON extent from declaring an impractically
+            # huge raster dimension when off-slide padding is enabled.
+            if (rectangle[2] - rectangle[0] > 2_147_483_647
+                    or rectangle[3] - rectangle[1] > 2_147_483_647):
+                raise ValueError("Crop output dimensions exceed the supported pixel-edge range")
+            rectangles[region.index] = rectangle
+        fill_value = mask_fill_value(reader, mask_background)
+        # Integer-edged axis-aligned rectangles require no raster mask. Retain
+        # the original zero-copy crop path (and RGB JPEG default) for them.
+        mask_required = {
+            region.index: (mask_background != "keep"
+                           and (padding != 0 or not region.is_integer_rectangle))
+            for region in regions
         }
         protected.extend(reader.backing_paths)
+        # Masked RGB crops default to lossless TIFF storage so JPEG cannot bleed
+        # boundary colors back into the black/white background. An explicit
+        # compression choice is always authoritative (including lossy JPEG).
+        compression_for_crop = compression
+        if (compression is None and output_format == "ome_tiff"
+                and reader.image_type == "rgb"
+                and (any(mask_required.values()) or pad_outside)):
+            compression_for_crop = "Deflate"
         writers = []
         planned_paths: list[Path] = []
         # Preflight the WHOLE batch, including input aliases and dangling symlinks.
@@ -246,7 +298,7 @@ def crop(
                 raise FileExistsError(path)
             planned_paths.append(path)
             writers.append((image_writer(
-                path, output_format=output_format, collection=True, compression=compression, tile_size=tile_size, pyramid_levels=pyramid_levels,
+                path, output_format=output_format, collection=True, compression=compression_for_crop, tile_size=tile_size, pyramid_levels=pyramid_levels,
                 jpeg_quality=jpeg_quality, jpeg_subsampling=jpeg_subsampling,
                 max_workers=max_workers, overwrite=overwrite, cache_directory=cache_directory,
             ), members))
@@ -269,7 +321,17 @@ def crop(
                         entries = []
                         for output_series, region in enumerate(members):
                             x0, y0, x1, y1 = rectangles[region.index]
-                            view = stack.enter_context(selected.crop(y0, y1, x0, x1))
+                            # The polygon source reads only the overlapping pixels
+                            # and masks a single writer-requested tile at a time.
+                            # keep preserves bbox pixels but still supports optional
+                            # padding beyond image edges.
+                            if not mask_required[region.index] and not pad_outside:
+                                view = stack.enter_context(selected.crop(y0, y1, x0, x1))
+                            else:
+                                view = stack.enter_context(geometry_crop(
+                                    selected, (x0, y0, x1, y1), polygons=region.polygons,
+                                    mask=mask_required[region.index], fill_value=fill_value,
+                                ))
                             name = f"{region.index:0{index_width}d} - {region.name or 'ROI'}"
                             entries.append(OMEImageSeries(name, view))
                             roi_records.append({
@@ -277,22 +339,35 @@ def crop(
                                 "output_series": output_series, "output_name": name,
                                 "bounds": [x0, y0, x1, y1],
                                 "requested_bounds": list(region.bounds),
-                                "clipped": (region.bounds[0] < 0 or region.bounds[1] < 0
-                                            or region.bounds[2] > width or region.bounds[3] > height),
+                                "clipped": (clip and (
+                                    region.bounds[0] - padding < 0 or
+                                    region.bounds[1] - padding < 0 or
+                                    region.bounds[2] + padding > width or
+                                    region.bounds[3] + padding > height)),
                                 "source_offset_xy": [x0, y0],
+                                "geometry_type": region.geometry_type,
+                                "geometry_sha256": region.geometry_sha256,
+                                "mask_applied": mask_required[region.index],
                             })
                         provenance = complete_report({
                             "coordinate_system": "level0_pixels",
                             "shatter": shatter,
                             "source_series": series, "source_size": [width, height],
-                            "crop_mode": "bounding_rectangle", "regions": roi_records,
-                            "channel_mapping": channel_mapping,
+                            "crop_mode": ("bounding_rectangle" if mask_background == "keep"
+                                          else "polygon_mask"),
+                            "mask_background": mask_background, "fill_value": fill_value,
+                            "padding": padding, "pad_outside": pad_outside,
+                            "regions": roi_records, "channel_mapping": channel_mapping,
                         }, "crop_provenance.schema.json")
                         write_report = writer.write(entries, provenance=provenance)
                     results.append({"path": str(writer.path), "regions": roi_records,
                                     "write_report": write_report})
     report = {"input_path": str(source_path), "source_series": series,
             "output_path": str(output_path), "shatter": shatter, "clip": clip,
+            "crop_mode": ("bounding_rectangle" if mask_background == "keep"
+                          else "polygon_mask"),
+            "mask_background": mask_background, "fill_value": fill_value,
+            "padding": padding, "pad_outside": pad_outside,
             "channel_mapping": channel_mapping, "outputs": results}
 
     return complete_report(report, "crop_report.schema.json")

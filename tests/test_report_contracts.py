@@ -93,12 +93,15 @@ def provenance():
     return {
         "coordinate_system": "level0_pixels", "shatter": None, "source_series": 0,
         "source_size": [64, 48], "crop_mode": "bounding_rectangle",
+        "mask_background": "keep", "fill_value": 0, "padding": 0, "pad_outside": False,
         "channel_mapping": [{"source_index": 0, "source_name": "DAPI",
                              "output_index": 0, "output_name": "DNA"}],
         "regions": [{
             "input_index": 1, "name": None, "output_name": "01 - ROI",
             "output_series": 0, "requested_bounds": [0., 0., 16., 16.],
             "bounds": [0, 0, 16, 16], "clipped": False, "source_offset_xy": [0, 0],
+            "geometry_type": "Polygon", "geometry_sha256": "0" * 64,
+            "mask_applied": False,
         }],
     }
 
@@ -106,7 +109,7 @@ def provenance():
 def test_report_identifier_is_current_and_input_record_is_not_mutated(provenance):
     original = deepcopy(provenance)
     result = complete_report(provenance, "crop_provenance.schema.json")
-    assert result["schema"] == "omeify.crop_provenance/2" and provenance == original
+    assert result["schema"] == "omeify.crop_provenance/3" and provenance == original
     result["schema"] = "omeify.crop/2"
     with pytest.raises(ValueError, match="const"):
         validate_report(result, "crop_provenance.schema.json")
@@ -235,7 +238,7 @@ def test_real_workflow_reports_and_pixels(tmp_path, real_stack, operation):
             rectangle_feature([20, 5, 36, 21], name="second"),
         ]}, shatter="by_index" if operation == "shatter" else None, **settings)
         schema = "crop_report.schema.json"
-        assert report["schema"] == "omeify.crop/5"
+        assert report["schema"] == "omeify.crop/6"
         for product in report["outputs"]:
             for region in product["regions"]:
                 x0, y0, x1, y1 = region["bounds"]

@@ -160,7 +160,7 @@ def test_grouped_exports_use_real_lazy_crops(input_file, tmp_path, writer_spy, s
         feature["properties"]["index"] = 10 - i
     output = tmp_path / "out.he.ome.tiff"
     report = crop(path, output_path=output, geojson=collection(*features), shatter=shatter)
-    assert report["schema"] == "omeify.crop/5" and report["shatter"] == shatter
+    assert report["schema"] == "omeify.crop/6" and report["shatter"] == shatter
     assert report["output_path"] == str(output) and "naming" not in report
     assert len(writer_spy) == len(report["outputs"]) == len(groups)
     if shatter is None:
@@ -169,7 +169,7 @@ def test_grouped_exports_use_real_lazy_crops(input_file, tmp_path, writer_spy, s
         assert call["names"] == [f"{i + 1:02d} - {names[i] or 'ROI'}" for i in indices]
         assert call["sizes"] == [PixelSize(.5, .7, "µm")] * len(indices)
         assert call["options"]["compression"] is None and call["options"]["tile_size"] is None
-        assert call["provenance"]["schema"] == "omeify.crop_provenance/2"
+        assert call["provenance"]["schema"] == "omeify.crop_provenance/3"
         assert call["provenance"]["shatter"] == shatter
         assert call["provenance"]["regions"] == result["regions"]
         for series, i in enumerate(indices):
@@ -194,14 +194,14 @@ def test_selected_channels_are_ordered_renamed_and_audited(input_file, tmp_path,
         {"source_index": 0, "source_name": "DAPI", "output_index": 1,
          "output_name": "DAPI"},
     ]
-    assert report["schema"] == "omeify.crop/5"
+    assert report["schema"] == "omeify.crop/6"
     assert report["channel_mapping"] == mapping
     assert len(writer_spy) == 2
     for call, output, bounds in zip(writer_spy, report["outputs"],
                                     ((2, 3, 14, 19), (11, 7, 25, 20))):
         assert call["channels"] == [("CD3e", "DAPI")]
         assert call["types"] == ["multichannel"]
-        assert call["provenance"]["schema"] == "omeify.crop_provenance/2"
+        assert call["provenance"]["schema"] == "omeify.crop_provenance/3"
         assert call["provenance"]["channel_mapping"] == mapping
         assert output["write_report"]["provenance"]["value"]["channel_mapping"] == mapping
         x0, y0, x1, y1 = bounds
@@ -545,3 +545,225 @@ def test_real_crop_collection_roundtrip(tmp_path, kind, shatter):
                 assert len(image.series_names) == len(output["regions"])
                 assert image.pixel_size == PixelSize(.5, .7, "µm") and image.dtype == data.dtype
                 assert image.image_type == kind
+
+
+def _polygon_feature(rings, name="ROI"):
+    return {"type": "Feature", "properties": {"name": name},
+            "geometry": {"type": "Polygon", "coordinates": rings}}
+
+
+def _rectangle_ring(x0, y0, x1, y1):
+    return [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]
+
+
+def test_polygon_mask_respects_holes_and_preserves_channel_selection(
+    input_file, tmp_path, writer_spy,
+):
+    source, pixels = input_file
+    feature = _polygon_feature([
+        _rectangle_ring(2, 3, 18, 17),
+        _rectangle_ring(7, 7, 12, 12),
+    ], name="with hole")
+    report = crop(source, tmp_path / "masked.ome.tiff", geojson=collection(feature),
+                  channels=[("CD3", "CD3e"), "DAPI"])
+    result = writer_spy[0]["pixels"][0]
+    expected = pixels[[1, 0], 3:17, 2:18].copy()
+    expected[:, 4:9, 5:10] = 0
+    np.testing.assert_array_equal(result, expected)
+    assert report["crop_mode"] == "polygon_mask"
+    assert report["fill_value"] == 0
+    assert report["outputs"][0]["regions"][0]["mask_applied"] is True
+    assert report["outputs"][0]["regions"][0]["geometry_sha256"] == parse_regions(
+        collection(feature))[0].geometry_sha256
+    assert report["outputs"][0]["write_report"]["provenance"]["value"]["crop_mode"] == "polygon_mask"
+
+
+def test_multipolygon_union_keeps_disjoint_regions_and_leaves_gap_empty(
+    input_file, tmp_path, writer_spy,
+):
+    source, pixels = input_file
+    polygon = {"type": "MultiPolygon", "coordinates": [
+        [_rectangle_ring(2, 4, 8, 10)],
+        [_rectangle_ring(15, 6, 20, 12)],
+    ]}
+    crop(source, tmp_path / "islands.ome.tiff", geojson=polygon, shatter="by_index")
+    observed = writer_spy[0]["pixels"][0]
+    expected = np.zeros((2, 8, 18), dtype=pixels.dtype)
+    expected[:, 0:6, 0:6] = pixels[:, 4:10, 2:8]
+    expected[:, 2:8, 13:18] = pixels[:, 6:12, 15:20]
+    np.testing.assert_array_equal(observed, expected)
+
+
+def test_mask_keep_retains_old_bounding_rectangle(input_file, tmp_path, writer_spy):
+    source, pixels = input_file
+    geometry = _polygon_feature([[[2, 3], [19, 3], [2, 19], [2, 3]]])
+    report = crop(source, tmp_path / "keep.ome.tiff", geojson=geometry,
+                  mask_background="keep")
+    np.testing.assert_array_equal(writer_spy[0]["pixels"][0], pixels[:, 3:19, 2:19])
+    assert report["crop_mode"] == "bounding_rectangle"
+    assert report["outputs"][0]["regions"][0]["mask_applied"] is False
+
+
+def test_padding_adds_background_margin_inside_source(input_file, tmp_path, writer_spy):
+    source, pixels = input_file
+    report = crop(source, tmp_path / "margin.ome.tiff",
+                  geojson=_polygon_feature([_rectangle_ring(6, 6, 10, 10)]), padding=2)
+    actual = writer_spy[0]["pixels"][0]
+    expected = np.zeros((2, 8, 8), dtype=pixels.dtype)
+    expected[:, 2:6, 2:6] = pixels[:, 6:10, 6:10]
+    np.testing.assert_array_equal(actual, expected)
+    assert report["outputs"][0]["regions"][0]["bounds"] == [4, 4, 12, 12]
+    assert report["padding"] == 2
+
+
+def test_padding_beyond_image_is_explicit_and_preserves_source_offset(
+    input_file, tmp_path, writer_spy,
+):
+    source, pixels = input_file
+    geometry = _polygon_feature([_rectangle_ring(1, 1, 5, 5)])
+    with pytest.raises(ValueError, match="outside the image"):
+        crop(source, tmp_path / "reject.ome.tiff", geojson=geometry, padding=3)
+    assert not writer_spy
+    report = crop(source, tmp_path / "pad.ome.tiff", geojson=geometry,
+                  padding=3, pad_outside=True)
+    actual = writer_spy[0]["pixels"][0]
+    expected = np.zeros((2, 10, 10), dtype=pixels.dtype)
+    expected[:, 3:7, 3:7] = pixels[:, 1:5, 1:5]
+    np.testing.assert_array_equal(actual, expected)
+    region = report["outputs"][0]["regions"][0]
+    assert region["bounds"] == [-2, -2, 8, 8]
+    assert region["source_offset_xy"] == [-2, -2]
+    assert region["clipped"] is False
+    assert report["pad_outside"] is True
+
+
+def test_clip_trims_polygon_extent_but_not_shape(input_file, tmp_path, writer_spy):
+    source, pixels = input_file
+    triangle = _polygon_feature([[[ -3, 3], [6, 3], [6, 12], [-3, 3]]])
+    with pytest.raises(ValueError, match="outside the image"):
+        crop(source, tmp_path / "reject.ome.tiff", geojson=triangle)
+    report = crop(source, tmp_path / "clip.ome.tiff", geojson=triangle, clip=True)
+    assert report["outputs"][0]["regions"][0]["bounds"] == [0, 3, 6, 12]
+    assert report["outputs"][0]["regions"][0]["clipped"]
+    assert (writer_spy[0]["pixels"][0][:, -1, 0] == 0).all()
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        crop(source, tmp_path / "fail.ome.tiff", geojson=triangle,
+             clip=True, pad_outside=True)
+
+
+def test_white_outside_is_dtype_max_for_integer_channels(input_file, tmp_path, writer_spy):
+    source, pixels = input_file
+    feature = _polygon_feature([[[2, 3], [18, 3], [2, 19], [2, 3]]])
+    report = crop(source, tmp_path / "white.ome.tiff", geojson=feature,
+                  mask_background="white")
+    assert report["fill_value"] == np.iinfo(np.uint16).max
+    observed = writer_spy[0]["pixels"][0]
+    assert observed.dtype == np.uint16
+    assert (observed[:, -1, -1] == 65535).all()
+    assert (observed[:, 0, 0] == pixels[:, 3, 2]).all()
+
+
+def test_rgb_auto_white_and_lossless_default_for_masked_regions(
+    tmp_path, writer_spy,
+):
+    path = tmp_path / "rgb.ome.tif"
+    pixels = np.zeros((32, 40, 3), dtype=np.uint8)
+    pixels[:, :, 0] = 80
+    pixels[:, :, 1] = 125
+    pixels[:, :, 2] = 200
+    tifffile.imwrite(path, pixels, ome=True, photometric="rgb", metadata={
+        "axes": "YXS", "PhysicalSizeX": .5, "PhysicalSizeY": .7,
+        "PhysicalSizeXUnit": "µm", "PhysicalSizeYUnit": "µm",
+    })
+    triangle = _polygon_feature([[[4, 3], [20, 3], [4, 19], [4, 3]]])
+    report = crop(path, tmp_path / "rgb-masked.ome.tif", geojson=triangle)
+    result = writer_spy[0]["pixels"][0]
+    assert result.shape == (16, 16, 3)
+    np.testing.assert_array_equal(result[0, 0], pixels[3, 4])
+    np.testing.assert_array_equal(result[-1, -1], np.array([255, 255, 255], dtype=np.uint8))
+    assert report["fill_value"] == 255
+    assert writer_spy[0]["options"]["compression"] == "Deflate"
+    writer_spy.clear()
+    crop(path, tmp_path / "rgb-explicit.ome.tif", geojson=triangle, compression="JPEG")
+    assert writer_spy[0]["options"]["compression"] == "JPEG"
+
+
+def test_label_mask_uses_background_id_without_inventing_class(image_factory):
+    from omeify.roi_raster import geometry_crop, mask_fill_value
+    values = np.full((12, 12), 19, dtype=np.uint32)
+    image = image_factory(values, kind="label", pixel_size=PixelSize(.3, .3, "µm"))
+    polygon = parse_regions(_polygon_feature([[[2, 2], [10, 2], [2, 10], [2, 2]]]))[0]
+    with geometry_crop(image, (2, 2, 10, 10), polygons=polygon.polygons,
+                       mask=True, fill_value=mask_fill_value(image, "auto")) as view:
+        out = view.asarray()
+        assert out[0, 0] == 19 and out[-1, -1] == 0
+    with pytest.raises(ValueError, match="invent a label ID"):
+        mask_fill_value(image, "white")
+    image.close()
+
+
+def test_chunked_polygon_reads_are_stable_and_match_whole_region(input_file):
+    from omeify.roi_raster import geometry_crop
+    path, _ = input_file
+    geometry = parse_regions(_polygon_feature([[[2, 2], [23, 2], [9, 29], [2, 2]]]))[0]
+    with OMETiffReader(path) as image:
+        with geometry_crop(image, (2, 2, 23, 29), polygons=geometry.polygons,
+                           mask=True, fill_value=0) as roi:
+            full = roi.asarray()
+            tiles = np.concatenate([
+                roi.read_region(0, 8, 0, 21),
+                roi.read_region(8, 27, 0, 21),
+            ], axis=1)
+            np.testing.assert_array_equal(tiles, full)
+            np.testing.assert_array_equal(roi.read_region(2, 8, 4, 10), full[:, 2:8, 4:10])
+
+
+def test_cli_polygon_mask_padding_and_conflicts(input_file, tmp_path, writer_spy):
+    source, _ = input_file
+    feature = _polygon_feature([[[1, 1], [10, 1], [1, 10], [1, 1]]])
+    geojson_path = tmp_path / "geometry.json"
+    geojson_path.write_text(json.dumps(feature))
+    result = CliRunner().invoke(main, ["crop", str(source), "-o", str(tmp_path / "cli.ome.tif"),
+                                      "--geojson", str(geojson_path), "--padding", "3",
+                                      "--pad-outside", "--mask-background", "white",
+                                      "--shatter", "by_index"])
+    assert result.exit_code == 0, result.output
+    assert len(writer_spy) == 1
+    assert writer_spy[0]["pixels"][0].shape == (2, 15, 15)
+    assert writer_spy[0]["pixels"][0][0, 0, 0] == 65535
+    bad = CliRunner().invoke(main, ["crop", str(source), "-o", str(tmp_path / "bad.ome.tif"),
+                                   "--geojson", str(geojson_path), "--clip", "--pad-outside"])
+    assert bad.exit_code != 0 and "mutually exclusive" in bad.output
+
+
+def test_mask_respects_nonzero_label_background_and_known_physical_origin():
+    from omeify import LabelImage
+    from omeify.roi_raster import geometry_crop, mask_fill_value
+    label = np.full((12, 12), 19, dtype=np.uint16)
+    region = parse_regions(_polygon_feature([[[2, 2], [8, 2], [2, 8], [2, 2]]]))[0]
+    with LabelImage.from_array(label, pixel_size=PixelSize(.5, .7, "µm"),
+                               background_label=7) as image:
+        with image.with_metadata(origin_yx=(100.0, 200.0)) as anchored:
+            with geometry_crop(anchored, (-2, -3, 10, 9), polygons=region.polygons,
+                               mask=True, fill_value=mask_fill_value(anchored, "auto")) as roi:
+                assert roi.origin_yx == (100 - 3 * .7, 200 - 2 * .5)
+                pixels = roi.asarray()
+                assert pixels[0, 0] == 7
+                assert pixels[5, 5] == 19
+                assert pixels[-1, -1] == 7
+
+
+def test_exact_rectangle_skips_mask_and_preserves_rgb_jpeg_policy(tmp_path, writer_spy):
+    path = tmp_path / "rgb.ome.tif"
+    pixels = np.full((24, 24, 3), 120, dtype=np.uint8)
+    tifffile.imwrite(path, pixels, photometric="rgb", ome=True, metadata={
+        "axes": "YXS", "PhysicalSizeX": .5, "PhysicalSizeY": .5,
+        "PhysicalSizeXUnit": "µm", "PhysicalSizeYUnit": "µm",
+    })
+    report = crop(path, tmp_path / "rectangle.ome.tif",
+                  geojson=_polygon_feature([_rectangle_ring(2, 3, 18, 19)]))
+    assert writer_spy[0]["options"]["compression"] is None
+    assert report["outputs"][0]["regions"][0]["mask_applied"] is False
+    np.testing.assert_array_equal(writer_spy[0]["pixels"][0], pixels[3:19, 2:18])
+    assert parse_regions(_polygon_feature([[[2, 3], [18, 19], [18, 3],
+                                                [2, 19], [2, 3]]]))[0].is_integer_rectangle is False

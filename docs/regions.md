@@ -18,8 +18,8 @@ The same crop command accepts `--type ome_zarr` and the Zarr source selectors.
 instead of a TIFF suffix. Names and crop provenance are intentional retained
 metadata; `by_index` does not remove names from metadata. Known physical origins
 are shifted with the crop. See [OME-Zarr](ome_zarr.md) for complete examples and
-new-directory publication restrictions. Current crop report: `omeify.crop/5`;
-embedded provenance: `omeify.crop_provenance/2`.
+new-directory publication restrictions. Current crop report: `omeify.crop/6`;
+embedded provenance: `omeify.crop_provenance/3`.
 
 ## Crop known coordinates
 
@@ -31,15 +31,18 @@ omeify crop slide.ome.tiff -o Scratch/regions.ome.tiff \
 This writes exactly `Scratch/regions.ome.tiff`, a 2048 by 2048 rectangle. CLI bounds are
 **X0 Y0 X1 Y1**, integer, half-open, in the selected series' **level-zero pixels**.
 They are not `x,y,width,height`, physical units, or pyramid-level coordinates.
-No spatial resampling or polygon masking occurs. RGB output may be color-mapped
-to sRGB before encoding, and JPEG remains lossy.
+No spatial resampling occurs. GeoJSON polygons are rasterized at pixel centers
+inside the enclosing rectangle, with black/white background outside. RGB pixels
+may be color-managed to sRGB. Irregular, actually masked RGB TIFF output defaults to **lossless
+Deflate** to avoid JPEG edge bleeding; exact integer-edged rectangles retain
+the regular JPEG default. An explicit `--compression JPEG` remains lossy.
 
 `--type` defaults to `ome_tiff`; supported vendor profiles are the same as
 `convert`. `--series` defaults to zero. All channels of the selected series are
 exported unless a channel selection is supplied. For TIFF destinations, scalar/label output retains lossless LZW /
-1024-pixel tiles; RGB retains
-JPEG quality 90 / 4:2:2 / 512-pixel tiles. Use `--compression Deflate` to avoid JPEG loss after any required sRGB
-color transform. Zarr destinations instead default to lossless Zstd and
+1024-pixel tiles; ordinary unmasked RGB output retains JPEG quality 90 /
+4:2:2 / 512-pixel tiles. Masked RGB defaults to Deflate / 512-pixel tiles;
+explicit codec choices always win. Zarr destinations default to lossless Zstd and
 512-pixel spatial chunks. Each output pyramid is rebuilt from the cropped base.
 
 Physical pixel calibration is preserved and remains required for export.
@@ -81,18 +84,68 @@ not newly assigned output positions, and `--rename-channels-by` is required.
 
 A label raster or interleaved RGB image has **one logical channel**, index zero.
 You can rename it, but cannot select individual RGB samples or duplicate it as
-separate logical channels. Spatial cropping and channel filtering/renaming are
-lazy borrowed views; neither copies the full slide nor alters scalar intensity
-values. Any selected channel set applies to **every ROI** in a combined or
+separate logical channels. Spatial cropping, shape masking, and channel filtering/renaming are
+lazy borrowed views; none loads the full slide. Masking changes only pixels
+outside the selection boundary to the requested fill value. Any selected channel set applies to **every ROI** in a combined or
 shattered product, including OME-Zarr output.
 
 The report's ordered `channel_mapping` and each output's embedded crop provenance
 record `source_index`, `source_name`, `output_index`, and `output_name`. These
 records include default all-channel exports too. The new crop report contract is
-`omeify.crop/5` and embedded provenance is `omeify.crop_provenance/2`; prior
+`omeify.crop/6` and embedded provenance is `omeify.crop_provenance/3`; prior
 report versions are not silently rewritten. The source names in this record
 are deliberate retained metadata and must be reviewed before sharing.
 
+
+## Shape-aware GeoJSON crops and padding
+
+An OME raster must have rectangular dimensions, but a polygon can control which
+**pixels** survive inside that rectangle. By default, `crop --geojson` selects
+pixels whose centers lie within the GeoJSON exterior and outside its interior
+rings (holes). MultiPolygon parts are unioned, with holes removed **from their
+own part only**. Nothing is resampled or blended at the boundary.
+
+```bash
+# Mask outside the exact shape, with white background for RGB / H&E.
+omeify crop slide.he.ome.tiff -o tumor.ome.tiff --geojson tumor.geojson \
+  --shatter by_name
+
+# Force a black background; include a 32px margin around every polygon.
+omeify crop slide.ome.tiff -o regions.ome.tiff --geojson regions.geojson \
+  --mask-background black --padding 32 --shatter by_index
+
+# Restore the earlier full-bounding-box behavior (no polygon mask).
+omeify crop slide.ome.tiff -o context.ome.tiff --geojson regions.geojson \
+  --mask-background keep
+
+# Keep an off-slide polygon/margin extent and pad missing source pixels.
+omeify crop slide.ome.tiff -o padded.ome.tiff --geojson regions.geojson \
+  --padding 32 --pad-outside
+```
+
+`--mask-background` accepts `auto` (default), `black`, `white`, and `keep`.
+Auto resolves to **255 white** for uint8 RGB, **zero black** for scalar images,
+and the declared background ID for categorical labels. Explicit white is the
+maximum representable integer value, or literal `1.0` for floating data; arbitrary
+float intensities are not display-normalized, so `1.0` may not look white.
+White is rejected for categorical labels because it could invent label IDs.
+`keep` leaves all pixels within the enclosing rectangle intact. When padding
+outside the physical image, that missing region still receives auto background.
+
+`--padding N` extends the output rectangle by N level-zero pixels on every side;
+outside the actual polygon that extra margin is filled. By default, an extent
+crossing the source image fails. `--clip` trims the output to the source image;
+`--pad-outside` preserves the requested extent and fills absent source pixels.
+These two policies are mutually exclusive. An entirely off-slide ROI still fails.
+The reported crop offset may be negative with `--pad-outside` and the physical
+origin is shifted accordingly. No phantom acquisition coordinates are inferred.
+
+Shape masking and padding are performed **lazily per writer-requested block**.
+Whole-slide masks and intermediate TIFFs are never materialized. Every output
+includes the mask policy, padding, fill value, and a SHA-256 digest of its
+canonical validated polygon coordinates; retain the original GeoJSON for full
+polygon reconstruction. `omeify.crop/6` and `omeify.crop_provenance/3` are the new
+report versions; older versions are not silently accepted or reinterpreted.
 
 ## Crop GeoJSON
 
@@ -109,7 +162,7 @@ is added. Prefer an explicit `.ome.tif` or `.ome.tiff` filename for viewers.
 Crop prints a short completion line by default; progress goes to stderr.
 Use `--output-json FILE` to save its full report, `--output-json -` for JSON-only
 stdout, or `-vvv` for the diagnostic report. [Current report contracts](reports.md)
-use crop report `omeify.crop/5` and embedded provenance `omeify.crop_provenance/2`.
+use crop report `omeify.crop/6` and embedded provenance `omeify.crop_provenance/3`.
 
 Supported inputs are a Feature, FeatureCollection, bare Polygon/MultiPolygon,
 polygon GeometryCollection, or a Feature array. `--geojson -` reads stdin.
@@ -119,10 +172,13 @@ image, x rightward, y downward. This is the
 **not geographic RFC 7946 longitude/latitude**. Geographic CRS declarations,
 3D positions, null geometries, points, and lines are not supported.
 
-Every object becomes its **bounding rectangle**. Polygon interiors, holes,
-and disjoint parts are not masked; a multipart Feature stays one ROI covering
-its parts. A top-level GeometryCollection supplies one ROI per member.
-Envelope/coordinate validation is not polygon-topology validation.
+Every object becomes one rectangular output raster whose interior pixels are
+**masked by the actual polygon geometry**. The enclosure is cropped tightly by
+default, or enlarged by `--padding`. Interior holes are filled with background;
+disjoint multipart geometries retain separate islands within one raster. A
+multipart Feature stays one ROI; a top-level GeometryCollection supplies one ROI
+per member. The parser checks finite, closed rings but does not validate every
+possible polygon topology or repair self-intersections.
 
 Example:
 
@@ -186,8 +242,9 @@ than 120 UTF-8 bytes after sanitization are rejected too. Omit shatter or select
 `by_index` to avoid making filenames depend on those names. Series labels retain
 the annotation text rather than the filename slug.
 
-Float geometry bounds round outward: floor the minima, ceil the maxima. The
-default rejects out-of-bounds ROIs; `--clip` opts into intersection with the image.
+Float geometry bounds round outward: floor the minima, ceil the maxima. By default,
+out-of-image bounds fail; `--clip` trims them and `--pad-outside` keeps the intended
+canvas with background beyond the source image.
 An empty intersection always fails. Every ROI and all destination paths are
 preflighted before writing pixels. Overwrite is on by default; `--no-overwrite`
 refuses existing entries, including dangling symlinks. Input image/GeoJSON aliases
@@ -200,7 +257,9 @@ These are named crop products written through `OMEMultiSeriesWriter`, including
 single-ROI files. Each file carries generated crop provenance: input series and
 shape, original requested bounds, exported bounds, one-based input indices,
 zero-based output series indices, original names, output series names, the shatter
-mode, and source XY offsets. A crop's local `(0,0)` maps to that source offset. No source
+mode, source XY offsets (possibly negative for padded crops), polygon geometry
+type and hash, mask policy, and background value. A crop's local `(0,0)` maps to
+that source offset. No source
 filename or arbitrary source annotation properties are copied into this metadata.
 Retain the original GeoJSON for polygon geometry and other annotation properties.
 
@@ -226,7 +285,7 @@ Positional calls still work, but without shatter they write the exact requested
 path. Change bare prefixes to complete filenames for combined output. At the
 0.20 change, crop reports and embedded provenance both used `omeify.crop/2`; the report gained `output_path` and `shatter` instead of
 `naming`, and each region gained `output_name`. This checkout's current identifiers
-are `omeify.crop/5` and `omeify.crop_provenance/2`, including explicit
+are `omeify.crop/6` and `omeify.crop_provenance/3`, including explicit
 source-to-output channel mappings.
 No image, geometry, or previously written file is modified by upgrading.
 
@@ -403,6 +462,8 @@ renamed_report = crop(
 )
 ```
 
+`Image.crop` is the low-level **rectangle-only** borrowed view. The file-level
+`crop(..., geojson=...)` workflow adds shape-aware masking via its lazy raster source.
 `Image.crop` constructs an unopened borrowed view, requiring strict integer,
 in-bounds level-zero coordinates. It owns no parent resources and inherits
 image type, dtype, channels, calibration, and the source RGB ICC for the writer's
