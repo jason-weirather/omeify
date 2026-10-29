@@ -42,6 +42,7 @@ image product. Views cannot silently remove that restriction.
 | Implement a procedural backend | Subclass `ImageSource`; implement `_read_region()` |
 | Use that backend | `with MultichannelImage(source) as image:` (or RGB/label wrapper) |
 | Select/reorder/assemble lazy scalar channels | `MultichannelImage.from_channels(channels, ...)` |
+| Recover RGB from separate scalar RED/GREEN/BLUE channels | `extract_rgb(input_path, output_path, ...)` |
 | Override calibration/names without changing pixels | `image.with_metadata(...)` |
 | Borrow a cropped level-zero image | `with image.crop(y0, y1, x0, x1) as roi:` |
 | Read a rectangle | `image.read_region(y0, y1, x0, x1, level=0, channels=...)` |

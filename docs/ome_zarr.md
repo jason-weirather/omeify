@@ -358,6 +358,16 @@ production S3 endpoint or make deployment part of Omeify.
 The optional S3 adapter does not implement new codecs or alternative image semantics.
 Integration against a real S3 endpoint should verify its authorization and missing-key policy.
 
+### RGB reconstruction from scalar channels
+
+`omeify extract-rgb` also reads explicit `ome_zarr` images and can write a
+canonical 0.5 RGB store using `--output-format ome_zarr`. The transformation
+is the same as TIFF: select separate uint8/uint16 RED/GREEN/BLUE scalar channels,
+reconstruct interleaved uint8 RGB, and preserve the source image's intrinsic
+calibration. OME-Zarr output uses lossless Zstd and an automatic pyramid. The
+new store must not already exist. No vendor metadata or color profile is
+inferred from the three source channel names.
+
 ## Safe writing and verification
 
 Zarr writes are local and **create-new only**. Existing directories, including

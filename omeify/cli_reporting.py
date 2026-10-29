@@ -31,6 +31,13 @@ def completion_summary(report: Mapping[str, Any], output_path: Path) -> str:
         outputs = report["outputs"]
         count = sum(len(item["regions"]) for item in outputs)
         return f"Wrote {count} region(s) in {len(outputs)} file(s) | sampled verification passed"
+    if report.get("schema") == "omeify.extract_rgb/1":
+        write = report["writer_report"]
+        return escape_terminal(
+            f"Wrote {output_path} | uint8 RGB | "
+            f"{write['pyramid']['subresolution_count']} reduced levels | "
+            f"{write['options']['compression']} lossless | sampled verification passed"
+        )
     fields = [f"Wrote {output_path}"]
     if "series" in report and "series_count" in report.get("output_file", {}):
         fields.append(f"{report['output_file']['series_count']} series")

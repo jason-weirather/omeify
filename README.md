@@ -3,7 +3,7 @@
 **Predictable OME-TIFF and OME-Zarr image I/O for microscopy.**
 
 Omeify is a command-line tool and Python library for **inspecting, converting,
-cropping, concatenating, and deliberately modifying** microscopy images. It reads
+cropping, RGB reconstruction, concatenating, and deliberately modifying** microscopy images. It reads
 supported vendor TIFFs, OME-TIFF, and OME-Zarr, and writes calibrated, pyramidal
 **OME-TIFF** or **OME-Zarr** with consistent pixel interpretation, controlled
 metadata, and verified construction. OME-TIFF is the default output.
@@ -60,11 +60,12 @@ Each command has a distinct job:
 | `omeify inspect` | Examine TIFF or OME-Zarr structure, channels, calibration, and metadata without decoding image pixels. |
 | `omeify convert` | Normalize a supported image into OME-TIFF or OME-Zarr, preserving dtype and intensity scale. |
 | `omeify crop` | Export pixel-coordinate rectangles or GeoJSON regions, optionally selecting/relabeling channels. |
+| `omeify extract-rgb` | Reconstruct a real RGB image from three named scalar channels, with explicit bit-depth/background policies. |
 | `omeify concat` | Combine selected, optionally renamed **OME-TIFF image series** in a chosen order. |
 | `omeify mutate` | Intentionally change floating-point image values or float32 precision, with a report. |
 | `omeify version` | Show the package version; `--json` also reports image-I/O dependency versions. |
 
-`convert`, `crop`, and `mutate` can write either output format with
+`convert`, `crop`, `extract-rgb`, and `mutate` can write either output format with
 `--output-format ome_tiff|ome_zarr`. `concat` writes OME-TIFF only.
 
 ### Quick start
@@ -161,6 +162,33 @@ omeify crop slide.ome.tif -o right.ome.tif --geojson right.geojson
 
 [Cropping guide](docs/regions.md) covers geometry, naming, preview setup,
 and output options.
+
+### Recover an RGB image from separate color channels
+
+Some multiplex OME-TIFFs store a displayed RGB image as three independent
+`RED`, `GREEN`, `BLUE` scalar channels alongside fluorescence markers. Those
+channels are **not** an OME RGB image. `extract-rgb` deliberately assembles
+an interleaved uint8 `YXS` image without loading the complete slide:
+
+```bash
+omeify extract-rgb multiplex.ome.tiff -o recovered.he.ome.tiff --name "H&E"
+# Preview five small samples of the stored byte pattern without writing.
+omeify extract-rgb multiplex.ome.tiff --probe
+```
+
+For uint16 input, `--encoding auto` (default) takes the high byte. This
+reverses both `value8*256` and `value8*257` expansions, but can discard real
+16-bit precision. Choose `--encoding rounded` for continuous full-range
+uint16 data or `low-byte` when values are entirely 0..255. uint8 channels
+are copied directly. By default, original all-zero RGB triples become white;
+`--background keep` retains true black. This fill is **not** tissue detection.
+
+The output uses **lossless Deflate** and Omeify's automatic RGB SubIFD pyramid
+(512-pixel tiles) by default, not the normal RGB JPEG storage policy. It
+retains pixel calibration, and the versioned operation report records the
+chosen source channels, bit-depth mapping, and background policy. Other
+formats can be selected explicitly using `--type` and `--output-format`.
+This is a deliberately transforming operation, **not** `convert`.
 
 ### Concatenate OME-TIFF series
 

@@ -28,6 +28,7 @@ from .io import (
     TemporaryOMETiffWriter,
 )
 from .mutation import mutate
+from .rgb_extraction import extract_rgb, probe_rgb
 from .zarr_inspection import ZarrInspector
 
 __all__ = [
@@ -67,4 +68,6 @@ __all__ = [
     "crop",
     "get_version_info",
     "mutate",
+    "extract_rgb",
+    "probe_rgb",
 ]

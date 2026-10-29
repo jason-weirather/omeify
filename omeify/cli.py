@@ -29,6 +29,7 @@ from omeify.io._writer.configuration import DEFAULT_JPEG_QUALITY, DEFAULT_JPEG_S
 from omeify.io.pixel_size import PixelSize
 from omeify.io.source_reader import INPUT_TYPES, PLANAR_INPUT_TYPES
 from omeify.mutation import mutate
+from omeify.rgb_extraction import extract_rgb, probe_rgb
 from omeify.path_safety import atomic_write_text, check_output_path
 from omeify.regions import group_outputs, parse_regions
 from omeify.terminal import escape_terminal
@@ -214,7 +215,7 @@ def _pixel_size_override(
 )
 @click.pass_context
 def main(ctx: click.Context) -> None:
-    """Convert, concatenate, crop, mutate, and inspect calibrated OME images."""
+    """Convert, crop, extract RGB, concatenate, mutate, and inspect OME images."""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -935,6 +936,125 @@ def crop_command(
             compression=compression, jpeg_quality=jpeg_quality, jpeg_subsampling=jpeg_subsampling,
             tile_size=tile_size, pyramid_levels=pyramid_levels, max_workers=workers,
             cache_directory=cache_directory, overwrite=overwrite,
+        )
+    except Exception as exc:
+        if verbose >= 2:
+            raise
+        raise click.ClickException(escape_terminal(str(exc))) from exc
+    emit_operation_report(
+        report, output_path=output_path, destination=output_json, verbose=verbose,
+        overwrite=overwrite, protected=protected,
+    )
+
+
+@main.command("extract-rgb", context_settings=_CONTEXT_SETTINGS)
+@source_options
+@output_options
+@click.argument("input_path", type=str)
+@click.option("-o", "--output", "output_path", type=click.Path(path_type=Path),
+              help="Destination OME-TIFF file or NEW OME-Zarr directory (required except --probe).")
+@click.option("--type", "input_type", type=click.Choice(PLANAR_INPUT_TYPES),
+              default="ome_tiff", show_default=True, help="Explicit planar image input profile.")
+@click.option("--series", type=click.IntRange(min=0), default=0, show_default=True)
+@click.option("--channel-name-field", type=click.Choice(["name", "biomarker", "auto"]),
+              default=None, help="Fusion QPTIFF source channel-name field.")
+@click.option("--red", default="RED", show_default=True, metavar="NAME|INDEX",
+              help="Exact RED channel name or zero-based index; name:0 for a numeric name.")
+@click.option("--green", default="GREEN", show_default=True, metavar="NAME|INDEX",
+              help="Exact GREEN channel name or zero-based index.")
+@click.option("--blue", default="BLUE", show_default=True, metavar="NAME|INDEX",
+              help="Exact BLUE channel name or zero-based index.")
+@click.option("--encoding", type=click.Choice(["auto", "native", "high-byte", "rounded", "low-byte"]),
+              default="auto", show_default=True,
+              help="uint16 auto=high-byte (x256/x257 recovery), uint8 auto=native; no normalization.")
+@click.option("--background", type=click.Choice(["white", "keep"]),
+              default="white", show_default=True,
+              help="White replaces only original all-zero RGB triples; keep leaves black untouched.")
+@click.option("--name", default="RGB", show_default=True,
+              help="Output logical RGB channel name, e.g. 'H&E'.")
+@click.option("--probe", is_flag=True, help="Sample five bounded regions; print encoding diagnostics, do not write.")
+@click.option("--compression", default=None,
+              help="Lossless TIFF: Deflate (default), LZW, ZSTD, Uncompressed; Zarr: ZSTD (default), Gzip, Uncompressed.")
+@click.option("--tile-size", type=click.IntRange(min=16), default=None,
+              help="Output tile edge; default 512 for RGB.")
+@click.option("--pyramid-levels", type=click.IntRange(min=0), default=None,
+              help="Reduced resolution levels; automatic by default, 0 disables pyramids.")
+@click.option("--workers", type=click.IntRange(min=1), default=None,
+              help="Output encoding workers.")
+@click.option("--cache-directory", type=click.Path(file_okay=False, path_type=Path),
+              default=None, help="TIFF-only temporary pyramid directory.")
+@click.option("--pixel-size-x", type=click.FloatRange(min=0, min_open=True), default=None)
+@click.option("--pixel-size-y", type=click.FloatRange(min=0, min_open=True), default=None)
+@click.option("--pixel-size-unit", type=str, default=None)
+@click.option("--output-json", type=click.Path(dir_okay=False, path_type=Path),
+              help="Save a validated extraction/write report; - writes JSON-only stdout.")
+@click.option("--overwrite/--no-overwrite", default=True, show_default=True)
+@click.option("-v", "--verbose", count=True, help="Progress/debug logging; -vvv prints report.")
+def extract_rgb_command(
+    group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
+    output_format: str, input_path: str, output_path: Path | None, input_type: str,
+    series: int, channel_name_field: str | None, red: str, green: str, blue: str,
+    encoding: str, background: str, name: str, probe: bool, compression: str | None,
+    tile_size: int | None, pyramid_levels: int | None, workers: int | None,
+    cache_directory: Path | None, pixel_size_x: float | None, pixel_size_y: float | None,
+    pixel_size_unit: str | None, output_json: Path | None, overwrite: bool, verbose: int,
+) -> None:
+    """Recover genuine interleaved uint8 RGB from separate color channels.
+
+    RED/GREEN/BLUE select three source scalar channels; they do not need to be
+    adjacent. The 16-to-8-bit mapping is explicit (default high-byte), output
+    compression is lossless, and a pyramidal RGB image is built automatically.
+    This may change pixel values: it is NOT a regular fidelity-preserving convert.
+    """
+    configure_logging(verbose)
+    source = str(input_path) if is_remote(input_path) else Path(input_path)
+    if probe and (output_path is not None or output_json is not None):
+        raise click.UsageError("--probe does not write images/reports; omit -o and --output-json")
+    if not probe and output_path is None:
+        raise click.UsageError("-o / --output is required unless --probe is selected")
+    if input_type != "qptiff_fusion" and channel_name_field is not None:
+        raise click.UsageError("--channel-name-field is only valid for qptiff_fusion")
+    selectors = tuple(_crop_channel_selector(value) for value in (red, green, blue))
+    if probe:
+        try:
+            details = probe_rgb(
+                source, input_type=input_type, series=series, group=group, z=z, t=t,
+                image_type=image_type, intrinsic_only=intrinsic_only,
+                channel_name_field=channel_name_field,
+                red=selectors[0], green=selectors[1], blue=selectors[2],
+            )
+        except Exception as exc:
+            if verbose >= 2:
+                raise
+            raise click.ClickException(escape_terminal(str(exc))) from exc
+        click.echo(f"Sampled {details['samples_examined']} pixels in {details['sample_windows']} "
+                   "windows (not full-slide extrema).")
+        click.echo(f"Source: {details['source_dtype']} {tuple(details['source_size_yx'])}; "
+                   f"all-zero RGB: {details['all_zero_rgb_fraction']:.1%}")
+        for entry in details["channels"]:
+            suffix = ""
+            if "byte_repeated_fraction" in entry:
+                suffix = (f"; byte-repeated={entry['byte_repeated_fraction']:.1%}, "
+                          f"low-byte-zero={entry['low_byte_zero_fraction']:.1%}")
+            click.echo(f"  {entry['color']}: {entry['index']}:{entry['name']}, "
+                       f"min={entry['minimum']}, median={entry['median']:.1f}, "
+                       f"max={entry['maximum']}{suffix}")
+        return
+    inputs = [source]
+    protected = [source, output_path]
+    try:
+        preflight_storage(output_path, output_format, protected=inputs, overwrite=overwrite)
+        preflight_report(output_json, protected=protected, overwrite=overwrite)
+        report = extract_rgb(
+            source, output_path, input_type=input_type, output_format=output_format,
+            series=series, group=group, z=z, t=t, image_type=image_type,
+            intrinsic_only=intrinsic_only, channel_name_field=channel_name_field,
+            red=selectors[0], green=selectors[1], blue=selectors[2],
+            encoding=encoding, background=background, name=name,
+            pixel_size=_pixel_size_override(pixel_size_x, pixel_size_y, pixel_size_unit),
+            compression=compression, tile_size=tile_size,
+            pyramid_levels=pyramid_levels, max_workers=workers,
+            overwrite=overwrite, cache_directory=cache_directory,
         )
     except Exception as exc:
         if verbose >= 2:

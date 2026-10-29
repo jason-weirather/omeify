@@ -11,9 +11,10 @@ it tightens interpretation/metadata checks and makes inspection scope explicit.
 OME-Zarr has its own storage and inspection records, not fabricated TIFF IFDs.
 `omeify.zarr_write/1`, `omeify.zarr_collection/1`, and `omeify.zarr_inspect/2`
 are validated by packaged schemas. Convert/mutate report version 2 selects the
-appropriate TIFF or Zarr output/verification variant. Crop version 5 supports
-both collection writers and records source-to-output channel identities;
-embedded crop provenance version 2 stores the same mapping for each file.
+appropriate TIFF or Zarr output/verification variant. Crop version 6 supports
+polygon geometry and source-to-output channel identities; its embedded
+provenance is version 3. RGB reconstruction has an independent, versioned
+report (`omeify.extract_rgb/1`) referencing the verified single-image writer.
 `miti_header` is null for Zarr, never a false claim of TIFF-header compliance.
 Input Zarr `size_bytes` is null: discovery does not traverse an entire store to
 measure it. Source selectors and physical origins are explicit. A source store
@@ -24,7 +25,7 @@ See [the Zarr contract](ome_zarr.md) for publication, version, and capability li
 
 ## CLI presentation
 
-These rules apply equally to `convert`, `concat`, `mutate`, and `crop`:
+These rules apply equally to `convert`, `concat`, `mutate`, `crop`, and `extract-rgb`:
 
 | Selection | Output |
 |---|---|
@@ -69,6 +70,7 @@ References resolve against packaged resources, never by fetching their `$id` URL
 | `conversion_report.schema.json` | Conversion: `omeify.convert/2` |
 | `mutation_report.schema.json` | Integer or float32 precision mutation: `omeify.mutate/2` |
 | `crop_report.schema.json` | Crop export, including nested writer reports: `omeify.crop/6` |
+| `rgb_extraction_report.schema.json` | RGB plane reconstruction with explicit conversion policy: `omeify.extract_rgb/1` |
 | `crop_provenance.schema.json` | Embedded crop geometry/provenance: `omeify.crop_provenance/3` |
 | `tiff_inspection.schema.json` | TIFF inspection: `schema_version="2.0"` |
 | `zarr_inspection.schema.json` | Zarr inspection, including discovery metadata snapshots: `omeify.zarr_inspect/2` |

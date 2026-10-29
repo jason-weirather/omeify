@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/rgb_extraction_report.schema.json",
+  "title": "Recover RGB from three scalar channels",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "input_path", "output_path", "input_type", "output_format",
+    "source_series", "source_group", "source_z", "source_t", "intrinsic_only",
+    "source_size_yx", "source_dtype", "channels", "requested_encoding",
+    "encoding", "background", "output_name", "pixel_size_override", "writer_report"
+  ],
+  "properties": {
+    "schema": {"const": "omeify.extract_rgb/1"},
+    "input_path": {"type": "string", "minLength": 1},
+    "output_path": {"type": "string", "minLength": 1},
+    "input_type": {"enum": ["ome_tiff", "ome_zarr", "qptiff_mif", "qptiff_fusion", "indica_mif"]},
+    "output_format": {"enum": ["ome_tiff", "ome_zarr"]},
+    "source_series": {"type": "integer", "minimum": 0},
+    "source_group": {"type": "string"},
+    "source_z": {"type": ["integer", "null"], "minimum": 0},
+    "source_t": {"type": ["integer", "null"], "minimum": 0},
+    "intrinsic_only": {"type": "boolean"},
+    "source_size_yx": {
+      "type": "array", "prefixItems": [
+        {"type": "integer", "minimum": 1}, {"type": "integer", "minimum": 1}
+      ], "minItems": 2, "maxItems": 2
+    },
+    "source_dtype": {"enum": ["uint8", "uint16"]},
+    "channels": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "prefixItems": [
+        {"$ref": "#/$defs/red"},
+        {"$ref": "#/$defs/green"},
+        {"$ref": "#/$defs/blue"}
+      ]
+    },
+    "requested_encoding": {"enum": ["auto", "native", "high-byte", "rounded", "low-byte"]},
+    "encoding": {"enum": ["native", "high-byte", "rounded", "low-byte"]},
+    "background": {"enum": ["white", "keep"]},
+    "output_name": {"type": "string", "minLength": 1},
+    "pixel_size_override": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "array", "minItems": 3, "maxItems": 3,
+         "prefixItems": [{"type": "number", "exclusiveMinimum": 0},
+                         {"type": "number", "exclusiveMinimum": 0},
+                         {"type": "string", "minLength": 1}]}
+      ]
+    },
+    "writer_report": {
+      "oneOf": [
+        {"$ref": "https://github.com/jason-weirather/omeify/schemas/write_report.schema.json"},
+        {"$ref": "https://github.com/jason-weirather/omeify/schemas/zarr_write_report.schema.json"}
+      ]
+    }
+  },
+  "$defs": {
+    "channel": {
+      "type": "object", "additionalProperties": false,
+      "required": ["color", "source_index", "source_name"],
+      "properties": {
+        "color": {"enum": ["RED", "GREEN", "BLUE"]},
+        "source_index": {"type": "integer", "minimum": 0},
+        "source_name": {"type": "string", "minLength": 1}
+      }
+    },
+    "red": {"allOf": [{"$ref": "#/$defs/channel"}, {"properties": {"color": {"const": "RED"}}}]},
+    "green": {"allOf": [{"$ref": "#/$defs/channel"}, {"properties": {"color": {"const": "GREEN"}}}]},
+    "blue": {"allOf": [{"$ref": "#/$defs/channel"}, {"properties": {"color": {"const": "BLUE"}}}]}
+  }
+}

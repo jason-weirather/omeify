@@ -345,6 +345,7 @@ omeify convert   Normalize a supported source into OME-TIFF or OME-Zarr
 omeify concat    Combine explicitly selected OME-TIFF Images into one OME-TIFF
 omeify mutate    Create an explicitly pixel-mutated OME-TIFF or OME-Zarr
 omeify crop      Export rectangles into an ordered OME image collection
+omeify extract-rgb  Recover uint8 interleaved RGB from three scalar color channels
 omeify inspect   Inspect TIFF or OME-Zarr structure and metadata
 omeify version   Show package and dependency versions
 ```
@@ -686,6 +687,64 @@ zero-based integers for indices, and `(source, output_name)` pairs for explicit
 one-channel renames. Alternatively, `rename_channels={2: "CD8a"}` and
 `rename_channels_by="index"` apply the same global mapping as conversion. RGB and
 labels each remain one logical channel; they cannot be split into scalar samples.
+
+### `omeify extract-rgb`
+
+Recover a true single-channel OME RGB image (`YXS`, uint8, three interleaved
+samples) from `RED`, `GREEN`, and `BLUE` *scalar* source channels. This operation
+is separate from `convert` because reducing uint16 to uint8 and replacing
+missing-value sentinels deliberately changes values. Three arbitrary scalar
+channels are never implicitly treated as RGB.
+
+```bash
+omeify extract-rgb mixed.ome.tiff -o recovered.ome.tiff --name "H&E"
+omeify extract-rgb mixed.ome.tiff --probe
+# Numeric/renamed channels are supported (zero-based indices).
+omeify extract-rgb mixed.ome.tiff -o recovered.ome.tiff \
+  --red index:4 --green index:5 --blue index:6 --encoding high-byte
+# Preserve black (0,0,0) pixels instead of using white for empty regions.
+omeify extract-rgb mixed.ome.tiff -o recovered.ome.tiff --background keep
+```
+
+Channel names are exact and case-sensitive; `--red`, `--green`, and `--blue`
+accept source names, plain zero-based numeric indices, or `name:0` for a
+literally numeric name. Indices must identify distinct scalar channels.
+Supported inputs are planar OME-TIFF, OME-Zarr, Akoya mIF/Fusion and Indica
+mIF. The source must have uint8 or uint16 scalar samples. Source data must
+remain registered; this command performs no alignment or color calibration.
+
+`--encoding auto` selects `high-byte` for uint16, and `native` for uint8.
+`high-byte` is `value >> 8`, an exact inverse of either x256 or x257
+8-bit expansion. `rounded` maps 0..65535 to 0..255 with nearest-integer
+rounding, and `low-byte` requires every processed value to be <=255. The
+mapping cannot recover genuine 16-bit color precision. Probe output examines
+five small windows, **not** the full slide, and cannot guarantee the encoding.
+
+By default, exact all-zero source RGB triples become `(255,255,255)`. This
+assumes black means missing/background and does not infer missingness from
+stains or near-zero intensities. `--background keep` retains black. The OME
+writer assumes sRGB for the reconstructed samples, generating its canonical
+ICC profile; scalar source channels do not supply an RGB color profile.
+
+For OME-TIFF, output defaults to **lossless Deflate** with **automatic pyramids**
+and 512-pixel tiles. Use `--pyramid-levels 0` to disable pyramid construction.
+For OME-Zarr, the same image uses canonical NGFF 0.5, lossless Zstd and a new
+store directory. Explicit lossy compression is not accepted. `-v` controls
+progress, and `--output-json FILE|-` exports the validated
+`omeify.extract_rgb/1` report including the nested writer verification.
+The destination is checked against source and report paths before writing.
+
+Python API:
+
+```python
+from omeify import extract_rgb, probe_rgb
+
+sample = probe_rgb("mixed.ome.tiff")
+report = extract_rgb(
+    "mixed.ome.tiff", "recovered.ome.tiff",
+    encoding="high-byte", background="white", name="H&E",
+)
+```
 
 ### `omeify inspect`
 
