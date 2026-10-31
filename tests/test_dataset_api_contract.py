@@ -97,7 +97,7 @@ class _ThreeLevelSource(DatasetSourceBase):
                              origin_yx=(.75, .75))
         self._complete_base = replace(native_levels[0].plane_metadata,
                                       levels=(base_level, aligned))
-        super().__init__(self._complete_base)
+        super().__init__()
         self._native_levels = tuple(native_levels)
         self.plane_level_indices = (0, 2)
 

@@ -160,3 +160,25 @@ def test_http_plane_changes_do_not_repeat_discovery_or_shared_chunk_fetches(tmp_
             assert not requests
     finally:
         server.shutdown();server.server_close();worker.join(timeout=5)
+
+
+def test_existing_zarr_reader_navigates_through_its_authoritative_backend(tmp_path):
+    expected = data()
+    path = tmp_path / 'reader-backend.zarr'
+    fixture(path, version='0.5', data=expected, axes='tczyx')
+    with OMEZarrReader(path, t=0, z=1) as reader:
+        source = reader._source
+        store = source.store
+        assert reader.dataset._source is source
+        assert reader.dataset._owns_source is False
+        with reader.dataset.plane(t=2, z=4) as alternate:
+            np.testing.assert_array_equal(alternate.asarray(), expected[2, :, 4])
+        np.testing.assert_array_equal(reader.asarray(), expected[0, :, 1])
+        borrowed = reader.dataset
+        generation = source.generation
+        borrowed.close()
+        assert reader.is_open and source.store is store
+        assert source.generation == generation
+        assert reader.dataset._source is source
+    assert not source.is_open
+    assert source.store is None

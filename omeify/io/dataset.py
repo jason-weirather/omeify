@@ -17,7 +17,7 @@ import numpy as np
 from ._selection import normalize_channel_indices
 from .base import _semantic_image
 from .dataset_metadata import selected_index
-from .dataset_source import check_dataset_source
+from .dataset_source import check_dataset_source, validate_dataset_levels
 from .image_metadata import integer
 from .image_source import ImageSource
 from .prefetch import PlaneRequest, PrefetchPolicy, PrefetchQueue
@@ -131,9 +131,7 @@ class ImageDataset:
         elif not self._source.is_open:
             raise RuntimeError("Borrowed source must already be open")
         try:
-            self._levels = tuple(self._source.dataset_levels)
-            if not self._levels:
-                raise ValueError("Source exposes no dataset levels")
+            self._levels = validate_dataset_levels(self._source.dataset_levels)
         except BaseException:
             if self._owns_source:
                 self._source.close()
@@ -610,7 +608,12 @@ def open_dataset(path, *, input_type, series=0, group="", image_type=None,
 
 
 class PlaneReaderMixin:
-    """Navigation access for existing 2D OME reader constructors."""
+    """A 2D OME reader borrows dataset navigation from its *same* pixel source.
+
+    The reader remains a fixed-observation Image for existing callers. Its
+    ``dataset`` does not rediscover the file or create another TIFF/Zarr backend;
+    it reuses the source handle and cache. The reader alone owns the source.
+    """
     @property
     def plane_selection(self):
         self._ensure_open()

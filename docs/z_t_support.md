@@ -202,6 +202,25 @@ dataset sources and borrowed dataset views inherit `DatasetSourceBase` only.
 and hence an ordinary `Image`. This keeps existing custom 2D providers and the
 reader/writer contract unchanged.
 
+Both interfaces share a **private `_SourceSession` lifecycle** for acquiring and
+releasing resources, validating startup, session generations and context safety.
+The base is intentionally metadata-neutral and does not expose a pixel-read API.
+`ImageSource` alone requires a fixed 2D `ImageMetadata` descriptor. A
+dataset-only source instead publishes ordered native `DatasetLevel` descriptors;
+these hold the validated geometry and plane-description templates from which
+`plane_metadata(z=..., t=..., level=...)` supplies the selected observation.
+It does not also carry a redundant `_metadata`/`metadata` record. Borrowed
+dataset views preserve their parent session without owning its file or store.
+
+`OMETiffReader` and `OMEZarrReader` remain convenience **single-observation
+Images**, not a separate decoding implementation: each delegates to the same
+underlying TIFF/Zarr source's `read_plane_region()`. Their `.dataset` property
+borrows that very source and cache rather than opening another backend. Closing
+the reader ends the physical source session and invalidates its borrowed views.
+Direct `open_dataset()` is the preferred metadata-first entry point for Z/T
+navigation, while ordinary procedural 2D `ImageSource` providers remain first
+class with no Z/T requirements. No new runtime dependencies are introduced.
+
 ## Cache ownership and resource limits
 
 A file/store session shares its cache across selected Z/T planes and levels.

@@ -95,17 +95,19 @@ class _QuantizedDatasetSource(DatasetMetadataSource):
         dtype = self.plans[0].target_dtype
         if any(p.target_dtype != dtype for p in self.plans):
             raise ValueError("All mutation plans must use the same output dtype")
-        base = replace(self._base_metadata.levels[0], index=0)
-        self._base_metadata = replace(self._base_metadata, dtype=dtype,
-                                      levels=(base,))
-        self._metadata = self._base_metadata
+        # A transformed dataset has its own native-level metadata, not a second
+        # ImageSource-style descriptor. Its pixels are still read lazily from the
+        # parent and quantized with one fixed mapping across the selected stack.
+        metadata = self._dataset_levels[0].plane_metadata
+        base = replace(metadata.levels[0], index=0)
+        transformed = replace(metadata, dtype=dtype, levels=(base,))
         self.plane_level_indices = (0,)
-        self._dataset_levels = (replace(self._dataset_levels[0], plane_metadata=self._metadata),)
+        self._dataset_levels = (replace(self._dataset_levels[0], plane_metadata=transformed),)
 
     def read_plane_region(self, *bounds, z, t, level, channels, speculative=False):
         data = super().read_plane_region(*bounds, z=z, t=t, level=level, channels=channels,
                                          speculative=speculative)
-        if self.metadata.axes == "YX":
+        if self._dataset_levels[0].plane_metadata.axes == "YX":
             return self.plans[0].quantize(data)
         return np.stack([self.plans[c].quantize(data[i]) for i, c in enumerate(channels)])
 

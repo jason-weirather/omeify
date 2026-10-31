@@ -3,18 +3,17 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from pathlib import Path
-from typing import Self
 
 import numpy as np
 
 from ._selection import normalize_channel_indices
+from ._source_session import _SourceSession
 from .image_metadata import ImageMetadata, integer
 
 ChannelSelection = int | Sequence[int] | None
 
 
-class ImageSource(ABC):
+class ImageSource(_SourceSession, ABC):
     """Subclass to provide stable metadata and on-demand, repeatable pixel regions.
 
     Implement ``_read_region``; optionally implement ``_open`` and ``_close`` for
@@ -29,13 +28,13 @@ class ImageSource(ABC):
     during an open observation. ``close`` is idempotent; re-open starts a new session.
     """
 
+    _closed_message = "Image source is closed; use 'with' or open()"
+
     def __init__(self, metadata: ImageMetadata | None = None) -> None:
         if metadata is not None and not isinstance(metadata, ImageMetadata):
             raise TypeError("metadata must be ImageMetadata or None")
+        super().__init__()
         self._metadata = metadata
-        self._is_open = False
-        self._generation = 0
-        self._context_active = False
 
     @property
     def metadata(self) -> ImageMetadata:
@@ -43,57 +42,9 @@ class ImageSource(ABC):
             raise RuntimeError("Open the source before discovering its metadata")
         return self._metadata
 
-    @property
-    def is_open(self) -> bool:
-        return self._is_open
-
-    @property
-    def generation(self) -> int:
-        """Session token, not a persistent identity or a content checksum."""
-        return self._generation
-
-    @property
-    def backing_paths(self) -> tuple[Path, ...]:
-        """Optional local dependencies protected from overwrite by image writers.
-
-        File backends must report local pixel dependencies, including a borrowed
-        memory-mapped array's file. Empty for non-file sources. Not OME metadata.
-        """
-        return ()
-
-    def open(self) -> Self:
-        if not self._is_open:
-            try:
-                self._open()
-                if not isinstance(self._metadata, ImageMetadata):
-                    raise TypeError("A source must publish ImageMetadata when opened")
-            except BaseException:
-                self._close()
-                raise
-            self._is_open = True
-            self._generation += 1
-        return self
-
-    def close(self) -> None:
-        if self._is_open:
-            try:
-                self._close()
-            finally:
-                self._is_open = False
-                self._generation += 1
-
-    def _open(self) -> None:
-        """Acquire resources and publish metadata, without rendering pixels."""
-
-    def _close(self) -> None:
-        """Release owned resources only."""
-
-    def clear_cache(self) -> None:
-        """Optional cache eviction; never closes the source or changes its pixels."""
-
-    def _ensure_open(self) -> None:
-        if not self.is_open:
-            raise RuntimeError("Image source is closed; use 'with' or open()")
+    def _validate_open(self) -> None:
+        if not isinstance(self._metadata, ImageMetadata):
+            raise TypeError("A source must publish ImageMetadata when opened")
 
     def read_region(
         self, y0: int, y1: int, x0: int, x1: int, *,
@@ -152,14 +103,3 @@ class ImageSource(ABC):
             f"axes={self._metadata.axes!r}, shape={self._metadata.shape}, "
             f"dtype={self._metadata.dtype})"
         )
-
-    def __enter__(self) -> Self:
-        if self._context_active:
-            raise RuntimeError("Nested contexts on the same source are not supported")
-        self.open()
-        self._context_active = True
-        return self
-
-    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        self._context_active = False
-        self.close()

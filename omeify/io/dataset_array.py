@@ -77,7 +77,7 @@ class DatasetArraySource(DatasetSourceBase):
             icc_profile=icc_profile, background_label=background_label)
         if count != metadata.logical_channel_count:
             raise ValueError("Logical channel count mismatch")
-        super().__init__(metadata)
+        super().__init__()
         self._dataset_levels = (DatasetLevel(0, tuple(infos), metadata),)
 
     @property
@@ -102,22 +102,22 @@ class DatasetArraySource(DatasetSourceBase):
         descriptor = self.dataset_levels[0]
         selected_index(descriptor.axis("Z"), z, name="Z")
         selected_index(descriptor.axis("T"), t, name="T")
-        return self.metadata
+        return descriptor.plane_metadata
 
     def read_plane_region(self, y0, y1, x0, x1, *, z, t, level, channels, speculative=False):
-        self.plane_metadata(z=z, t=t, level=level)
+        metadata = self.plane_metadata(z=z, t=t, level=level)
         indices = {"Z": z, "T": t, "Y": slice(y0, y1), "X": slice(x0, x1),
                    "S": slice(None)}
-        wanted = channels if self.metadata.axes == "CYX" else (0,)
+        wanted = channels if metadata.axes == "CYX" else (0,)
         result = []
         for c in wanted:
             indices["C"] = c
             selection = tuple(indices[a] for a in self.native_axes)
             values = self.array[selection]
             remaining = [a for a, v in zip(self.native_axes, selection) if isinstance(v, slice)]
-            axes = "YXS" if self.metadata.image_type == "rgb" else "YX"
+            axes = "YXS" if metadata.image_type == "rgb" else "YX"
             result.append(np.transpose(values, [remaining.index(a) for a in axes]))
-        return np.stack(result) if self.metadata.axes == "CYX" else np.array(result[0], copy=True)
+        return np.stack(result) if metadata.axes == "CYX" else np.array(result[0], copy=True)
 
     def cache_info(self):
         return {"max_bytes": 0, "resident_bytes": 0, "entries": 0, "in_flight": 0}

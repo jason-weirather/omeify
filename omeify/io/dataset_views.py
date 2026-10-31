@@ -36,7 +36,7 @@ class SelectedDatasetSource(DatasetSourceBase):
                         metadata = selected._metadata
                 else:
                     metadata = cropped._metadata
-        super().__init__(metadata)
+        super().__init__()
         axes = []
         for info in parent.levels[0].axes:
             if info.name in "TZ":
@@ -79,7 +79,7 @@ class SelectedDatasetSource(DatasetSourceBase):
             raise IndexError("Selected dataset views have one level")
         selected_index(self.dataset_levels[0].axis("Z"), z, name="Z")
         selected_index(self.dataset_levels[0].axis("T"), t, name="T")
-        return self.metadata
+        return self.dataset_levels[0].plane_metadata
 
     def read_plane_region(self, y0, y1, x0, x1, *, z, t, level, channels, speculative=False):
         self.plane_metadata(z=z, t=t, level=level)
@@ -174,8 +174,8 @@ class DatasetMetadataSource(DatasetSourceBase):
         with parent.plane(z=z0, t=t0) as plane, plane.with_metadata(
                 pixel_size=pixel_size, channel_names=channel_names) as changed:
             complete_base = changed._metadata
-        super().__init__(complete_base)
-        self._levels = []
+        super().__init__()
+        native_levels = []
 
         for i, descriptor in enumerate(parent.levels):
             axis_infos = []
@@ -201,7 +201,7 @@ class DatasetMetadataSource(DatasetSourceBase):
             if i == 0:
                 # Existing 2D metadata rules preserve/recalibrate all compatible
                 # XY levels, including their offsets and original unknowns.
-                metadata = replace(complete_base, levels=(complete_base.levels[0],))
+                metadata = complete_base
             else:
                 with parent.plane(z=0 if descriptor.axis("Z") else None,
                                   t=0 if descriptor.axis("T") else None,
@@ -224,10 +224,9 @@ class DatasetMetadataSource(DatasetSourceBase):
                                   else channel_names,
                     pixel_size=new_size, shape=current_level.shape,
                     levels=(current_level,))
-            self._levels.append(DatasetLevel(i, tuple(axis_infos), metadata,
+            native_levels.append(DatasetLevel(i, tuple(axis_infos), metadata,
                                              descriptor.plane_preserving))
-        self._dataset_levels = tuple(self._levels)
-        self._base_metadata = complete_base
+        self._dataset_levels = tuple(native_levels)
 
     @property
     def is_open(self):
@@ -256,7 +255,7 @@ class DatasetMetadataSource(DatasetSourceBase):
         selected_index(descriptor.axis("T"), t, name="T")
         # Retain parent's per-plane TIFF/NGFF checks, not just first-plane metadata.
         self.parent._source.plane_metadata(z=z, t=t, level=level)
-        return self._base_metadata if level == 0 else descriptor.plane_metadata
+        return descriptor.plane_metadata
 
     def read_plane_region(self, *bounds, z, t, level, channels, speculative=False):
         self.plane_metadata(z=z, t=t, level=level)
