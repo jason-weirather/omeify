@@ -65,6 +65,10 @@ References resolve against packaged resources, never by fetching their `$id` URL
 
 | Schema resource | Product / current identifier |
 |---|---|
+| `dataset_write_report.schema.json` | Explicit complete/ranged stack writer: `omeify.dataset_write/1` |
+| `dataset_operation_report.schema.json` | Explicit stack convert/mutate: `omeify.dataset_operation/1` |
+| `ome_zarr_dataset_profile.schema.json` | Canonical TCZYX NGFF 0.5 stack attributes, distinct from 2D profile |
+| `stack_geometry.schema.json` | Linked intrinsic Z/T origins: `omeify.stack_geometry/1` |
 | `write_report.schema.json` | Single image or temporary writer: `omeify.write/1` |
 | `multi_series_report.schema.json` | Named heterogeneous images, including `concat`: `omeify.multi_series/1` |
 | `conversion_report.schema.json` | Conversion: `omeify.convert/2` |
@@ -250,3 +254,13 @@ Successful structural report validation does not independently repeat those chec
 
 Metadata minimization is not deidentification. Reports and allowed image metadata
 can contain identifying information, and pixels are not screened for burned-in text.
+
+## Z/T development branch reports
+
+Explicit stack operations return `omeify.dataset_operation/1`, containing the
+selected half-open Z/T ranges, an `omeify.dataset_write/1` writer report and any
+fixed whole-stack mutation mapping. Ordinary 2D operation schemas are unchanged.
+Numeric axis geometry is allowlisted; cache statistics, source paths, acquisition
+free text and execution histories are not embedded in generated image metadata.
+Reports may still contain paths and need review before sharing.
+See [Z/T source sessions](z_t_support.md) for implementation and validation limits.

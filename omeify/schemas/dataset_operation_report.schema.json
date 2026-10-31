@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/dataset_operation_report.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "operation",
+    "input",
+    "writer_report",
+    "mutation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.dataset_operation/1"
+    },
+    "operation": {
+      "enum": [
+        "convert",
+        "mutate"
+      ]
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "format",
+        "series",
+        "group",
+        "z_range",
+        "t_range"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "ome_tiff",
+            "ome_zarr"
+          ]
+        },
+        "series": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "group": {
+          "type": "string"
+        },
+        "z_range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "t_range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "writer_report": {
+      "$ref": "https://github.com/jason-weirather/omeify/schemas/dataset_write_report.schema.json"
+    },
+    "mutation": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "source_dtype",
+            "target_dtype",
+            "range_mode",
+            "scope",
+            "sample_layout",
+            "channels"
+          ],
+          "properties": {
+            "kind": {
+              "const": "integer"
+            },
+            "source_dtype": {
+              "enum": [
+                "float32",
+                "float64"
+              ]
+            },
+            "target_dtype": {
+              "enum": [
+                "uint8",
+                "uint16"
+              ]
+            },
+            "range_mode": {
+              "enum": [
+                "auto",
+                "preserve",
+                "full"
+              ]
+            },
+            "scope": {
+              "const": "one fixed mapping per channel across the selected T/Z extent"
+            },
+            "sample_layout": {
+              "const": "deterministic row-concatenated T/Z raster; no physical interpretation"
+            },
+            "channels": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "float32_mantissa_bits"
+          ],
+          "properties": {
+            "kind": {
+              "const": "float_precision"
+            },
+            "float32_mantissa_bits": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 22
+            }
+          }
+        }
+      ]
+    }
+  }
+}

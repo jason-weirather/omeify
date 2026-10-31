@@ -13,6 +13,15 @@ call signatures are unchanged. There are no deprecated forwarding APIs. File ope
 now validates the complete advertised level description; inconsistent metadata
 can fail earlier than a later regional read in the former reader implementation.
 
+## Z/T source sessions (development)
+
+The existing Image API remains 2D. `open_dataset()` describes a complete native
+OME-TIFF/OME-Zarr source and yields ordinary Images with `.plane(z=..., t=...)`.
+It shares handles, metadata and cache ownership across those immutable views.
+The [Z/T guide](z_t_support.md) documents source axes, native-level selection,
+bounded block reads, optional prefetch and explicit `write_dataset()` output.
+This adds no multidimensional `Image.asarray()` behavior or mutable Z/T cursor.
+
 ## OME-Zarr and coordinates (0.22)
 
 `OMEZarrReader` uses this same Image/Channel API for local directories and HTTP(S)

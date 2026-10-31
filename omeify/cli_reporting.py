@@ -27,6 +27,9 @@ def preflight_report(
 
 def completion_summary(report: Mapping[str, Any], output_path: Path) -> str:
     """A short display generated from the report, never a second stored model."""
+    if report.get("schema") == "omeify.dataset_operation/1":
+        summary = completion_summary(report["writer_report"], output_path)
+        return summary + " | explicit Z/T stack"
     if "outputs" in report:
         outputs = report["outputs"]
         count = sum(len(item["regions"]) for item in outputs)

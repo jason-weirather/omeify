@@ -139,3 +139,17 @@ work from that installed distribution. Do not commit `.pypirc`, tokens, or AWS
 credentials. Native S3 uses the optional `omeify[s3]` extra, not an import side
 effect on ordinary TIFF/HTTP users. The repository must also be made public
 separately if you intend to link to it from the package page.
+
+## Z/T branch validation
+
+Run `python -m pytest -q tests/test_dataset*.py tests/test_volume_pyramid.py`,
+then the full suite in the environments above. `test_dataset_zarr.py` and
+`test_dataset_writers.py` are mandatory real-backend tests, not optional skips.
+`test_dataset_writer_core.py` additionally exercises actual uncompressed TIFF
+encoding below the public XSD boundary; that does not substitute for XSD tests.
+
+`python -m examples.zt_io ~/Scratch/omeify-zt-demo` generates small deterministic
+TIFF, XY-Zarr and XYZ-Zarr products and checks complete base-plane readback.
+Use a new destination and install the declared dependencies first.
+The [Z/T implementation guide](z_t_support.md) lists outstanding integration
+and supported-scope boundaries; source-level tests alone are not a release gate.

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import math
 import threading
-from collections import OrderedDict
 from typing import Protocol, runtime_checkable
 
 import numpy as np
+
+from .read_cache import CacheNamespace, ReadCache
 import tifffile
 
 
@@ -68,6 +69,7 @@ class TiffPlaneReader:
         *,
         lock: threading.RLock | None = None,
         cache_mib: int = 64,
+        cache: ReadCache | None = None,
     ) -> None:
         self.samples_per_pixel = int(page.samplesperpixel)
         if self.samples_per_pixel == 3:
@@ -86,7 +88,9 @@ class TiffPlaneReader:
         self.height = int(page.imagelength)
         self.width = int(page.imagewidth)
         self.dtype = np.dtype(page.dtype).newbyteorder("=")
-        self._cache: OrderedDict[int, tuple[np.ndarray, int, int]] = OrderedDict()
+        self._shared_cache = cache or ReadCache(max(0, cache_mib) * 1024 * 1024)
+        self._namespace = (id(page.parent), int(page.offset))
+        self._cache = CacheNamespace(self._shared_cache, self._namespace)
 
         if page.is_tiled:
             self.segment_height = int(page.tilelength)
@@ -146,12 +150,12 @@ class TiffPlaneReader:
             shape += (self.samples_per_pixel,)
         return np.zeros(shape, dtype=self.dtype)
 
-    def _decode_segment(self, index: int) -> tuple[np.ndarray, int, int]:
-        cached = self._cache.get(index)
-        if cached is not None:
-            self._cache.move_to_end(index)
-            return cached
+    def _decode_segment(self, index: int, *, speculative=False) -> tuple[np.ndarray, int, int]:
+        return self._shared_cache.load(
+            (self._namespace, index), lambda: self._load_segment(index), speculative=speculative,
+        )
 
+    def _load_segment(self, index: int) -> tuple[np.ndarray, int, int]:
         try:
             offset = int(self.page.dataoffsets[index])
             bytecount = int(self.page.databytecounts[index])
@@ -214,13 +218,9 @@ class TiffPlaneReader:
             array = np.ascontiguousarray(array[:valid_h, :valid_w, ...])
 
         value = (array, origin_y, origin_x)
-        self._cache[index] = value
-        self._cache.move_to_end(index)
-        while len(self._cache) > self.cache_capacity:
-            self._cache.popitem(last=False)
         return value
 
-    def read_region(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
+    def read_region(self, y0: int, y1: int, x0: int, x1: int, *, speculative=False) -> np.ndarray:
         if not (0 <= y0 <= y1 <= self.height and 0 <= x0 <= x1 <= self.width):
             raise ValueError(
                 f"Requested region {(y0, y1, x0, x1)} is outside page shape {self.shape}"
@@ -237,7 +237,7 @@ class TiffPlaneReader:
         for segment_y in range(first_segment_y, last_segment_y + 1):
             for segment_x in range(first_segment_x, last_segment_x + 1):
                 index = self._segment_index(segment_y, segment_x)
-                segment, seg_y0, seg_x0 = self._decode_segment(index)
+                segment, seg_y0, seg_x0 = (self._decode_segment(index, speculative=True) if speculative else self._decode_segment(index))
                 seg_y1 = seg_y0 + segment.shape[0]
                 seg_x1 = seg_x0 + segment.shape[1]
 

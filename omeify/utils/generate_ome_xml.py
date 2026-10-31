@@ -9,6 +9,7 @@ from tifffile import OmeXml
 
 from omeify._version import __version__
 from .ome_geometry import attach_geometry
+from .stack_geometry import attach_stack_geometry
 
 _OME_NAMESPACE = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
 _PYRAMID_NAMESPACE = "openmicroscopy.org/PyramidResolution"
@@ -36,6 +37,12 @@ def _image_metadata(
         "PhysicalSizeYUnit": pixel_size.unit,
         "Channel": {"Name": list(tiff_features.channel_names)},
     }
+    for field, xml, unit in (("z_spacing_um", "PhysicalSizeZ", "µm"),
+                             ("time_increment_s", "TimeIncrement", "s")):
+        value = getattr(tiff_features, field, None)
+        if value is not None:
+            metadata[xml] = value
+            metadata[xml + "Unit"] = unit
     if len(level_shapes) > 1:
         annotation: dict[str, str] = {"Namespace": _PYRAMID_NAMESPACE}
         for index, shape in enumerate(level_shapes[1:], start=1):
@@ -100,8 +107,8 @@ def _normalize_root(
     for pixels in pixels_nodes:
         # These values describe the file that omeify writes, not the source.
         pixels.set("BigEndian", "true" if output_byteorder == ">" else "false")
-        # With SizeZ=SizeT=1, XYZCT maps planar channel pages in order and
-        # also correctly describes one interleaved RGB plane.
+        # Writer layouts TCZYX/TZYXS and the 2D special cases have Z fastest,
+        # then logical C, then T. SubIFDs are never extra logical Z planes.
         pixels.set("DimensionOrder", "XYZCT")
         channels = pixels.findall("./ome:Channel", namespaces=namespace)
         interleaved = (
@@ -184,6 +191,7 @@ def generate_ome_xml(
         remove_image_names=True,
     )
     attach_geometry(root, image_elements, (tiff_features,))
+    attach_stack_geometry(root, image_elements, (tiff_features,))
     return {
         "xml_string": _serialize(root),
         "uuid": file_uuid if display_uuid else None,
@@ -229,6 +237,7 @@ def generate_multi_series_ome_xml(
         remove_image_names=False,
     )
     attach_geometry(root, image_elements, [spec for _, spec, _ in normalized])
+    attach_stack_geometry(root, image_elements, [spec for _, spec, _ in normalized])
     if provenance_json is not None:
         if not isinstance(provenance_json, str) or not provenance_json:
             raise ValueError("provenance_json must be a non-empty string or None")

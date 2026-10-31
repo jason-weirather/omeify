@@ -63,6 +63,9 @@ def read_store(path: str | Path, *, storage_options: dict | None = None,
             self.cache_size = 0
             self.metadata_bytes = 0
             self.metadata_keys = set()
+            self.prefetching = False
+            self.stats = dict(encoded_hits=0, encoded_misses=0,
+                              backend_bytes=0, speculative_backend_bytes=0)
 
         async def get(self, key, prototype, byte_range=None):
             relative_path(key)
@@ -73,13 +76,20 @@ def read_store(path: str | Path, *, storage_options: dict | None = None,
                     raise ValueError("A source store key resolves outside its root")
             cache_key = (key, repr(byte_range))
             if cache_key in self.cache:
-                payload = self.cache.pop(cache_key)
-                self.cache[cache_key] = payload
+                self.stats["encoded_hits"] += 1
+                payload = self.cache[cache_key]
+                if not self.prefetching:
+                    self.cache.move_to_end(cache_key)
                 return prototype.buffer.from_bytes(payload)
+            self.stats["encoded_misses"] += 1
+            speculative = self.prefetching
             result = await self._store.get(key, prototype, byte_range=byte_range)
             if result is None:
                 return None
             payload = result.to_bytes()
+            self.stats["backend_bytes"] += len(payload)
+            if speculative:
+                self.stats["speculative_backend_bytes"] += len(payload)
             if key.rsplit("/", 1)[-1] in {"zarr.json", ".zattrs", ".zarray", ".zgroup"}:
                 if len(payload) > MAX_METADATA_BYTES:
                     raise ValueError("Zarr node metadata exceeds 8 MiB")
@@ -88,7 +98,9 @@ def read_store(path: str | Path, *, storage_options: dict | None = None,
                     self.metadata_bytes += len(payload)
                     if self.metadata_bytes > 32 * 1024 * 1024 or len(self.metadata_keys) > 8192:
                         raise ValueError("Zarr metadata discovery exceeds its bounded budget")
-            if 0 < len(payload) <= cache_bytes:
+            # Prefetch is retained only in the protected decoded-block tier.
+            # It must not displace demand bytes from this encoded-object tier.
+            if not speculative and 0 < len(payload) <= cache_bytes:
                 old = self.cache.pop(cache_key, None)
                 if old is not None:
                     self.cache_size -= len(old)

@@ -1,7 +1,11 @@
 """Regional OME-Zarr image readers over the existing ImageSource contract."""
 from __future__ import annotations
 
+from ..dataset import PlaneReaderMixin
+
 import logging
+import itertools
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +13,8 @@ import numpy as np
 from ..base import Image, LabelImage
 from ..image_metadata import integer
 from ..image_source import ImageSource
+from ..read_cache import ReadCache
+from ..dataset_metadata import selected_index
 from .metadata import ArrayInfo, ome_attributes, parse_image, relative_path
 from .store import is_remote, location, read_store
 
@@ -101,9 +107,11 @@ def discover_images(store, group_path="", *, metadata_nodes=None) -> tuple[tuple
 
 
 class ZarrSource(ImageSource):
+    supports_prefetch = True
+
     def __init__(self, path: str | Path, *, series=0, group="", z=None, t=None,
                  image_type=None, intrinsic_only=False, storage_options=None,
-                 cache_bytes=64 * 1024 * 1024):
+                 cache_bytes=64 * 1024 * 1024, _allow_default_selection=False):
         super().__init__()
         self.path = location(path)
         self.series_index = integer(series, "series")
@@ -114,6 +122,9 @@ class ZarrSource(ImageSource):
         self.intrinsic_only = intrinsic_only
         self.storage_options = dict(storage_options or {})
         self.cache_bytes = integer(cache_bytes, "cache_bytes")
+        self._allow_default_selection = _allow_default_selection
+        self._block_cache = ReadCache(self.cache_bytes - self.cache_bytes // 4)
+        self._read_lock = threading.RLock()
         self.store = None
         self.arrays = ()
         self.entries = ()
@@ -131,7 +142,7 @@ class ZarrSource(ImageSource):
         import zarr
 
         self.store = read_store(self.path, storage_options=self.storage_options,
-                                cache_bytes=self.cache_bytes)
+                                cache_bytes=self.cache_bytes // 4)
         self.discovery_metadata = {}
         self.entries = discover_images(self.store, self.group_path,
                                        metadata_nodes=self.discovery_metadata)
@@ -156,6 +167,7 @@ class ZarrSource(ImageSource):
             self.attributes, group.metadata.zarr_format, [array_info(a) for a in self.arrays],
             series=index, z=self.z, t=self.t, image_type=self.image_type,
             intrinsic_only=self.intrinsic_only,
+            allow_default_selection=self._allow_default_selection,
         )
         self._metadata = self.parsed.metadata
         if self.parsed.additional_spatial_context and not self.intrinsic_only:
@@ -163,6 +175,7 @@ class ZarrSource(ImageSource):
                            "or scene registration; export requires explicit intrinsic_only=True")
 
     def _close(self):
+        self._block_cache.clear()
         self.arrays = ()
         self.entries = ()
         self.parsed = None
@@ -178,34 +191,104 @@ class ZarrSource(ImageSource):
     def clear_cache(self):
         self._ensure_open()
         self.store.clear_cache()
+        self._block_cache.clear()
+
+    @property
+    def dataset_levels(self):
+        self._ensure_open()
+        return self.parsed.dataset_levels
+
+    def plane_metadata(self, *, z=None, t=None, level=0):
+        self._ensure_open()
+        level = integer(level, "source level")
+        if level >= len(self.dataset_levels):
+            raise IndexError("Source level outside pyramid")
+        descriptor = self.dataset_levels[level]
+        selected_index(descriptor.axis("Z"), z, name="Z")
+        selected_index(descriptor.axis("T"), t, name="T")
+        return self.metadata if level == 0 else descriptor.plane_metadata
+
+    def _native_region(self, array, selection, *, speculative):
+        """Read/cache native chunks through public Zarr indexing, never codec internals.
+
+        A chunk spanning several Z/T positions is decoded once and shared by all
+        plane views. For sharded arrays, ``chunks`` is the inner chunk grid; Zarr
+        retains responsibility for shard indices and ranged storage reads.
+        """
+        chunks = tuple(array.chunks)
+        sliced = [i for i, value in enumerate(selection) if isinstance(value, slice)]
+        shape = tuple(selection[i].stop - selection[i].start for i in sliced)
+        out = np.empty(shape, dtype=array.dtype)
+        if not out.size:
+            return out
+        ranges = []
+        for i, sel in enumerate(selection):
+            lo, hi = (sel.start, sel.stop) if isinstance(sel, slice) else (sel, sel + 1)
+            ranges.append(range(lo // chunks[i], (hi - 1) // chunks[i] + 1))
+        for coordinates in itertools.product(*ranges):
+            starts = tuple(k * size for k, size in zip(coordinates, chunks))
+            ends = tuple(min(lo + size, length) for lo, size, length
+                         in zip(starts, chunks, array.shape))
+            block = self._block_cache.load((array.path, coordinates),
+                lambda: np.array(array[tuple(slice(lo, hi) for lo, hi in zip(starts, ends))],
+                                 copy=True, order="C"), speculative=speculative)
+            local, target = [], []
+            for i, sel in enumerate(selection):
+                if isinstance(sel, slice):
+                    lo, hi = max(sel.start, starts[i]), min(sel.stop, ends[i])
+                    local.append(slice(lo - starts[i], hi - starts[i]))
+                    target.append(slice(lo - sel.start, hi - sel.start))
+                else:
+                    local.append(sel - starts[i])
+            out[tuple(target)] = block[tuple(local)]
+        return out
+
+    def read_plane_region(self, y0, y1, x0, x1, *, z, t, level, channels, speculative=False):
+        with self._read_lock:
+            self._ensure_open()
+            self.store.prefetching = speculative
+            try:
+                return self._read_selected_region(y0,y1,x0,x1,z=z,t=t,level=level,
+                                                  channels=channels,speculative=speculative)
+            finally:
+                self.store.prefetching = False
+
+    def _read_selected_region(self,y0,y1,x0,x1,*,z,t,level,channels,speculative):
+        native = self.parsed.native_axes
+        array = self.arrays[level]
+        descriptor = self.dataset_levels[level]
+        z = selected_index(descriptor.axis("Z"), z, name="Z")
+        t = selected_index(descriptor.axis("T"), t, name="T")
+        indices = {"z": z, "t": t, "y": slice(y0, y1), "x": slice(x0, x1)}
+        spatial_order = [a for a in native if a in "yx"]
+        wanted = (0, 1, 2) if self.metadata.image_type == "rgb" else channels
+        values = []
+        for c in wanted:
+            indices["c"] = c
+            selection = tuple(indices[a] for a in native)
+            plane = self._native_region(array, selection, speculative=speculative)
+            values.append(np.transpose(plane, [spatial_order.index("y"), spatial_order.index("x")]))
+        if self.metadata.image_type == "rgb":
+            return np.stack(values, axis=-1)
+        return values[0] if self.metadata.axes == "YX" else np.stack(values)
 
     def _read_region(self, y0, y1, x0, x1, *, level, channels):
-        parsed = self.parsed
-        native = parsed.native_axes
-        array = self.arrays[level]
-        selection = list(parsed.selections)
-        selection[native.index("y")] = slice(y0, y1)
-        selection[native.index("x")] = slice(x0, x1)
-        remaining = [axis for axis, index in zip(native, selection) if isinstance(index, slice)]
-        if "c" in native:
-            # Scalar reads preserve requested ordering/duplicates without allocating all channels.
-            values = []
-            wanted = (0, 1, 2) if self.metadata.image_type == "rgb" else channels
-            for channel in wanted:
-                selection[native.index("c")] = channel
-                plane = np.asarray(array[tuple(selection)])
-                spatial_order = [a for a in remaining if a != "c"]
-                values.append(np.transpose(plane, [spatial_order.index("y"), spatial_order.index("x")]))
-            if self.metadata.image_type == "rgb":
-                return np.stack(values, axis=-1)
-            if self.metadata.axes == "YX":
-                return values[0]
-            return np.stack(values)
-        plane = np.asarray(array[tuple(selection)])
-        return np.transpose(plane, [remaining.index("y"), remaining.index("x")])
+        native = self.parsed.native_axes
+        selections = self.parsed.selections
+        z = selections[native.index("z")] if "z" in native else None
+        t = selections[native.index("t")] if "t" in native else None
+        return self.read_plane_region(y0, y1, x0, x1, z=z, t=t,
+                    level=self.parsed.level_indices[level], channels=channels)
+
+    def cache_info(self):
+        info = self._block_cache.info()
+        encoded = 0 if self.store is None else self.store.cache_size
+        stats = {} if self.store is None else self.store.stats
+        return {**info, **stats, "decoded_bytes": info["resident_bytes"], "encoded_bytes": encoded,
+                "resident_bytes": info["resident_bytes"] + encoded, "max_bytes": self.cache_bytes}
 
 
-class OMEZarrReader(Image):
+class OMEZarrReader(PlaneReaderMixin, Image):
     """Open a local/HTTP NGFF 0.4, 0.5 or 0.6 image as a regional 2D observation.
 
     Non-singleton Z/T axes require explicit z=/t=. A group selects an image within

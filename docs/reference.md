@@ -12,6 +12,13 @@ see [Images and sources](image_sources.md).
 [Python API](#python-api) · [Verification](#validation-and-verification) ·
 [I/O and failure behavior](#io-scratch-space-and-failure-behavior)
 
+## Z/T source sessions (development)
+
+[Z/T source sessions](z_t_support.md) is the reference for `open_dataset()`,
+`ImageDataset`, source-axis metadata, immutable plane Images, shared cache,
+optional prefetch, explicit stack scopes and `write_dataset()`.
+Existing Image methods below remain two-dimensional.
+
 ## Installation
 
 Omeify 0.22 requires **Python 3.11 or newer**. TIFF and Zarr support, including
@@ -441,9 +448,9 @@ omeify convert slide.svs --output slide.ome.tif \
 ```
 
 Only the selected image/series is converted. Series 0 is the default. Use
-`--series` when inspection shows the desired image elsewhere. Zarr additionally
-accepts `--group`, `--z-index`, and `--t-index`; its selectors never reinterpret
-a multi-plane TIFF. The [Zarr reading contract](ome_zarr.md#reading-contract)
+`--series` when inspection shows the desired image elsewhere. Both OME inputs accept `--z-index` and `--t-index`. Zarr additionally accepts
+`--group`. Explicit `--all-planes`, `--z-range` and `--t-range` scopes select
+regular-stack conversion/mutation; there is no implicit full-stack conversion. The [Zarr reading contract](ome_zarr.md#reading-contract)
 describes additional-geometry and intrinsic-only restrictions.
 
 #### Channel renaming
@@ -493,7 +500,7 @@ Common conversion options:
 --output-format FORMAT     ome_tiff (default) or ome_zarr
 --series N                 Declared source image/series; default 0
 --group PATH               Zarr image group within the store
---z-index N, --t-index N    Explicit Zarr plane selectors when required
+--z-index N, --t-index N    Explicit OME-TIFF/Zarr plane selectors when required
 --intrinsic-only           Explicitly discard additional Zarr spatial context
 --compression NAME         TIFF: JPEG for RGB, LZW otherwise; Zarr: ZSTD
 --jpeg-quality N           JPEG quality from 1 through 100; default 90
@@ -1481,8 +1488,8 @@ TIFF segments continue to read as zeros.
 ## Current limitations
 
 - Supported image models are two-dimensional `YX`, planar `CYX`, and interleaved `YXS` RGB.
-  Zarr requires explicit selection of non-singleton Z/T planes; this does not add
-  general multi-plane TIFF selection or multidimensional output.
+  Persistent OME source sessions select Z/T planes into this same Image model.
+  Explicit dataset writers support regular stacks; see the Z/T guide for limits.
 - RGB writing is restricted to interleaved `uint8` samples.
 - Mutation supports planar floating-point input to `uint8` or `uint16`, or float32-to-float32 precision trimming through retained mantissa bits.
 - Metadata minimization does not detect identifying text embedded in pixels.

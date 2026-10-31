@@ -1,0 +1,570 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/ome_zarr_dataset_profile.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ome"
+  ],
+  "properties": {
+    "ome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "multiscales",
+        "omero"
+      ],
+      "properties": {
+        "version": {
+          "const": "0.5"
+        },
+        "multiscales": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "axes",
+              "datasets",
+              "type",
+              "metadata"
+            ],
+            "properties": {
+              "axes": {
+                "enum": [
+                  [
+                    {
+                      "name": "t",
+                      "type": "time"
+                    },
+                    {
+                      "name": "c",
+                      "type": "channel"
+                    },
+                    {
+                      "name": "z",
+                      "type": "space"
+                    },
+                    {
+                      "name": "y",
+                      "type": "space",
+                      "unit": "micrometer"
+                    },
+                    {
+                      "name": "x",
+                      "type": "space",
+                      "unit": "micrometer"
+                    }
+                  ],
+                  [
+                    {
+                      "name": "t",
+                      "type": "time"
+                    },
+                    {
+                      "name": "c",
+                      "type": "channel"
+                    },
+                    {
+                      "name": "z",
+                      "type": "space",
+                      "unit": "micrometer"
+                    },
+                    {
+                      "name": "y",
+                      "type": "space",
+                      "unit": "micrometer"
+                    },
+                    {
+                      "name": "x",
+                      "type": "space",
+                      "unit": "micrometer"
+                    }
+                  ],
+                  [
+                    {
+                      "name": "t",
+                      "type": "time",
+                      "unit": "second"
+                    },
+                    {
+                      "name": "c",
+                      "type": "channel"
+                    },
+                    {
+                      "name": "z",
+                      "type": "space"
+                    },
+                    {
+                      "name": "y",
+                      "type": "space",
+                      "unit": "micrometer"
+                    },
+                    {
+                      "name": "x",
+                      "type": "space",
+                      "unit": "micrometer"
+                    }
+                  ],
+                  [
+                    {
+                      "name": "t",
+                      "type": "time",
+                      "unit": "second"
+                    },
+                    {
+                      "name": "c",
+                      "type": "channel"
+                    },
+                    {
+                      "name": "z",
+                      "type": "space",
+                      "unit": "micrometer"
+                    },
+                    {
+                      "name": "y",
+                      "type": "space",
+                      "unit": "micrometer"
+                    },
+                    {
+                      "name": "x",
+                      "type": "space",
+                      "unit": "micrometer"
+                    }
+                  ]
+                ]
+              },
+              "datasets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "path",
+                    "coordinateTransformations"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "pattern": "^(0|[1-9][0-9]*)$"
+                    },
+                    "coordinateTransformations": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "scale"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "scale"
+                            },
+                            "scale": {
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0
+                                },
+                                {
+                                  "const": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0
+                                },
+                                {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0
+                                },
+                                {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0
+                                }
+                              ],
+                              "items": false,
+                              "minItems": 5,
+                              "maxItems": 5
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "translation"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "translation"
+                            },
+                            "translation": {
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "const": 0
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ],
+                              "items": false,
+                              "minItems": 5,
+                              "maxItems": 5
+                            }
+                          }
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 1,
+                      "maxItems": 2
+                    }
+                  }
+                },
+                "minItems": 1,
+                "maxItems": 64
+              },
+              "type": {
+                "enum": [
+                  "mean",
+                  "nearest"
+                ]
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "method",
+                  "edge_policy",
+                  "factors_zyx"
+                ],
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "omeify.mean_zyx",
+                      "omeify.nearest_zyx"
+                    ]
+                  },
+                  "edge_policy": {
+                    "const": "available_samples"
+                  },
+                  "factors_zyx": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                      "type": "array",
+                      "minItems": 3,
+                      "maxItems": 3,
+                      "items": {
+                        "enum": [
+                          1,
+                          2
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "omero": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "channels"
+          ],
+          "properties": {
+            "channels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "label",
+                  "color",
+                  "window",
+                  "active"
+                ],
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^[0-9A-F]{6}$"
+                  },
+                  "window": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "min",
+                      "max",
+                      "start",
+                      "end"
+                    ],
+                    "properties": {
+                      "min": {
+                        "type": "number"
+                      },
+                      "max": {
+                        "type": "number"
+                      },
+                      "start": {
+                        "type": "number"
+                      },
+                      "end": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "minItems": 1,
+              "maxItems": 4096
+            }
+          }
+        }
+      }
+    },
+    "omeify": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "image_type",
+            "logical_channel_name",
+            "icc_profile_base64"
+          ],
+          "properties": {
+            "image_type": {
+              "const": "rgb"
+            },
+            "logical_channel_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "icc_profile_base64": {
+              "type": "string",
+              "minLength": 784,
+              "maxLength": 784,
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "image_type",
+            "background_label",
+            "channel_name"
+          ],
+          "properties": {
+            "image_type": {
+              "const": "label"
+            },
+            "background_label": {
+              "type": "integer"
+            },
+            "channel_name": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "float32_mantissa_bits"
+          ],
+          "properties": {
+            "float32_mantissa_bits": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 23
+            }
+          }
+        }
+      ]
+    }
+  },
+  "description": "Omeify single-image attribute production profile for NGFF 0.5, not a validator for foreign NGFF or a whole-store privacy audit. Python also checks finite JSON, sequential dataset paths, ordered display windows and cross-field label identity. Array storage/geometry are verified separately.",
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "omeify"
+        ],
+        "properties": {
+          "omeify": {
+            "required": [
+              "image_type"
+            ],
+            "properties": {
+              "image_type": {
+                "const": "rgb"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "allOf": [
+          {
+            "properties": {
+              "ome": {
+                "properties": {
+                  "multiscales": {
+                    "items": {
+                      "properties": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "ome": {
+                "properties": {
+                  "omero": {
+                    "properties": {
+                      "channels": {
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "prefixItems": [
+                          {
+                            "properties": {
+                              "label": {
+                                "const": "Red"
+                              },
+                              "color": {
+                                "const": "FF0000"
+                              },
+                              "active": {
+                                "const": true
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "label": {
+                                "const": "Green"
+                              },
+                              "color": {
+                                "const": "00FF00"
+                              },
+                              "active": {
+                                "const": true
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "label": {
+                                "const": "Blue"
+                              },
+                              "color": {
+                                "const": "0000FF"
+                              },
+                              "active": {
+                                "const": true
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "omeify"
+        ],
+        "properties": {
+          "omeify": {
+            "required": [
+              "image_type"
+            ],
+            "properties": {
+              "image_type": {
+                "const": "label"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "allOf": [
+          {
+            "properties": {
+              "ome": {
+                "properties": {
+                  "multiscales": {
+                    "items": {
+                      "properties": {
+                        "type": {
+                          "const": "nearest"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "ome": {
+                "properties": {
+                  "omero": {
+                    "properties": {
+                      "channels": {
+                        "minItems": 1,
+                        "maxItems": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

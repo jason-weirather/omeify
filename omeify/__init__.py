@@ -71,3 +71,12 @@ __all__ = [
     "extract_rgb",
     "probe_rgb",
 ]
+
+from .io.dataset import ImageDataset, PlaneSelection, open_dataset
+from .io.dataset_metadata import AxisInfo, DatasetLevel
+from .io.prefetch import PlaneRequest, PrefetchPolicy
+
+__all__ += ["ImageDataset", "PlaneSelection", "open_dataset", "AxisInfo", "DatasetLevel", "PlaneRequest", "PrefetchPolicy"]
+
+from .dataset_mutation import analyze_dataset_dtype_mutation, apply_dataset_dtype_mutation
+__all__ += ["analyze_dataset_dtype_mutation", "apply_dataset_dtype_mutation"]

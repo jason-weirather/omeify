@@ -359,6 +359,18 @@ class OMEZarrWriter:
         with canonical_rgb(image) as normalized:
             return self._write_normalized(normalized, level=level)
 
+    def write_dataset(self, dataset, *, pyramid_axes="xy", pyramid_factors=None,
+                      chunk_z=1, max_block_bytes=64*1024*1024):
+        """Stream Z/T plus explicit XY/XYZ spatial reductions; never reduce T/C.
+
+        Dataset encoding keeps one working block on this thread; Zarr owns its
+        internal asynchronous codec/storage concurrency. max_workers remains the
+        ordinary 2D writer's tile-submission setting, not another stack pool.
+        """
+        from .dataset_writer import write_zarr_dataset
+        return write_zarr_dataset(self, dataset, pyramid_axes=pyramid_axes,
+            pyramid_factors=pyramid_factors, chunk_z=chunk_z, max_block_bytes=max_block_bytes)
+
     def _write_normalized(self, image: Image, *, level: int):
         self._prepare(image, level)
         self.path.parent.mkdir(parents=True, exist_ok=True)

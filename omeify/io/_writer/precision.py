@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 
 import numpy as np
@@ -108,11 +109,11 @@ class FloatMantissaSource:
         self._source = source
         self._mantissa_bits = mantissa_bits
 
-    def plane_readers(self) -> list[_FloatMantissaPlaneReader]:
-        return [
-            _FloatMantissaPlaneReader(reader, self._mantissa_bits)
-            for reader in self._source.plane_readers()
-        ]
+    def plane_readers(self) -> Sequence[_FloatMantissaPlaneReader]:
+        from .._reader_sequence import ReaderSequence
+        readers = self._source.plane_readers()
+        return ReaderSequence(len(readers), lambda i: _FloatMantissaPlaneReader(
+            readers[i], self._mantissa_bits))
 
 
 def prepare_float_precision(

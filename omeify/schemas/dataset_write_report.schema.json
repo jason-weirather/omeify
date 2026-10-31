@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/dataset_write_report.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "output_file",
+    "image",
+    "pyramid",
+    "verification",
+    "metadata",
+    "options"
+  ],
+  "properties": {
+    "schema": {
+      "const": "omeify.dataset_write/1"
+    },
+    "output_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "format",
+        "size_bytes",
+        "axes",
+        "shape",
+        "dtype"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "ome_tiff",
+            "ome_zarr"
+          ]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "axes": {
+          "enum": [
+            "TCZYX",
+            "TZYX",
+            "TZYXS"
+          ]
+        },
+        "shape": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "dtype": {
+          "type": "string"
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image_type",
+        "channel_names",
+        "pixel_size",
+        "z_spacing_um",
+        "time_increment_s",
+        "z_origin_um",
+        "time_origin_s"
+      ],
+      "properties": {
+        "image_type": {
+          "enum": [
+            "multichannel",
+            "rgb",
+            "label"
+          ]
+        },
+        "channel_names": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "pixel_size": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "const": "\u00b5m"
+            }
+          ],
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "z_spacing_um": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "time_increment_s": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "z_origin_um": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "time_origin_s": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "pyramid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "axes",
+        "method",
+        "level_shapes"
+      ],
+      "properties": {
+        "axes": {
+          "enum": [
+            "xy",
+            "xyz",
+            "auto"
+          ]
+        },
+        "method": {
+          "enum": [
+            "mean",
+            "nearest"
+          ]
+        },
+        "level_shapes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 6,
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "factors_zyx": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "enum": [
+                1,
+                2
+              ]
+            }
+          }
+        }
+      }
+    },
+    "verification": {
+      "type": "object"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ome_xml_valid": {
+          "const": true
+        },
+        "miti_header_valid": {
+          "const": true
+        },
+        "ngff_version": {
+          "const": "0.5"
+        },
+        "profile_valid": {
+          "const": true
+        }
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "compression",
+        "tile_size",
+        "lossless_compression",
+        "float32_mantissa_bits",
+        "color_management"
+      ],
+      "properties": {
+        "compression": {
+          "type": "string"
+        },
+        "tile_size": {
+          "type": "integer",
+          "minimum": 16
+        },
+        "lossless_compression": {
+          "type": "boolean"
+        },
+        "float32_mantissa_bits": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 23
+        },
+        "color_management": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "chunk_z": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_block_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "output_file": {
+            "properties": {
+              "format": {
+                "const": "ome_tiff"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "verification": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/verification"
+          },
+          "metadata": {
+            "required": [
+              "ome_xml_valid",
+              "miti_header_valid"
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "verification": {
+            "$ref": "https://github.com/jason-weirather/omeify/schemas/report_common.schema.json#/$defs/zarr_verification"
+          },
+          "metadata": {
+            "required": [
+              "ngff_version",
+              "profile_valid"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

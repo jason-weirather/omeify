@@ -76,3 +76,9 @@ def __getattr__(name: str) -> Any:
             "OMEMultiSeriesWriter": OMEMultiSeriesWriter,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+from .dataset import ImageDataset, PlaneSelection, open_dataset
+from .dataset_metadata import AxisInfo, DatasetLevel
+from .prefetch import PlaneRequest, PrefetchPolicy
+
+__all__ += ["ImageDataset", "PlaneSelection", "open_dataset", "AxisInfo", "DatasetLevel", "PlaneRequest", "PrefetchPolicy"]

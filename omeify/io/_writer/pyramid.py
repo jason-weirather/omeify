@@ -374,14 +374,14 @@ def iter_downsampled_tiles(
 def page_readers(
     tiff: tifffile.TiffFile,
     plane_count: int,
-) -> list[TiffPlaneReader]:
-    pages = [page.aspage() for page in list(tiff.pages)[:plane_count]]
-    if len(pages) != plane_count:
-        raise ValueError(
-            f"Temporary pyramid level has {len(pages)} pages; expected {plane_count}"
-        )
-    lock = threading.RLock()
-    return [TiffPlaneReader(page, lock=lock) for page in pages]
+) -> Sequence[TiffPlaneReader]:
+    from .._reader_sequence import ReaderSequence
+    from ..read_cache import ReadCache
+    if len(tiff.pages) != plane_count:
+        raise ValueError(f"Temporary level has {len(tiff.pages)} pages; expected {plane_count}")
+    lock, cache = threading.RLock(), ReadCache()
+    return ReaderSequence(plane_count, lambda i: TiffPlaneReader(
+        tiff.pages[i].aspage(), lock=lock, cache=cache))
 
 
 def resolution(pixel_size: PixelSize, scale: int) -> tuple[float, float]:
@@ -399,14 +399,12 @@ def series_layout_matches(
     expected = tuple(int(item) for item in expected_shape)
     if actual_axes == expected_axes and actual == expected:
         return True
-    # Tifffile conventionally squeezes a singleton planar C axis when it
-    # materializes a series, even though OME still declares SizeC=1.
-    return (
-        expected_axes == "CYX"
-        and expected[0] == 1
-        and actual_axes == "YX"
-        and actual == expected[1:]
-    )
+    # OME retains SizeT/Z/C=1 even where tifffile squeezes those logical axes.
+    # Never squeeze a real one-pixel X/Y dimension or an RGB sample dimension.
+    def essential(axes, shape):
+        return tuple((axis, n) for axis, n in zip(axes, shape, strict=True)
+                     if axis not in "TCZ" or n != 1)
+    return essential(actual_axes, actual) == essential(expected_axes, expected)
 
 
 def build_pyramid(

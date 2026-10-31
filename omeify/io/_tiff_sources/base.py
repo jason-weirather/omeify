@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import OrderedDict
 from abc import abstractmethod
 from pathlib import Path
 
@@ -15,20 +16,22 @@ from ..image_metadata import ImageLevel, ImageMetadata, integer
 from ..image_source import ImageSource
 from ..pixel_size import PixelSize, consistent_tiff_resolution_pixel_size
 from ..tiff import TiffPlaneReader, validate_rgb_page
+from ..read_cache import ReadCache
 
 
 LOGGER = logging.getLogger(__name__)
 
 
 class TiffSource(ImageSource):
-    def __init__(self, path: str | Path, *, series: int = 0) -> None:
+    def __init__(self, path: str | Path, *, series: int = 0, cache_bytes: int = 64 * 1024 * 1024) -> None:
         super().__init__()
         self.path = Path(path)
         self.series_index = integer(series, "series")
         self._tiff: tifffile.TiffFile | None = None
         self._series: tifffile.TiffPageSeries | None = None
         self._inspection: TiffInspector | None = None
-        self._planes: dict[tuple[int, int], TiffPlaneReader] = {}
+        self._planes: OrderedDict[tuple, TiffPlaneReader] = OrderedDict()
+        self._block_cache = ReadCache(cache_bytes)
         self._read_lock = threading.RLock()
 
     @property
@@ -54,8 +57,7 @@ class TiffSource(ImageSource):
         self._metadata = self._describe()
 
     def _close(self) -> None:
-        for plane in self._planes.values():
-            plane.clear_cache()
+        self._block_cache.clear()
         self._planes.clear()
         if self._tiff is not None:
             self._tiff.close()
@@ -66,8 +68,7 @@ class TiffSource(ImageSource):
 
     def clear_cache(self) -> None:
         self._ensure_open()
-        for plane in self._planes.values():
-            plane.clear_cache()
+        self._block_cache.clear()
         self._planes.clear()
 
     @abstractmethod
@@ -136,8 +137,11 @@ class TiffSource(ImageSource):
         key = (channel, level)
         if key not in self._planes:
             self._planes[key] = TiffPlaneReader(
-                self.native_levels[level].pages[channel].aspage(), lock=self._read_lock,
+                self.native_levels[level].pages[channel].aspage(), lock=self._read_lock, cache=self._block_cache,
             )
+        self._planes.move_to_end(key)
+        while len(self._planes) > 32:
+            self._planes.popitem(last=False)
         return self._planes[key]
 
     def _read_region(

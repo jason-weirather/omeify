@@ -94,6 +94,11 @@ class OMETiffWriter:
         with canonical_rgb(image) as normalized:
             return self._write_normalized(normalized, level=level)
 
+    def write_dataset(self, dataset) -> dict[str, object]:
+        """Stream an explicitly selected Z/T dataset with per-plane XY pyramids."""
+        from .dataset_writer import write_tiff_dataset
+        return write_tiff_dataset(self, dataset)
+
     def _write_normalized(self, image: Image, *, level: int) -> dict[str, object]:
         source = ImagePlaneSource(image, level=level)
         spec = source.output_spec()
