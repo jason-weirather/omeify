@@ -69,15 +69,21 @@ class OMESource(TiffSource):
         physical = (image.get("physical_size") or {}) if image is not None else {}
         x = physical.get("x")
         y = physical.get("y")
-        x_complete = bool(x and x.get("value") is not None and x.get("unit"))
-        y_complete = bool(y and y.get("value") is not None and y.get("unit"))
+        # OME-XML 2016-06 defaults omitted PhysicalSize*Unit attributes to µm.
+        # The inspection summary deliberately retains the *raw* absent units;
+        # use its schema-aware calibration interpreter for effective read units.
+        # This does not invent missing numeric PhysicalSizeX/Y measurements.
+        from omeify._calibration import ome_calibration
+        effective = ome_calibration(self._plane_map.pixels)
+        x_unit = effective["x"]["effective_unit"]
+        y_unit = effective["y"]["effective_unit"]
+        x_complete = bool(x and x.get("value") is not None and x_unit)
+        y_complete = bool(y and y.get("value") is not None and y_unit)
         if x_complete and y_complete:
             assert x is not None and y is not None
             return pixel_size_from_xy_units(
-                float(x["value"]),
-                str(x["unit"]),
-                float(y["value"]),
-                str(y["unit"]),
+                float(x["value"]), str(x_unit),
+                float(y["value"]), str(y_unit),
             )
 
         if x is not None or y is not None:

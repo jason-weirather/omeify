@@ -91,6 +91,8 @@ def test_public_xyz_and_anisotropic_pyramids(tmp_path,axes_mode,kind,dtype):
 def test_public_dataset_conversion_and_global_mutation(tmp_path):
     a=np.arange(2*3*17*19,dtype=np.float32).reshape(2,3,17,19)
     source=tmp_path/'source.ome.tif'
+    # OME-XML 2016-06 defaults omitted physical-size unit attributes to µm.
+    # Exercise that legitimate input through the public whole-stack workflow.
     tifffile.imwrite(source,a,ome=True,photometric='minisblack',metadata={
         'axes':'TZYX','PhysicalSizeX':.5,'PhysicalSizeY':.5,'PhysicalSizeZ':2})
     converted=tmp_path/'converted.zarr'

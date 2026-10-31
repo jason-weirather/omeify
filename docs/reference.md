@@ -143,6 +143,10 @@ Both generated output formats require usable X and Y physical pixel sizes.
 For multi-page inputs, calibration present on one page may apply to pages where those tags are
 absent. Any other page that explicitly provides usable calibration must agree. Partial OME
 physical-size metadata is not combined with TIFF tags; supply an explicit override instead.
+OME-XML 2016-06 defines µm as the default unit when a numeric PhysicalSizeX/Y is present
+but its corresponding unit attribute is omitted. The reader honors that schema default;
+inspection still records the absent source attribute, and Omeify writers emit explicit units.
+An absent numeric PhysicalSizeX/Y never gains a value from this rule.
 
 TIFF resolution values are interpreted as pixels per physical unit, converted to micrometers for
 inch or centimeter source units, and rounded to six significant digits to avoid carrying rational
