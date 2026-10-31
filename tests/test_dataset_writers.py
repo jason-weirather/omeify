@@ -51,8 +51,10 @@ def test_public_stack_write_read_every_plane_and_xy_level(tmp_path,fmt,kind,dtyp
         assert back.shape == values.shape
         if fmt == 'ome_zarr':
             assert back.native_axes == 'TCZYX'
-            assert back.native_shape == ((2, 3 if kind == 'rgb' else
-                                          1 if kind == 'label' else 2), 5, 19, 21)
+            # NGFF stores RGB samples as three C components and labels as C=1;
+            # native TCZYX is intentionally distinct from the logical API axes.
+            stored_c = {'multichannel': 2, 'rgb': 3, 'label': 1}[kind]
+            assert back.native_shape == (2, stored_c, 5, 19, 21)
         for level in range(3):
             for t in range(2):
                 for z in range(5):
