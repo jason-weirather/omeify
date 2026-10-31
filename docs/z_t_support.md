@@ -337,6 +337,13 @@ Pure XY reduction delegates to the established 2D arithmetic. Known nominal
 voxel-center transforms accompany each generated level. Source pyramids are
 rebuilt rather than copied. Temporal reduction is not a pyramid option.
 
+A requested reduction must change at least one spatial extent. Once a Z, Y, or X
+axis reaches length one, automatically planned steps leave that axis unchanged;
+explicit factors of two on singleton axes are rejected. Requests for more levels
+than the permitted dimensions can support fail instead of writing duplicate
+resolutions or falsely increasing their sampling. XYZ floating-point means retain
+IEEE NaN/infinity behavior and recover finite float64 accumulation overflow.
+
 `max_block_bytes` preflights an estimate of working data and padded output chunks;
 upstream codec scratch remains outside this estimate. The Zarr stack encoder is
 serial at the outer block loop; Zarr owns internal I/O. Its ordinary writer
@@ -386,20 +393,6 @@ collections are not added to their CLI workflows.** Existing 2D workflows retain
 their prior scope. Stack operation and writer reports have separate versioned
 schemas; consumers should dispatch on `schema`, not assume the old 2D report.
 
-## twhy integration boundary
-
-This patch changes Omeify, not twhy key bindings or its render pump. Keep one
-`open_dataset()` alive per opened source/series. Discover Z/T lengths from its
-axes. When navigating, create a new plane Image and render session, preserve
-camera/display settings, and use an immutable request identity including the
-selection. Keep the owning dataset alive until old render work is finished.
-
-Do not flush Omeify's cache on ordinary channel/level/plane changes: its budget
-is now shared. twhy's existing `ViewSession` contains such eager cache clearing
-and needs a companion adjustment. Continue guarding against stale completed
-frames, and distinguish native coarse XYZ observations from exact sections.
-Optional caller-directed lookahead can then target the current viewport.
-
 ## Tests and outstanding release gates
 
 ```bash
@@ -422,4 +415,4 @@ orders, reversed TiffData mappings, 4,097 planes, borrowed lifetimes, cache
 coalescing/eviction, explicit prefetch, odd XYZ reductions, numeric overflow,
 fixed stack mutation and fresh metadata. The existing minimum-Python, wheel,
 optional independent NGFF-model/Bio-Formats and real public dataset gates remain
-necessary. No remote latency benchmark or twhy end-to-end certification is implied.
+necessary. No remote latency or end-to-end application performance benchmark is implied.

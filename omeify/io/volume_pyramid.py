@@ -69,15 +69,19 @@ def plan_volume_pyramid(shape, *, tile_size=512, chunk_z=1, levels=None,
         z, y, x = shapes[-1]
         if explicit is not None:
             step = explicit[i]
+            # An explicit factor of two on a singleton axis would alter its
+            # advertised sampling without actually reducing any pixels.
+            if any(f == 2 and n == 1 for n, f in zip((z, y, x), step, strict=True)):
+                raise ValueError("Explicit pyramid factor cannot reduce a singleton Z/Y/X axis")
         else:
             done_xy = y <= tile_size and x <= tile_size
             done_z = axes == "xy" or z <= chunk_z
             if levels is None and done_xy and done_z:
                 break
             if axes == "xy":
-                step = (1, 2, 2)
+                step = (1, 2 if y > 1 else 1, 2 if x > 1 else 1)
             elif axes == "xyz":
-                step = (2 if z > 1 else 1, 2, 2)
+                step = (2 if z > 1 else 1, 2 if y > 1 else 1, 2 if x > 1 else 1)
             else:
                 # Reduce the finest spatial sampling first. Z can never be
                 # averaged merely because it has more planes than the XY grid.
@@ -93,6 +97,12 @@ def plan_volume_pyramid(shape, *, tile_size=512, chunk_z=1, levels=None,
                     if levels is None:
                         break
                     raise ValueError("No spatial axis remains to reduce")
+        # Requested level counts must never create duplicate resolutions.
+        # Auto plans have the same constraint, but can stop naturally.
+        if step == (1, 1, 1):
+            if levels is None and explicit is None:
+                break
+            raise ValueError("No spatial axis remains to reduce at the requested pyramid level")
         steps.append(step)
         shapes.append(tuple((n + f - 1) // f for n, f in zip(shapes[-1], step, strict=True)))
         if sampling is not None:
@@ -147,16 +157,26 @@ def reduce_zyx(block, factors, *, method="mean"):
         return np.asarray(quotient + increment, dtype=dtype)
     with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
         result = total / divisor
-    # Ordinary values retain their normal arithmetic. Recover only groups of
-    # finite contributors whose summation overflowed, preserving real NaN/Inf.
-    for position in np.argwhere(~np.isfinite(total)):
-        index = tuple(int(v) for v in position)
-        window = tuple(slice(index[a]*f, min(block.shape[a], (index[a]+1)*f))
-                       for a, f in enumerate(factors)) + index[3:]
-        values = np.asarray(block[window], dtype=np.float64).reshape(-1)
-        if np.all(np.isfinite(values)):
-            magnitude = float(np.max(np.abs(values)))
-            if magnitude:
-                _, exponent = math.frexp(magnitude)
-                result[index] = np.ldexp(np.ldexp(values, -exponent).sum() / values.size, exponent)
+    # Only float64 finite contributors can overflow a float64 sum of <=8
+    # values. Float32 inputs cannot, even if their output contains many NaNs.
+    # For float64, mask genuine NaN/Inf source groups in vectorized slices;
+    # iterating over them in Python made NaN-heavy volumes extremely slow.
+    if dtype.kind == "f" and dtype.itemsize == 8:
+        overflow = ~np.isfinite(total)
+        if np.any(overflow):
+            for offset in offsets:
+                values = block[tuple(slice(o, None, f) for o, f in zip(offset, factors, strict=True))]
+                target = tuple(slice(0, n) for n in values.shape[:3])
+                overflow[target] &= np.isfinite(values)
+            # Only recover bins with ALL finite inputs whose running sum
+            # overflowed. True source NaN/Inf follows the original IEEE rules.
+            for position in np.argwhere(overflow):
+                index = tuple(int(v) for v in position)
+                window = tuple(slice(index[a]*f, min(block.shape[a], (index[a]+1)*f))
+                               for a, f in enumerate(factors)) + index[3:]
+                values = np.asarray(block[window], dtype=np.float64).reshape(-1)
+                magnitude = float(np.max(np.abs(values)))
+                if magnitude:
+                    _, exponent = math.frexp(magnitude)
+                    result[index] = np.ldexp(np.ldexp(values, -exponent).sum() / values.size, exponent)
     return np.asarray(result, dtype=dtype)
