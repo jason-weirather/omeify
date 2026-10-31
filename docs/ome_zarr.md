@@ -12,7 +12,12 @@ sessions and explicit regular-stack output. Z-downsampled native levels are now
 readable, but are excluded from a base-plane Image's interchangeable XY pyramid.
 Use a native-level plane selection explicitly for such a coarse observation.
 The existing `write(image)` profile stays unchanged; `write_dataset()` uses a
-separate strict TCZYX attribute profile and can construct XY/XYZ pyramids.
+separate strict stored `tczyx` attribute profile and can construct XY/XYZ pyramids.
+The public logical dataset/block axes are `TCZYX` for multiplex, `TZYXS` for RGB,
+and `TZYX` for a single scalar/labels. Stored RGB uses the NGFF C components,
+not a nonstandard S axis; `native_axes` records the physical layout. Dataset
+native-level selection uses `native_level=`; 2D image pyramid reads retain
+`level=`.
 
 ## Installation and dependencies
 

@@ -7,11 +7,11 @@ import numpy as np
 
 from .dataset_metadata import AxisInfo, DatasetLevel, canonical_axis, selected_index
 from .image_metadata import ImageLevel, ImageMetadata
-from .image_source import ImageSource
+from .dataset_source import DatasetSourceBase
 from .pixel_size import PixelSize
 
 
-class DatasetArraySource(ImageSource):
+class DatasetArraySource(DatasetSourceBase):
     supports_prefetch = True
 
     def __init__(self, array, *, axes, image_type="multichannel", channel_names=None,
@@ -118,12 +118,6 @@ class DatasetArraySource(ImageSource):
             axes = "YXS" if self.metadata.image_type == "rgb" else "YX"
             result.append(np.transpose(values, [remaining.index(a) for a in axes]))
         return np.stack(result) if self.metadata.axes == "CYX" else np.array(result[0], copy=True)
-
-    def _read_region(self, y0, y1, x0, x1, *, level, channels):
-        descriptor = self.dataset_levels[0]
-        z = selected_index(descriptor.axis("Z"), None, name="Z")
-        t = selected_index(descriptor.axis("T"), None, name="T")
-        return self.read_plane_region(y0,y1,x0,x1,z=z,t=t,level=level,channels=channels)
 
     def cache_info(self):
         return {"max_bytes": 0, "resident_bytes": 0, "entries": 0, "in_flight": 0}

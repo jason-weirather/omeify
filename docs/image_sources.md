@@ -18,6 +18,11 @@ can fail earlier than a later regional read in the former reader implementation.
 The existing Image API remains 2D. `open_dataset()` describes a complete native
 OME-TIFF/OME-Zarr source and yields ordinary Images with `.plane(z=..., t=...)`.
 It shares handles, metadata and cache ownership across those immutable views.
+`dataset.axes`/`dataset.shape` and `read_block()` use canonical logical layouts,
+while `dataset.native_axes`/`dataset.native_shape` report original storage order.
+A dataset-level resolution is selected by `native_level=`; 2D Image readers
+continue using `level=`. The dataset-specific array/borrowed backends implement
+`DatasetSource`, not a misleading unresolved 2D `ImageSource`.
 The [Z/T guide](z_t_support.md) documents source axes, native-level selection,
 bounded block reads, optional prefetch and explicit `write_dataset()` output.
 This adds no multidimensional `Image.asarray()` behavior or mutable Z/T cursor.

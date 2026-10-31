@@ -7,10 +7,10 @@ from ._selection import normalize_channel_indices
 from .base import MultichannelImage
 from .dataset_metadata import DatasetLevel, selected_index
 from .image_metadata import integer
-from .image_source import ImageSource
+from .dataset_source import DatasetSourceBase
 
 
-class SelectedDatasetSource(ImageSource):
+class SelectedDatasetSource(DatasetSourceBase):
     """One base-level view; no materialized volume and no second crop implementation."""
     def __init__(self, parent, *, z=None, t=None, channels=None, bounds=None):
         parent._ensure_open()
@@ -105,10 +105,6 @@ class SelectedDatasetSource(ImageSource):
         return self.parent.acquisition_plane(z=self._zs[0 if z is None else z],
             t=self._ts[0 if t is None else t],channel=self._channels[channel])
 
-    def _read_region(self, *bounds, level, channels):
-        return self.read_plane_region(*bounds, z=selected_index(self.dataset_levels[0].axis("Z"),None,name="Z"),
-            t=selected_index(self.dataset_levels[0].axis("T"),None,name="T"), level=level, channels=channels)
-
     def clear_cache(self):
         self.parent.clear_cache()
 
@@ -116,50 +112,127 @@ class SelectedDatasetSource(ImageSource):
         return self.parent.cache_info()
 
 
-class DatasetMetadataSource(ImageSource):
-    """A base-level metadata-only view; no hidden calibration inference or mutation."""
-    def __init__(self,parent,*,pixel_size=None,channel_names=None,z_spacing_um=None,
-                 time_increment_s=None,z_origin_um=None,time_origin_s=None):
+class DatasetMetadataSource(DatasetSourceBase):
+    """Metadata-only native pyramid view, retaining every compatible resolution.
+
+    The underlying data, per-native-level dimensions, and level selection stay
+    unchanged. Calibrations are updated from declared native sampling ratios,
+    never from rounded array-shape ratios. An unknown ratio stays unknown.
+    """
+
+    def __init__(self, parent, *, pixel_size=None, channel_names=None,
+                 z_spacing_um=None, time_increment_s=None, z_origin_um=None,
+                 time_origin_s=None):
         parent._ensure_open()
-        self.parent, self._parent_generation = parent,parent.generation
+        from .pixel_size import PixelSize
+
+        if pixel_size is not None and not isinstance(pixel_size, PixelSize):
+            raise TypeError("pixel_size must be PixelSize")
+        self.parent, self._parent_generation = parent, parent.generation
         self.supports_prefetch = getattr(parent._source, "supports_prefetch", False)
         self._read_lock = parent._lock
-        z=0 if parent.axis_info('Z') else None
-        t=0 if parent.axis_info('T') else None
-        with parent.plane(z=z,t=t) as plane, plane.with_metadata(
-                pixel_size=pixel_size,channel_names=channel_names) as modified:
-            # Dataset views expose their explicitly selected base observation.
-            metadata=replace(modified._metadata,levels=(modified.levels[0],))
-        super().__init__(metadata)
-        axes=[]
-        values={'Z':(z_spacing_um,z_origin_um,'µm'),'T':(time_increment_s,time_origin_s,'s')}
-        for name,(scale,origin,_) in values.items():
-            if parent.axis_info(name) is None and (scale is not None or origin is not None):
+        self.plane_level_indices = parent._plane_level_map(0)
+        base = parent.levels[0]
+        values = {"Z": (z_spacing_um, z_origin_um, "µm"),
+                  "T": (time_increment_s, time_origin_s, "s")}
+        for name, (scale, origin, _) in values.items():
+            old = base.axis(name)
+            if old is None and (scale is not None or origin is not None):
                 raise ValueError(f"Cannot override absent {name} axis")
-        size=None if metadata.pixel_size is None else metadata.pixel_size.converted_to('µm')
-        for axis in parent.levels[0].axes:
-            if axis.name in values:
-                scale,origin,unit=values[axis.name]
-                if (scale is not None or origin is not None) and axis.unit != unit:
-                    if scale is None:
-                        raise ValueError("A physical/time origin override also needs explicit sampling")
-                    if origin is None and axis.origin not in (None, 0):
-                        raise ValueError("Calibrating a shifted unitless axis requires an explicit origin")
-                axis=replace(axis,scale=axis.scale if scale is None else scale,
-                    origin=axis.origin if origin is None else origin,
-                    unit=axis.unit if scale is None and origin is None else unit)
-                if axis.origin is not None and axis.scale is None:
-                    raise ValueError("An explicit physical/time origin needs known sampling")
-            elif axis.name in 'YX' and pixel_size is not None:
-                origin = metadata.levels[0].origin_yx
-                axis=replace(axis,unit='µm',scale=size.y if axis.name=='Y' else size.x,
-                             origin=None if origin is None else origin[0 if axis.name=='Y' else 1])
-            axes.append(axis)
-        self._dataset_levels=(DatasetLevel(0,tuple(axes),metadata),)
+            if old is not None and (scale is not None or origin is not None):
+                if old.unit not in (None, values[name][2]):
+                    raise ValueError(f"Cannot override incompatible {name} units")
+                if old.unit is None and scale is None:
+                    raise ValueError(f"Uncalibrated {name} origin requires explicit sampling")
+                if (old.unit is None and old.origin not in (None, 0)
+                        and origin is None):
+                    raise ValueError(
+                        f"Calibrating a shifted unitless {name} axis requires an explicit origin")
+
+        def axis_update(old, original, *, base_scale, base_origin, unit, at_base):
+            """Project only declared base-relative sampling into new physical units."""
+            ratio = (1.0 if at_base else
+                     old.scale / original.scale
+                     if old.scale is not None and original.scale is not None else None)
+            new_scale = None if ratio is None or base_scale is None else base_scale * ratio
+            if base_origin is None:
+                new_origin = None
+            elif at_base:
+                new_origin = base_origin
+            elif (old.origin is not None and original.origin is not None
+                  and original.scale is not None and base_scale is not None):
+                new_origin = base_origin + (
+                    (old.origin - original.origin) / original.scale * base_scale)
+            else:
+                new_origin = None  # Unknown sampling phase is not zero.
+            return replace(old, unit=unit, scale=new_scale, origin=new_origin)
+
+        # The metadata override is also an ordinary 2D Image operation; use
+        # that authoritative calculation for the compatible XY plane pyramid.
+        z0 = 0 if base.axis("Z") else None
+        t0 = 0 if base.axis("T") else None
+        with parent.plane(z=z0, t=t0) as plane, plane.with_metadata(
+                pixel_size=pixel_size, channel_names=channel_names) as changed:
+            complete_base = changed._metadata
+        super().__init__(complete_base)
+        self._levels = []
+
+        for i, descriptor in enumerate(parent.levels):
+            axis_infos = []
+            for old in descriptor.axes:
+                original = base.axis(old.name)
+                if old.name in values:
+                    override_scale, override_origin, unit = values[old.name]
+                    if override_scale is not None or override_origin is not None:
+                        base_scale = original.scale if override_scale is None else override_scale
+                        base_origin = original.origin if override_origin is None else override_origin
+                        old = axis_update(old, original, base_scale=base_scale,
+                            base_origin=base_origin, unit=unit, at_base=i == 0)
+                elif old.name in "YX" and pixel_size is not None:
+                    size = pixel_size.converted_to("µm")
+                    base_scale = size.y if old.name == "Y" else size.x
+                    origin_yx = complete_base.levels[0].origin_yx
+                    base_origin = (None if origin_yx is None else origin_yx[
+                                   0 if old.name == "Y" else 1])
+                    old = axis_update(old, original, base_scale=base_scale,
+                        base_origin=base_origin, unit="µm", at_base=i == 0)
+                axis_infos.append(old)
+
+            if i == 0:
+                # Existing 2D metadata rules preserve/recalibrate all compatible
+                # XY levels, including their offsets and original unknowns.
+                metadata = replace(complete_base, levels=(complete_base.levels[0],))
+            else:
+                with parent.plane(z=0 if descriptor.axis("Z") else None,
+                                  t=0 if descriptor.axis("T") else None,
+                                  native_level=i) as plane:
+                    old_metadata = plane._metadata
+                y, x = (next(a for a in axis_infos if a.name == name) for name in "YX")
+                new_size = (PixelSize(x.scale, y.scale, "µm")
+                            if x.unit == y.unit == "µm" and
+                            x.scale is not None and y.scale is not None else None)
+                old_origin = old_metadata.levels[0].origin_yx
+                # An unchanged metadata view must not infer a previously unknown
+                # origin; a calibration override only rescales known positions.
+                new_origin = (y.origin, x.origin) if (
+                    old_origin is not None and y.origin is not None and x.origin is not None
+                ) else old_origin
+                current_level = replace(old_metadata.levels[0],
+                    pixel_size=new_size, origin_yx=new_origin)
+                metadata = replace(old_metadata,
+                    channel_names=old_metadata.channel_names if channel_names is None
+                                  else channel_names,
+                    pixel_size=new_size, shape=current_level.shape,
+                    levels=(current_level,))
+            self._levels.append(DatasetLevel(i, tuple(axis_infos), metadata,
+                                             descriptor.plane_preserving))
+        self._dataset_levels = tuple(self._levels)
+        self._base_metadata = complete_base
 
     @property
     def is_open(self):
-        return self._is_open and self.parent.is_open and self._parent_generation==self.parent.generation
+        return (self._is_open and self.parent.is_open and
+                self._parent_generation == self.parent.generation)
 
     def _open(self):
         self.parent._ensure_session(self._parent_generation)
@@ -173,28 +246,33 @@ class DatasetMetadataSource(ImageSource):
         self._ensure_open()
         return self._dataset_levels
 
-    def plane_metadata(self,*,z=None,t=None,level=0):
-        if level!=0:raise IndexError('Metadata dataset view has one level')
-        selected_index(self.dataset_levels[0].axis('Z'),z,name='Z')
-        selected_index(self.dataset_levels[0].axis('T'),t,name='T')
-        return self.metadata
-
-    def read_plane_region(self,*bounds,z,t,level,channels,speculative=False):
-        self.plane_metadata(z=z,t=t,level=level)
+    def plane_metadata(self, *, z=None, t=None, level=0):
         self.parent._ensure_session(self._parent_generation)
-        return self.parent._source.read_plane_region(*bounds,z=z,t=t,level=0,
-                                                     channels=channels,speculative=speculative)
+        level = integer(level, "native level")
+        if level >= len(self.dataset_levels):
+            raise IndexError("Native level outside pyramid")
+        descriptor = self.dataset_levels[level]
+        selected_index(descriptor.axis("Z"), z, name="Z")
+        selected_index(descriptor.axis("T"), t, name="T")
+        # Retain parent's per-plane TIFF/NGFF checks, not just first-plane metadata.
+        self.parent._source.plane_metadata(z=z, t=t, level=level)
+        return self._base_metadata if level == 0 else descriptor.plane_metadata
+
+    def read_plane_region(self, *bounds, z, t, level, channels, speculative=False):
+        self.plane_metadata(z=z, t=t, level=level)
+        self.parent._ensure_session(self._parent_generation)
+        return self.parent._source.read_plane_region(*bounds, z=z, t=t,
+            level=level, channels=channels, speculative=speculative)
 
     def estimate_read(self, request):
         return self.parent._estimate(request)
 
     def acquisition_plane(self, *, z, t, channel=0):
         self.parent._ensure_session(self._parent_generation)
-        return self.parent.acquisition_plane(z=z,t=t,channel=channel)
+        return self.parent.acquisition_plane(z=z, t=t, channel=channel)
 
-    def _read_region(self,*bounds,level,channels):
-        return self.read_plane_region(*bounds,z=selected_index(self.dataset_levels[0].axis('Z'),None,name='Z'),
-            t=selected_index(self.dataset_levels[0].axis('T'),None,name='T'),level=level,channels=channels)
+    def clear_cache(self):
+        self.parent.clear_cache()
 
-    def clear_cache(self):self.parent.clear_cache()
-    def cache_info(self):return self.parent.cache_info()
+    def cache_info(self):
+        return self.parent.cache_info()

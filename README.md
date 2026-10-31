@@ -35,7 +35,8 @@ OME-TIFF without installing Omeify.
 
 `Image` remains a two-dimensional observation. `open_dataset()` adds persistent
 OME-TIFF/OME-Zarr source sessions, first-class Z/T axis metadata, borrowed plane
-Images, shared bounded caching and explicit optional read-ahead. Both writers
+Images, canonical logical block axes (`TCZYX`, `TZYXS`, `TZYX`) distinct from
+native storage axes, shared bounded caching and explicit optional read-ahead. Both writers
 have `write_dataset()` for regular stacks; Zarr adds explicit XY/XYZ and
 anisotropy-aware pyramids. `convert` and `mutate` accept explicit whole/ranged
 stack scope. Multi-file TIFF is not included.

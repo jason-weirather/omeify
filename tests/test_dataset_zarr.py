@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import zarr
 
-from omeify import OMEZarrReader, PlaneRequest, PrefetchPolicy, open_dataset
+from omeify import OMEZarrReader, PixelSize, PlaneRequest, PrefetchPolicy, open_dataset
 from zarr_fixture import attributes, fixture
 
 
@@ -26,7 +26,9 @@ def test_zt_planes_and_regions_are_source_axis_independent(tmp_path,version,axes
     path=tmp_path/'input.zarr'
     fixture(path,version=version,data=values,axes=axes)
     with open_dataset(path,input_type='ome_zarr') as ds:
-        assert ds.axes==axes.upper()
+        assert ds.axes=="TCZYX"
+        assert ds.native_axes==axes.upper()
+        assert ds.native_shape==tuple(values.shape)
         assert ds.axis_info('Z').size==5
         assert ds.axis_info('T').size==3
         for t in range(3):
@@ -36,6 +38,15 @@ def test_zt_planes_and_regions_are_source_axis_independent(tmp_path,version,axes
                     np.testing.assert_array_equal(image.read_region(2,18,3,20,channels=[1,0,1]),
                                                    expected[t,[1,0,1],z,2:18,3:20])
                     np.testing.assert_array_equal(image.asarray(level=1),expected[t,:,z,::2,::2])
+        # Renaming/recalibrating does not collapse a compatible XY-only pyramid.
+        with ds.with_metadata(pixel_size=PixelSize(1.,1.,'µm'),
+                              channel_names=('A','B')) as calibrated:
+            assert len(calibrated.levels) == 2
+            with calibrated.plane(t=1,z=3) as optical:
+                assert len(optical.levels) == 2
+                assert optical.levels[1].pixel_size == PixelSize(2.,2.,'µm')
+                np.testing.assert_array_equal(optical.asarray(level=1),
+                                              expected[1,:,3,::2,::2])
         store=ds._source.store
         with ds.plane(t=0,z=0) as a: a.read_region(0,5,0,5,channels=0)
         before=ds.cache_info()['loads']
@@ -93,12 +104,26 @@ def test_xyz_levels_are_explicit_not_false_optical_sections(tmp_path,version):
         np.testing.assert_array_equal(plane.asarray(),expected[1,:,3])
         assert len(plane.source_levels)==2
     with open_dataset(path,input_type='ome_zarr') as ds:
-        with ds.plane(t=1,z=1,level=1) as plane:
+        with ds.plane(t=1,z=1,native_level=1) as plane:
             np.testing.assert_array_equal(plane.asarray(),expected[1,:,2,::2,::2])
-        mapping=ds.locate_plane(t=1,z=2,level=1)
+        mapping=ds.locate_plane(t=1,z=2,native_level=1)
         assert mapping['z']==1
         assert mapping['z_displacement']==0
         assert not mapping['plane_preserving']
+        # A metadata-only calibration view retains the *native* XYZ level
+        # without claiming it is an exact optical section at base resolution.
+        with ds.with_metadata(pixel_size=PixelSize(1.,1.,'µm'),
+                              z_spacing_um=3.,channel_names=('A','B')) as calibrated:
+            assert calibrated.axes == 'TCZYX'
+            assert len(calibrated.levels) == 2
+            with calibrated.plane(t=1,z=3) as optical:
+                assert len(optical.levels) == 1
+            with calibrated.plane(t=1,z=1,native_level=1) as coarse:
+                assert coarse.channel_names == ('A','B')
+                assert coarse.pixel_size == PixelSize(2.,2.,'µm')
+                np.testing.assert_array_equal(coarse.asarray(),expected[1,:,2,::2,::2])
+            assert calibrated.axis_info('Z',native_level=1).scale == 6.
+
 
 
 def test_http_plane_changes_do_not_repeat_discovery_or_shared_chunk_fetches(tmp_path):

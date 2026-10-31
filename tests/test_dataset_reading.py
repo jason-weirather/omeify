@@ -40,6 +40,11 @@ def test_tiff_all_dimension_orders(tmp_path, axis):
     write_tiff(p, axis)
     reference = values()
     with open_dataset(p, input_type="ome_tiff") as ds:
+        assert ds.axes == "TCZYX"
+        assert ds.shape == reference.shape
+        assert ds.native_axes == axis
+        assert ds.native_shape == tuple(reference.transpose(
+            ["TCZYX".index(n) for n in axis]).shape)
         assert ds.axis_info("Z").size == 4
         assert ds.axis_info("T").scale == 4
         assert ds.axis_info("Z").origin is None
@@ -50,7 +55,7 @@ def test_tiff_all_dimension_orders(tmp_path, axis):
                 np.testing.assert_array_equal(plane.read_region(1,16,3,18,channels=[2,0,2]),
                                               reference[ti,[2,0,2],zi,1:16,3:18])
         result = ds.read_block(0,17,0,19,z=slice(1,3),t=slice(None))
-        np.testing.assert_array_equal(result,reference[:,:,1:3].transpose(0,2,1,3,4))
+        np.testing.assert_array_equal(result,reference[:,:,1:3])
 
 
 def test_tiff_requires_plane_choice_and_reader_navigation_shares_cache(tmp_path, monkeypatch):
@@ -92,7 +97,7 @@ def test_array_selection_and_calibration():
         with ds.select(z=slice(1,3),channels=[2,0,2],bounds=(2,8,3,12)) as selected:
             assert selected.axis_info("Z").origin == 12
             actual=selected.read_block(0,6,0,9,z=slice(None),t=slice(None))
-            expected=a[:,[2,0,2],1:3,2:8,3:12].transpose(0,2,1,3,4)
+            expected=a[:,[2,0,2],1:3,2:8,3:12]
             np.testing.assert_array_equal(actual,expected)
         with pytest.raises(ValueError,match="max_bytes"):
             ds.read_block(0,17,0,19,z=slice(None),t=slice(None),max_bytes=100)

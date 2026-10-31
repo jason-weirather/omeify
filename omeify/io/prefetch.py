@@ -14,7 +14,7 @@ class PlaneRequest:
     bounds: tuple[int, int, int, int]
     z: int | None = None
     t: int | None = None
-    level: int = 0
+    native_level: int = 0
     channels: tuple[int, ...] | None = None
 
     def __post_init__(self):
@@ -22,7 +22,7 @@ class PlaneRequest:
         if len(bounds) != 4 or bounds[0] > bounds[1] or bounds[2] > bounds[3]:
             raise ValueError("bounds must be half-open (y0, y1, x0, x1)")
         object.__setattr__(self, "bounds", bounds)
-        object.__setattr__(self, "level", integer(self.level, "source level"))
+        object.__setattr__(self, "native_level", integer(self.native_level, "native level"))
         for name in ("z", "t"):
             if getattr(self, name) is not None:
                 object.__setattr__(self, name, integer(getattr(self, name), name))

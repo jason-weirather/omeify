@@ -95,7 +95,11 @@ class _QuantizedDatasetSource(DatasetMetadataSource):
         dtype = self.plans[0].target_dtype
         if any(p.target_dtype != dtype for p in self.plans):
             raise ValueError("All mutation plans must use the same output dtype")
-        self._metadata = replace(self._metadata, dtype=dtype)
+        base = replace(self._base_metadata.levels[0], index=0)
+        self._base_metadata = replace(self._base_metadata, dtype=dtype,
+                                      levels=(base,))
+        self._metadata = self._base_metadata
+        self.plane_level_indices = (0,)
         self._dataset_levels = (replace(self._dataset_levels[0], plane_metadata=self._metadata),)
 
     def read_plane_region(self, *bounds, z, t, level, channels, speculative=False):

@@ -17,6 +17,7 @@ import numpy as np
 from ._selection import normalize_channel_indices
 from .base import _semantic_image
 from .dataset_metadata import selected_index
+from .dataset_source import check_dataset_source
 from .image_metadata import integer
 from .image_source import ImageSource
 from .prefetch import PlaneRequest, PrefetchPolicy, PrefetchQueue
@@ -26,7 +27,7 @@ from .prefetch import PlaneRequest, PrefetchPolicy, PrefetchQueue
 class PlaneSelection:
     z: int | None
     t: int | None
-    source_level: int
+    native_level: int
     session: tuple[int, int]
 
 
@@ -77,8 +78,7 @@ class ImageDataset:
     ``prefetch`` or ``hint_navigation``; it is never enabled by construction.
     """
     def __init__(self, source, *, owns_source=True):
-        if not isinstance(source, ImageSource):
-            raise TypeError("source must implement ImageSource")
+        check_dataset_source(source)
         if not isinstance(owns_source, bool):
             raise TypeError("owns_source must be boolean")
         self._source = source
@@ -184,10 +184,61 @@ class ImageDataset:
 
     @property
     def axes(self):
-        return self.levels[0].axis_names
+        """Canonical *logical* block axes, independent of stored dimension order.
+
+        Dataset blocks retain T and Z as singleton dimensions when the source
+        omits them. C denotes logical scalar channels; RGB uses S samples.
+        See native_axes/native_shape for the actual storage organization.
+        """
+        plane_axes = self.levels[0].plane_metadata.axes
+        return "TCZYX" if plane_axes == "CYX" else "TZYXS" if plane_axes == "YXS" else "TZYX"
 
     @property
     def shape(self):
+        """Canonical logical shape, matching a complete ``read_block`` result."""
+        level = self.levels[0]
+        sizes = {axis.name: axis.size for axis in level.axes}
+        sizes.setdefault("T", 1)
+        sizes.setdefault("Z", 1)
+        sizes["C"] = level.plane_metadata.logical_channel_count
+        sizes["S"] = level.plane_metadata.samples_per_pixel
+        return tuple(sizes[axis] for axis in self.axes)
+
+    def _storage_source(self):
+        """Root source behind any borrowed dataset selections/metadata views."""
+        source = self._source
+        while hasattr(source, "parent"):
+            source = source.parent._source
+        return source
+
+    @property
+    def native_axes(self):
+        """Original source storage order, not normalized block order.
+
+        For OME-TIFF this is the selected tifffile series layout; for OME-Zarr
+        it is the declared native array layout. Dataset selections can change
+        logical shape without changing the underlying physical array.
+        """
+        self._ensure_open()
+        source = self._storage_source()
+        if hasattr(source, "native_levels"):
+            return str(source.native_levels[0].axes)
+        parsed = getattr(source, "parsed", None)
+        if parsed is not None:
+            return "".join(parsed.native_axes).upper()
+        return getattr(source, "native_axes", self.levels[0].axis_names)
+
+    @property
+    def native_shape(self):
+        """Original source storage dimensions in native_axes order."""
+        self._ensure_open()
+        source = self._storage_source()
+        if hasattr(source, "native_levels"):
+            return tuple(source.native_levels[0].shape)
+        if getattr(source, "parsed", None) is not None:
+            return tuple(source.arrays[0].shape)
+        if hasattr(source, "array"):
+            return tuple(source.array.shape)
         return self.levels[0].shape
 
     @property
@@ -206,32 +257,37 @@ class ImageDataset:
     def backing_paths(self):
         return self._source.backing_paths
 
-    def axis_info(self, name: str, *, level=0):
-        level = integer(level, "source level")
-        if level >= len(self.levels):
-            raise IndexError("Source level outside pyramid")
-        return self.levels[level].axis(name)
+    def axis_info(self, name: str, *, native_level=0):
+        native_level = integer(native_level, "native level")
+        if native_level >= len(self.levels):
+            raise IndexError("Native level outside pyramid")
+        return self.levels[native_level].axis(name)
 
-    def _plane_level_map(self, level):
-        if level != 0:
-            return (level,)
+    def _plane_level_map(self, native_level):
+        if native_level != 0:
+            return (native_level,)
+        selected = getattr(self._source, "plane_level_indices", None)
+        if selected is not None:
+            return tuple(selected)
         parsed = getattr(self._source, "parsed", None)
         return parsed.level_indices if parsed is not None else tuple(range(len(self.levels)))
 
-    def plane(self, *, z=None, t=None, level=0):
-        """Select indices in a stored level; level=0 keeps its safe XY pyramid.
+    def plane(self, *, z=None, t=None, native_level=0):
+        """Borrow a 2D Image from a stored resolution, with an immutable Z/T choice.
 
-        Choosing level>0 is an explicit native-level observation. Its Z index is
-        local to that level, not a silently mapped full-resolution optical slice.
+        ``native_level=0`` offers its exact-plane XY pyramid; nonzero native
+        levels select the actual stored coarse observation. The Z index always
+        belongs to the selected native level. Image.read_region(level=...) has
+        a *different* 2D-relative level index, intentionally left unchanged.
         """
         self._ensure_open()
-        level = integer(level, "source level")
-        z = selected_index(self.axis_info("Z", level=level), z, name="Z")
-        t = selected_index(self.axis_info("T", level=level), t, name="T")
+        native_level = integer(native_level, "native level")
+        z = selected_index(self.axis_info("Z", native_level=native_level), z, name="Z")
+        t = selected_index(self.axis_info("T", native_level=native_level), t, name="T")
         with self._lock:
             self._ensure_open()
-            metadata = self._source.plane_metadata(z=z, t=t, level=level)
-        return _semantic_image(_DatasetPlaneSource(self, z, t, level, metadata))
+            metadata = self._source.plane_metadata(z=z, t=t, level=native_level)
+        return _semantic_image(_DatasetPlaneSource(self, z, t, native_level, metadata))
 
     @contextmanager
     def _demand(self):
@@ -250,7 +306,7 @@ class ImageDataset:
         if not speculative:
             with self._demand():
                 return self._source.read_plane_region(*request.bounds, z=request.z, t=request.t,
-                    level=request.level, channels=request.channels, speculative=False)
+                    level=request.native_level, channels=request.channels, speculative=False)
         with self._condition:
             self._condition.wait_for(lambda: not self._gate.foreground or cancelled())
         if cancelled():
@@ -260,10 +316,10 @@ class ImageDataset:
             if cancelled():
                 raise CancelledError()
             return self._source.read_plane_region(*request.bounds, z=request.z, t=request.t,
-                level=request.level, channels=request.channels, speculative=True)
+                level=request.native_level, channels=request.channels, speculative=True)
 
     def _normalize_request(self, request):
-        with self.plane(z=request.z, t=request.t, level=request.level) as plane:
+        with self.plane(z=request.z, t=request.t, native_level=request.native_level) as plane:
             y0, y1, x0, x1 = request.bounds
             h, w = plane.levels[0].spatial_shape
             if not (0 <= y0 <= y1 <= h and 0 <= x0 <= x1 <= w):
@@ -272,7 +328,7 @@ class ImageDataset:
             if plane.axes != "CYX" and channels != (0,):
                 raise ValueError("RGB/label/single-plane images allow only logical channel zero")
             selection = plane._source.plane_selection
-            return PlaneRequest(request.bounds, selection.z, selection.t, request.level, channels)
+            return PlaneRequest(request.bounds, selection.z, selection.t, request.native_level, channels)
 
     def _estimate(self, request):
         request = self._normalize_request(request)
@@ -284,7 +340,7 @@ class ImageDataset:
             return estimate(request)
         arrays = getattr(self._source, "arrays", None)
         if arrays is not None:
-            array = arrays[request.level]
+            array = arrays[request.native_level]
             native = self._source.parsed.native_axes
             extent = dict(y=(y0, y1), x=(x0, x1))
             count = 1
@@ -300,7 +356,7 @@ class ImageDataset:
             return count * int(np.prod(array.chunks, dtype=object)) * self.dtype.itemsize
         pages_for = getattr(self._source, "_pages_for", None)
         if pages_for is not None:
-            pages = pages_for(request.z, request.t, request.level)
+            pages = pages_for(request.z, request.t, request.native_level)
             total = 0
             for c in request.channels:
                 page = pages[c]
@@ -344,7 +400,7 @@ class ImageDataset:
         if count > policy.max_pending:
             raise ValueError("lookahead exceeds max_pending")
         request = self._normalize_request(request)
-        info = self.axis_info(axis, level=request.level)
+        info = self.axis_info(axis, native_level=request.native_level)
         if info is None or info.size == 1:
             return ()
         current = request.z if axis.upper() == "Z" else request.t
@@ -355,7 +411,7 @@ class ImageDataset:
                 plans.append(PlaneRequest(request.bounds,
                     target if axis.upper() == "Z" else request.z,
                     target if axis.upper() == "T" else request.t,
-                    request.level, request.channels))
+                    request.native_level, request.channels))
         return self.prefetch(plans, policy=policy)
 
     def hint_pan(self, request: PlaneRequest, *, dx=0, dy=0, distance=256, policy=None):
@@ -364,7 +420,7 @@ class ImageDataset:
             raise ValueError("Pan directions must be -1, 0, or 1")
         distance = integer(distance, "distance", minimum=1)
         request = self._normalize_request(request)
-        level = self.levels[request.level]
+        level = self.levels[request.native_level]
         h, w = level.plane_metadata.levels[0].spatial_shape
         y0,y1,x0,x1 = request.bounds
         bounds = []
@@ -372,10 +428,10 @@ class ImageDataset:
         if dx < 0 and x0 > 0: bounds.append((y0,y1,max(0,x0-distance),x0))
         if dy > 0 and y1 < h: bounds.append((y1,min(h,y1+distance),x0,x1))
         if dy < 0 and y0 > 0: bounds.append((max(0,y0-distance),y0,x0,x1))
-        return self.prefetch([PlaneRequest(b,request.z,request.t,request.level,request.channels)
+        return self.prefetch([PlaneRequest(b,request.z,request.t,request.native_level,request.channels)
                               for b in bounds],policy=policy)
 
-    def locate_plane(self, *, z=None, t=None, level):
+    def locate_plane(self, *, z=None, t=None, native_level):
         """Report an explicit nearest native-level Z sample, never select it implicitly.
 
         Returns requested/actual indices and coordinates. A coarse voxel's support
@@ -383,10 +439,10 @@ class ImageDataset:
         """
         import math
         from types import MappingProxyType
-        level = integer(level, "source level")
+        native_level = integer(native_level, "native level")
         z = selected_index(self.axis_info("Z"), z, name="Z")
         t = selected_index(self.axis_info("T"), t, name="T")
-        target = self.levels[level]  # range validation is intentional
+        target = self.levels[native_level]  # range validation is intentional
         source_z, target_z = self.axis_info("Z"), target.axis("Z")
         actual, requested, coordinate = z, None, None
         if source_z is not None:
@@ -398,7 +454,7 @@ class ImageDataset:
                 fractional = (requested-target_z.origin)/target_z.scale
                 actual = min(target_z.size-1,max(0,int(math.floor(fractional+.5))))
             coordinate = target_z.coordinate(actual)
-        return MappingProxyType({"level":level,"requested_z":z,"z":actual,"t":t,
+        return MappingProxyType({"native_level":native_level,"requested_z":z,"z":actual,"t":t,
             "requested_z_coordinate":requested,"sampled_z_coordinate":coordinate,
             "z_displacement":None if requested is None or coordinate is None else coordinate-requested,
             "unit":None if source_z is None else source_z.unit,
@@ -431,8 +487,8 @@ class ImageDataset:
             self._ensure_open()
             self._source.clear_cache()
 
-    def _indices(self, name, selection, level):
-        info = self.axis_info(name, level=level)
+    def _indices(self, name, selection, native_level):
+        info = self.axis_info(name, native_level=native_level)
         if info is None:
             if selection is not None:
                 raise ValueError(f"Source has no {name} axis")
@@ -447,26 +503,27 @@ class ImageDataset:
             return range(lo, hi)
         return (selected_index(info, selection, name=name),)
 
-    def iter_planes(self, *, z=None, t=None, level=0):
+    def iter_planes(self, *, z=None, t=None, native_level=0):
         """Yield (selection, unopened Image); explicit slices select whole/ranged axes."""
         generation = self.generation
-        zs, ts = self._indices("Z", z, level), self._indices("T", t, level)
+        zs, ts = self._indices("Z", z, native_level), self._indices("T", t, native_level)
         for ti in ts:
             for zi in zs:
                 self._ensure_session(generation)
-                plane = self.plane(z=zi, t=ti, level=level)
+                plane = self.plane(z=zi, t=ti, native_level=native_level)
                 yield plane._source.plane_selection, plane
 
     def read_block(self, y0, y1, x0, x1, *, z=None, t=None, channels=None,
-                   level=0, max_bytes=64 * 1024 * 1024):
-        """Explicit bounded materialization; output axes are TZ + plane.axes.
+                   native_level=0, max_bytes=64 * 1024 * 1024):
+        """Bounded materialization in canonical TCZYX, TZYXS or TZYX axes.
 
-        T/Z remain singleton dimensions even when absent or selected by integer.
-        Use plane().read_region() for the unchanged 2D result convention.
+        T/Z stay singleton dimensions when absent or selected by integer; the
+        C axis precedes Z for scalar channels, matching dataset.axes/shape.
+        Use plane().read_region() for unchanged 2D array conventions.
         """
         max_bytes = integer(max_bytes, "max_bytes", minimum=1)
-        zs, ts = self._indices("Z", z, level), self._indices("T", t, level)
-        with self.plane(z=zs[0], t=ts[0], level=level) as first:
+        zs, ts = self._indices("Z", z, native_level), self._indices("T", t, native_level)
+        with self.plane(z=zs[0], t=ts[0], native_level=native_level) as first:
             bounds = tuple(integer(v, "bound") for v in (y0, y1, x0, x1))
             y0, y1, x0, x1 = bounds
             h, w = first.levels[0].spatial_shape
@@ -480,14 +537,21 @@ class ImageDataset:
                 shape = (len(selected), *shape)
             elif first.axes == "YXS":
                 shape = (*shape, 3)
-            shape = (len(ts), len(zs), *shape)
+            if first.axes == "CYX":
+                shape = (len(ts), len(selected), len(zs), y1-y0, x1-x0)
+            else:
+                shape = (len(ts), len(zs), *shape)
             if int(np.prod(shape, dtype=object)) * first.dtype.itemsize > max_bytes:
                 raise ValueError("Requested block exceeds max_bytes")
             output = np.empty(shape, dtype=first.dtype)
         for it, ti in enumerate(ts):
             for iz, zi in enumerate(zs):
-                with self.plane(z=zi, t=ti, level=level) as plane:
-                    output[it, iz] = plane.read_region(*bounds, channels=selected)
+                with self.plane(z=zi, t=ti, native_level=native_level) as plane:
+                    pixels = plane.read_region(*bounds, channels=selected)
+                    if plane.axes == "CYX":
+                        output[it, :, iz] = pixels
+                    else:
+                        output[it, iz] = pixels
         return output
 
     def acquisition_plane(self, *, z=None, t=None, channel=0):
@@ -567,11 +631,11 @@ class PlaneReaderMixin:
             self._dataset_view = view
         return view
 
-    def plane(self, *, z=None, t=None, level=0):
-        return self.dataset.plane(z=z, t=t, level=level)
+    def plane(self, *, z=None, t=None, native_level=0):
+        return self.dataset.plane(z=z, t=t, native_level=native_level)
 
-    def axis_info(self, name, *, level=0):
-        return self.dataset.axis_info(name, level=level)
+    def axis_info(self, name, *, native_level=0):
+        return self.dataset.axis_info(name, native_level=native_level)
 
     @property
     def source_levels(self):

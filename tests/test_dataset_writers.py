@@ -47,10 +47,16 @@ def test_public_stack_write_read_every_plane_and_xy_level(tmp_path,fmt,kind,dtyp
         assert ds.is_open
     expected=values
     with open_dataset(path,input_type=fmt,image_type='label' if kind=='label' else None) as back:
+        assert back.axes == axes
+        assert back.shape == values.shape
+        if fmt == 'ome_zarr':
+            assert back.native_axes == 'TCZYX'
+            assert back.native_shape == ((2, 3 if kind == 'rgb' else
+                                          1 if kind == 'label' else 2), 5, 19, 21)
         for level in range(3):
             for t in range(2):
                 for z in range(5):
-                    with back.plane(t=t,z=z,level=level) as image:
+                    with back.plane(t=t,z=z,native_level=level) as image:
                         exp=expected[t,:,z] if kind=='multichannel' else expected[t,z]
                         np.testing.assert_array_equal(image.asarray(),exp)
             if level<2:
@@ -77,7 +83,7 @@ def test_public_xyz_and_anisotropic_pyramids(tmp_path,axes_mode,kind,dtype):
         for level,shape in enumerate(plan.shapes):
             for t in range(2):
                 for z in range(shape[0]):
-                    with back.plane(t=t,z=z,level=level) as p:
+                    with back.plane(t=t,z=z,native_level=level) as p:
                         exp=expected[t,:,z] if kind=='multichannel' else expected[t,z]
                         np.testing.assert_array_equal(p.asarray(),exp)
             if level<len(plan.steps):

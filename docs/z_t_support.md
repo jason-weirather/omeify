@@ -19,7 +19,8 @@ actual runs, not an implied compatibility certification.
 from omeify import open_dataset
 
 with open_dataset("input.ome.tif", input_type="ome_tiff") as dataset:
-    print(dataset.axes, dataset.shape)
+    print(dataset.axes, dataset.shape)  # Logical TCZYX, TZYXS, or TZYX
+    print(dataset.native_axes, dataset.native_shape)  # Original storage
     print(dataset.axis_info("Z"), dataset.axis_info("T"))
 
     # Explicit indices are required for each non-singleton Z/T axis.
@@ -44,7 +45,7 @@ Image does not close or clear the dataset. Keep the owning dataset open until
 all its consumers have finished. Closing/reopening invalidates old views.
 Returned NumPy patches own their values and remain usable after closure.
 
-`plane_selection` contains Z, T, source-level index and a session-local identity.
+`plane_selection` contains Z, T, `native_level` and a session-local identity.
 It is useful for render/cache request identities, not a persistent accession.
 The identity propagates through ordinary single-observation metadata/crop/channel
 views. It is absent where an ordinary Image does not have a dataset selection.
@@ -82,15 +83,43 @@ declared units, including standard defaults. They are not silently fitted to a
 regular grid or reinterpreted as intrinsic pixel origins. Duplicate, nonfinite,
 or out-of-range acquisition records fail when that surface is requested.
 
-`dataset.levels` describes native stored levels, with full source axes, shapes,
+`dataset.levels` describes native stored levels, with source axes, shapes,
 calibration and `plane_preserving`. `image.levels` remains the ordinary 2D level
-surface. These two index spaces can differ.
+surface. These two index spaces can differ. The dataset API deliberately uses
+`native_level=` when indexing a stored resolution; `Image.read_region(level=...)`
+continues indexing the selected Image's own **plane-preserving** resolutions.
 
-* `dataset.plane(z=..., t=..., level=0)` includes only reduced XY levels that
+`dataset.axes`/`dataset.shape` are **canonical logical block axes**, regardless of
+input format and source axis order:
+
+| Pixel kind | Logical dataset axes | Corresponding 2D `Image.axes` |
+|---|---|---|
+| Multiplex/scalar with a logical C axis | `TCZYX` | `CYX` |
+| Single scalar or categorical labels | `TZYX` | `YX` |
+| Interleaved RGB (one logical channel) | `TZYXS` | `YXS` |
+
+The time and depth axes remain present with size one in this normalized dataset
+layout even when absent in the source. `read_block()` returns arrays in the same
+logical order; channel subsets change the C extent without moving that axis.
+`dataset.native_axes`/`dataset.native_shape` describe the **original physical
+storage** (including arbitrary TIFF dimension orders and permitted Zarr axis
+permutations). Borrowed metadata/selection views retain the original storage
+identity; their logical `shape` describes the selected view. Source-native level
+descriptors remain available through `dataset.levels`.
+
+OME-TIFF writers use their existing specified T/C/Z plane ordering and per-plane
+XY layout. OME-Zarr stack writers emit canonical *stored* `tczyx` arrays for NGFF
+interoperability, including RGB encoded as three stored C components and labels
+encoded with a singleton stored C. The public logical API represents RGB as S
+samples, not three independent biomarker channels. Native and logical axes are
+reported separately rather than falsely asserting the file uses a nonstandard
+NGFF S axis.
+
+* `dataset.plane(z=..., t=..., native_level=0)` includes only reduced XY levels that
   retain the same Z/T sampling.
-* `dataset.plane(z=..., t=..., level=N)` for N > 0 explicitly selects a native
+* `dataset.plane(z=..., t=..., native_level=N)` for N > 0 explicitly selects a native
   coarse observation. Its Z index is **local to level N**; the Image has one level.
-* `dataset.locate_plane(z=..., t=..., level=N)` reports the nearest native Z sample
+* `dataset.locate_plane(z=..., t=..., native_level=N)` reports the nearest native Z sample
   to a base-plane position, including the displacement. It does not resample,
   change the current plane, or claim a known reduction kernel for external data.
 
@@ -114,7 +143,8 @@ with open_dataset("input.zarr", input_type="ome_zarr") as dataset:
         0, 64, 0, 64, z=slice(10, 13), t=2,
         channels=[1, 0, 1], max_bytes=16 * 1024 * 1024,
     )
-    # Output axes: TZ + the plane's axes, including singleton T/Z.
+    # Output axes: TCZYX / TZ YXS / TZYX, including singleton T/Z.
+    # Dataset.read_block always agrees with dataset.axes.
 
     with dataset.select(z=slice(10, 20), t=slice(0, 5),
                         channels=[1, 0], bounds=(100, 356, 200, 456)) as selected:
@@ -124,8 +154,12 @@ with open_dataset("input.zarr", input_type="ome_zarr") as dataset:
 Selections use half-open integer bounds and unit-stride ranges. `select()` keeps
 all of an omitted Z/T axis; `plane()`, `iter_planes()` and `read_block()` require
 explicit selection of a non-singleton axis. The CLI also requires explicit scope.
-Selection and metadata-override dataset views expose one base level; output
-pyramids are rebuilt. No cropped whole volume is materialized.
+Rectangular/channel/Z/T selections expose only their newly selected base level;
+output pyramids are rebuilt. **Metadata-only** dataset views preserve every native
+resolution and the exact-plane compatible XY pyramid. X/Y and Z/T sampling
+recalibrations use declared native level ratios and known coordinate offsets;
+unknown phase and absent physical origins remain unknown. No cropped whole
+volume is materialized.
 
 `read_block()` bounds the returned allocation, not upstream codec scratch or
 source chunk size. Reads still return owned, native-endian arrays. Channel order
@@ -151,6 +185,22 @@ with ImageDataset.from_array(
 `copy=False` borrows arrays and requires callers not to mutate them while open.
 `image_type="rgb"` requires an S axis of length three, not an inferred C=3;
 labels require categorical integer values and one logical channel.
+
+## Dataset sources versus 2D ImageSource
+
+`ImageSource` remains the established public 2D provider interface: its
+`read_region()` validates one Image's coordinates and returns owned YX/CYX/YXS
+arrays. `ImageDataset` instead requires an internal, structurally checked
+`DatasetSource` protocol (`dataset_levels`, `plane_metadata`, `read_plane_region`,
+and session lifecycle). It does **not** require a source to expose an ambiguous
+2D `read_region()` while Z/T remain unselected.
+
+The file-backed TIFF and Zarr source classes implement **both** capabilities,
+serving existing fixed-plane readers and new dataset sessions. Native array-backed
+dataset sources and borrowed dataset views inherit `DatasetSourceBase` only.
+`dataset.plane()` is the explicit bridge: it builds an ordinary 2D `ImageSource`
+and hence an ordinary `Image`. This keeps existing custom 2D providers and the
+reader/writer contract unchanged.
 
 ## Cache ownership and resource limits
 
@@ -197,7 +247,8 @@ with open_dataset("input.zarr", input_type="ome_zarr") as dataset:
     print(dataset.prefetch_info(), dataset.cache_info())
 ```
 
-`prefetch([PlaneRequest(...)])` accepts explicit upcoming regions.
+`prefetch([PlaneRequest(...)])` accepts explicit upcoming regions. The request
+field `native_level` follows the dataset API, not the 2D Image `level` keyword.
 `hint_navigation()` predicts only adjacent Z/T viewports at the caller's requested
 level/channels. `hint_pan()` predicts leading XY strips. Each submission replaces
 older pending predictions. Request count and estimated decoded native-block work

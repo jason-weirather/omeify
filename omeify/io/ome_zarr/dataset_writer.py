@@ -267,7 +267,7 @@ def _verify(writer,source,stage,plan,method,attributes,serializer,compressors,ch
                         raise ValueError("Stack coordinate geometry failed readback")
                 for t in range(spec.size_t):
                     for z in range(depth):
-                        with readback.plane(t=t,z=z,level=i) as plane:
+                        with readback.plane(t=t,z=z,native_level=i) as plane:
                             if plane.icc_profile!=spec.icc_profile:
                                 raise ValueError("Stack ICC profile failed readback")
                             for c in range(spec.logical_channel_count):
