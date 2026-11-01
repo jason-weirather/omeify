@@ -150,8 +150,6 @@ class OMEImageSpec:
             if self.icc_profile is not None:
                 raise ValueError("ICC profiles are only valid for RGB images")
 
-        if self.size_z > 1 and self.z_spacing_um is None:
-            raise ValueError("Calibrated volume output requires z_spacing_um")
         if self.z_origin_um is not None and self.z_spacing_um is None:
             raise ValueError("A physical Z origin requires Z calibration")
         if self.time_origin_s is not None and self.time_increment_s is None:

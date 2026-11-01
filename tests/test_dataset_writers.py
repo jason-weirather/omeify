@@ -105,10 +105,10 @@ def test_public_dataset_conversion_and_global_mutation(tmp_path):
         'axes':'TZYX','PhysicalSizeX':.5,'PhysicalSizeY':.5,'PhysicalSizeZ':2})
     converted=tmp_path/'converted.zarr'
     report=convert(source,converted,input_type='ome_tiff',output_format='ome_zarr',
-                   all_planes=True,tile_size=16,pyramid_levels=1,pyramid_axes='xyz')
+                   tile_size=16,pyramid_levels=1,pyramid_axes='xyz')
     validate_report(report,'dataset_operation_report.schema.json')
     out=tmp_path/'mutated.ome.tif'
-    report=mutate(converted,out,input_type='ome_zarr',all_planes=True,dtype='uint8',range_mode='full',
+    report=mutate(converted,out,input_type='ome_zarr',dtype='uint8',range_mode='full',
                   compression='Deflate',tile_size=16,pyramid_levels=1)
     validate_report(report,'dataset_operation_report.schema.json')
     mapping=report['mutation']['channels'][0]['mapping']

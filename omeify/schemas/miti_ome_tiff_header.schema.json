@@ -176,29 +176,18 @@
       "minLength": 1
     }
   },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "size_z": {
-            "minimum": 2
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "physical_size_z",
-          "physical_size_z_unit"
-        ]
-      }
-    }
-  ],
   "dependentRequired": {
     "time_increment": [
       "time_increment_unit"
     ],
     "time_increment_unit": [
       "time_increment"
+    ],
+    "physical_size_z": [
+      "physical_size_z_unit"
+    ],
+    "physical_size_z_unit": [
+      "physical_size_z"
     ]
   }
 }

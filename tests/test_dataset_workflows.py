@@ -41,22 +41,45 @@ def test_mutation_finds_nonfinite_values_in_last_plane(value):
             analyze_dataset_dtype_mutation(dataset,dtype="uint16")
 
 
-def test_stack_scopes_are_explicit():
-    with ImageDataset.from_array(np.zeros((4,5,6,7)),axes="TZYX") as ds:
-        for kwargs in [{},{"z_range":(1,3)},{"t":1}]:
-            with pytest.raises(ValueError,match="requires an explicit"):
-                stack_selection(ds,**kwargs)
-        selection,record=stack_selection(ds,z_range=(1,3),t=2)
-        assert selection==dict(z=slice(1,3),t=2)
-        assert record==dict(z=[1,3],t=[2,3])
-        with ds.select(**selection) as selected:
-            assert selected.axis_info('Z').size==2
-            assert selected.axis_info('T').size==1
-        selection,record=stack_selection(ds,all_planes=True)
-        assert record==dict(z=[0,5],t=[0,4])
-        for kwargs in [{'all_planes':True,'z':1},{'z':1,'z_range':(1,2),'t':1},
-                       {'z_range':(3,2),'t':0},{'z_range':(0,6),'t':0}]:
-            with pytest.raises(ValueError):stack_selection(ds,**kwargs)
+def test_stack_scopes_preserve_omitted_axes_and_reject_ambiguous_combinations():
+    with ImageDataset.from_array(np.zeros((4, 5, 6, 7)), axes="TZYX") as ds:
+        for kwargs, expected_selection, expected_scope in (
+            ({}, dict(z=slice(None), t=slice(None)), dict(z=[0, 5], t=[0, 4])),
+            ({"z_range": (1, 3)}, dict(z=slice(1, 3), t=slice(None)),
+             dict(z=[1, 3], t=[0, 4])),
+            ({"t": 1}, dict(z=slice(None), t=1), dict(z=[0, 5], t=[1, 2])),
+            ({"z": 2}, dict(z=2, t=slice(None)), dict(z=[2, 3], t=[0, 4])),
+            ({"z_range": (1, 3), "t": 2}, dict(z=slice(1, 3), t=2),
+             dict(z=[1, 3], t=[2, 3])),
+        ):
+            selection, record = stack_selection(ds, **kwargs)
+            assert selection == expected_selection
+            assert record == expected_scope
+            with ds.select(**selection) as selected:
+                assert selected.axis_info("Z").size == expected_scope["z"][1] - expected_scope["z"][0]
+                assert selected.axis_info("T").size == expected_scope["t"][1] - expected_scope["t"][0]
+        for kwargs in ({"z": 1, "z_range": (1, 2)},
+                       {"z_range": (3, 2)}, {"z_range": (0, 6)},
+                       {"t": 4}, {"t_range": (0, 0)}):
+            with pytest.raises((ValueError, IndexError)):
+                stack_selection(ds, **kwargs)
+        with pytest.raises(TypeError):
+            stack_selection(ds, all_planes=True)
+    with ImageDataset.from_array(np.zeros((6, 7)), axes="YX") as ds:
+        assert stack_selection(ds) == (dict(z=None, t=None), dict(z=None, t=None))
+
+
+def test_stack_writer_scope_detects_non_singleton_omitted_axes():
+    from omeify.dataset_workflow import stack_requested
+    with ImageDataset.from_array(np.zeros((4, 5, 6, 7)), axes="TZYX") as ds:
+        assert stack_requested(ds)
+        assert stack_requested(ds, z=2)
+        assert stack_requested(ds, t=1)
+        assert stack_requested(ds, z_range=(2, 3), t=1)
+        assert not stack_requested(ds, z=2, t=1)
+    with ImageDataset.from_array(np.zeros((6, 7)), axes="YX") as ds:
+        assert not stack_requested(ds)
+        assert stack_requested(ds, z_range=(0, 1))
 
 
 def test_calibration_override_preserves_pixels_and_known_origin():
@@ -87,14 +110,19 @@ def test_coordinate_overflow_is_explicit():
 def test_stack_help_and_old_plane_options(command):
     result=CliRunner().invoke(main,[command,'--help'])
     assert result.exit_code==0
-    for option in ['--all-planes','--z-range','--t-range','--pyramid-axes','--chunk-z','--z-index']:
+    for option in ['--z-range','--t-range','--pyramid-axes','--chunk-z','--z-index']:
         assert option in result.output
+    assert '--all-planes' not in result.output
 
 
-@pytest.mark.parametrize('function',[convert,mutate])
-def test_2d_workflows_do_not_ignore_stack_parameters(tmp_path,function):
-    with pytest.raises(ValueError,match='require all_planes'):
-        function(tmp_path/'missing.tif',tmp_path/'out.tif',input_type='ome_tiff',pyramid_axes='xyz')
+@pytest.mark.parametrize('function', [convert, mutate])
+def test_2d_workflows_do_not_ignore_stack_parameters(tmp_path, function):
+    import tifffile
+    path = tmp_path / 'source.ome.tif'
+    tifffile.imwrite(path, np.zeros((16, 16), dtype=np.float32), ome=True,
+                     metadata={'axes': 'YX', 'PhysicalSizeX': .5, 'PhysicalSizeY': .5})
+    with pytest.raises(ValueError, match='non-singleton or ranged'):
+        function(path, tmp_path / 'out.tif', input_type='ome_tiff', pyramid_axes='xyz')
 
 
 def test_dataset_and_selection_share_demand_priority_gate():

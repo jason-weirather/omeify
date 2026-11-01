@@ -257,8 +257,8 @@ can contain identifying information, and pixels are not screened for burned-in t
 
 ## Z/T development branch reports
 
-Explicit stack operations return `omeify.dataset_operation/1`, containing the
-selected half-open Z/T ranges, an `omeify.dataset_write/1` writer report and any
+Dataset conversions (including automatic full-series selection) and scoped stack
+mutations return `omeify.dataset_operation/1`, containing the selected half-open Z/T ranges, an `omeify.dataset_write/1` writer report and any
 fixed whole-stack mutation mapping. Ordinary 2D operation schemas are unchanged.
 Numeric axis geometry is allowlisted; cache statistics, full source file paths,
 acquisition free text and execution histories are not embedded in generated image metadata.

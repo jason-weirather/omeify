@@ -153,7 +153,8 @@ with open_dataset("input.zarr", input_type="ome_zarr") as dataset:
 
 Selections use half-open integer bounds and unit-stride ranges. `select()` keeps
 all of an omitted Z/T axis; `plane()`, `iter_planes()` and `read_block()` require
-explicit selection of a non-singleton axis. The CLI also requires explicit scope.
+explicit selection of a non-singleton axis. Conversion and mutation keep the
+full extent of an omitted axis; other 2D read workflows still select one plane.
 Rectangular/channel/Z/T selections expose only their newly selected base level;
 output pyramids are rebuilt. **Metadata-only** dataset views preserve every native
 resolution and the exact-plane compatible XY pyramid. X/Y and Z/T sampling
@@ -304,8 +305,10 @@ with open_dataset("input.ome.tif", input_type="ome_tiff") as dataset:
     )
 ```
 
-Both outputs require calibrated XY; non-singleton Z requires physical Z spacing.
-Missing time intervals are not invented. Explicit overrides are borrowed views:
+Both outputs require calibrated XY. Unknown Z spacing and time intervals remain
+unknown: the TIFF header omits the corresponding optional OME fields, and NGFF
+records unitless index axes rather than pretending they are micrometers/seconds.
+XYZ automatic physical-anisotropy pyramids still require calibrated Z. Explicit overrides are borrowed views:
 `dataset.with_metadata(pixel_size=..., z_spacing_um=..., time_increment_s=...)`.
 Regular intrinsic Z/T origins are kept separately from acquisition measurements.
 
@@ -353,32 +356,38 @@ Whole-stack export **currently refuses any OME Plane acquisition measurements**
 (DeltaT, ExposureTime or PositionXYZ) rather than dropping them or inventing a
 regular grid. This is conservative, including regularly spaced measurements.
 Reading those planes and explicit 2D export remain possible. Supporting retained
-per-plane measurement output is unfinished work, not claimed here.
+per-plane measurement output is unfinished work, not claimed here. The output
+contracts are the required OME XSD and `miti_ome_tiff_header.schema.json` for
+TIFF, `ome_zarr_dataset_profile.schema.json` for NGFF attributes, and
+`stack_geometry.schema.json` for intentionally retained Z/T coordinate origins;
+`dataset_write_report.schema.json` describes both outputs.
 
 ## CLI scopes and mutation
 
 ```bash
-# Explicit complete dataset, fresh normalized Zarr, anisotropy-aware pyramid.
+# Whole selected series is preserved by default (no all-planes flag).
 omeify convert input.ome.tif -o full.zarr --type ome_tiff \
-  --output-format ome_zarr --all-planes --pyramid-axes auto --chunk-z 1
+  --output-format ome_zarr --pyramid-axes auto --chunk-z 1
 
-# Explicit T/Z subrange, with calibrated output supplied by the source.
+# Restrict Z only; omitted T remains at its complete source extent.
 omeify convert input.zarr -o subset.ome.tif --type ome_zarr \
-  --t-range 0 4 --z-range 10 30 --compression Deflate --no-overwrite
+  --z-range 10 30 --compression Deflate --no-overwrite
 
-# One plane also works for OME-TIFF in existing convert/crop/mutate workflows.
+# Restrict both Z and T to export an ordinary 2D observation.
 omeify convert input.ome.tif -o plane.ome.tif --type ome_tiff \
   --t-index 3 --z-index 12 --no-overwrite
 
-# One fixed intensity mapping per channel across the selected T/Z extent.
+# One fixed numerical mutation mapping per channel across all Z/T by default.
 omeify mutate float.zarr -o compact.zarr --type ome_zarr \
-  --output-format ome_zarr --all-planes --dtype uint16 --range-mode full
+  --output-format ome_zarr --dtype uint16 --range-mode full
 ```
 
-`--all-planes` is exclusive with Z/T indices and ranges. With ranges, explicitly
-select every remaining non-singleton axis. No-scope calls follow the previous
-2D workflow; they never silently export plane zero or the complete volume.
-Additional stack flags are `--z-spacing-um`, `--time-increment-s`,
+Omitted Z/T selectors retain every plane of the selected image/series. A single
+index restricts that axis while retaining the other; two indices select a 2D
+observation. A range is half-open and can be combined with an index on the other
+axis. Singleton/absent Z/T input retains the established 2D conversion path and
+report schema. `--all-planes` is not supported. Other workflows requiring one
+2D Image still reject unselected non-singleton axes. Additional stack flags are `--z-spacing-um`, `--time-increment-s`,
 `--pyramid-axes`, repeated `--pyramid-step Z Y X`, `--chunk-z`, and
 `--max-block-mib`. Incompatible TIFF/Zarr-only options fail.
 

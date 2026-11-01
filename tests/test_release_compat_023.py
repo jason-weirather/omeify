@@ -95,7 +95,7 @@ def test_invalid_stack_precision_is_rejected_before_overwriting(tmp_path):
     tifffile.imwrite(path, values, ome=True, metadata=metadata("TYX", TimeIncrement=1.),
                      photometric="minisblack")
     sentinel = b"Existing output must not be replaced by invalid stack mutation"
-    for scope in ({"t": 0}, {"all_planes": True}):
+    for scope in ({"t": 0}, {}):
         destination.write_bytes(sentinel)
         with pytest.raises(ValueError, match="retains full float32 precision"):
             mutate(path, destination, input_type="ome_tiff", float32_mantissa_bits=23,

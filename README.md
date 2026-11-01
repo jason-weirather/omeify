@@ -29,7 +29,7 @@ OME-TIFF without installing Omeify.
 [OME-TIFF contract](#the-ome-tiff-home-base) ·
 [OME-Zarr contract](#the-ome-zarr-home-base) ·
 [Metadata and MITI](#metadata-minimization-and-miti-alignment) ·
-[Python library](#python-library) · [Reference][reference]
+[Python library](#python-library) · [Charter](CHARTER.md) · [Reference][reference]
 
 ## Z/T release candidate
 
@@ -38,8 +38,8 @@ OME-TIFF/OME-Zarr source sessions, first-class Z/T axis metadata, borrowed plane
 Images, canonical logical block axes (`TCZYX`, `TZYXS`, `TZYX`) distinct from
 native storage axes, shared bounded caching and explicit optional read-ahead. Both writers
 have `write_dataset()` for regular stacks; Zarr adds explicit XY/XYZ and
-anisotropy-aware pyramids. `convert` and `mutate` accept explicit whole/ranged
-stack scope. Multi-file TIFF is not included.
+anisotropy-aware pyramids. `convert` preserves complete selected Z/T series by default;
+`mutate` makes explicit numerical changes over the selected extent. Multi-file TIFF is not included.
 
 See [Z/T source sessions, examples, and limitations](docs/z_t_support.md).
 This candidate adds dependency-backed Z/T tests and 2D compatibility regressions.
@@ -74,7 +74,7 @@ Each command has a distinct job:
 | Command | Purpose |
 |---|---|
 | `omeify inspect` | Examine TIFF or OME-Zarr structure, channels, calibration, and metadata without decoding image pixels. |
-| `omeify convert` | Normalize a supported image into OME-TIFF or OME-Zarr, preserving dtype and intensity scale. |
+| `omeify convert` | Reconstruct the selected image/series in OME-TIFF or OME-Zarr; preserve its Z/T extent and scalar intensity scale by default. |
 | `omeify crop` | Export pixel-coordinate rectangles or GeoJSON regions, optionally selecting/relabeling channels. |
 | `omeify extract-rgb` | Reconstruct a real RGB image from three named scalar channels, with explicit bit-depth/background policies. |
 | `omeify concat` | Combine selected, optionally renamed **OME-TIFF image series** in a chosen order. |
@@ -122,8 +122,9 @@ can also be converted into a fresh, normalized output.
 
 Source support is intentionally specific, not a promise to convert every TIFF or
 all variations of a vendor format. `--series` selects an image where supported;
-Both OME readers accept `--z-index` and `--t-index`; OME-Zarr additionally
-accepts `--group`. Explicit stack scopes are documented in the Z/T guide. See [supported inputs and calibration][supported-inputs]
+Both OME inputs accept `--z-index` and `--t-index` to restrict a conversion;
+with no Z/T selectors the complete selected series is retained. OME-Zarr also
+accepts `--group`. The [Z/T guide](docs/z_t_support.md) describes scopes. See [supported inputs and calibration][supported-inputs]
 for the exact rules. Ordinary TIFF `inspect` can describe metadata from layouts
 that `convert` does not support.
 

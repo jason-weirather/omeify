@@ -10,38 +10,45 @@ from .reports import complete_report
 from .workflow import apply_channel_renames, validate_channel_rename_mapping, validate_image_paths
 
 
-def stack_requested(*, all_planes=False, z_range=None, t_range=None):
-    if not isinstance(all_planes, bool):
-        raise TypeError("all_planes must be boolean")
-    return all_planes or z_range is not None or t_range is not None
+def stack_requested(dataset, *, z=None, t=None, z_range=None, t_range=None):
+    """Whether the selected OME image needs the dataset writer, not a 2D Image.
+
+    Conversion and mutation retain each omitted Z/T axis. An explicitly selected
+    plane becomes an ordinary Image only when no non-singleton axis remains.
+    Ranges use the dataset writer even when they happen to contain one section.
+    """
+    if z_range is not None or t_range is not None:
+        return True
+    return any(
+        index is None and (info := dataset.axis_info(name)) is not None and info.size > 1
+        for name, index in (("Z", z), ("T", t))
+    )
 
 
-def stack_selection(dataset, *, all_planes=False, z=None, t=None, z_range=None, t_range=None):
-    """Resolve explicit half-open scopes, rejecting every ambiguous non-singleton axis."""
-    if all_planes and any(v is not None for v in (z,t,z_range,t_range)):
-        raise ValueError("all_planes cannot be combined with Z/T indices or ranges")
+def stack_selection(dataset, *, z=None, t=None, z_range=None, t_range=None):
+    """Resolve Z/T scopes; omitted axes retain their entire available extent."""
     result, record = {}, {}
-    for name, index, bounds in (("Z",z,z_range),("T",t,t_range)):
+    for name, index, bounds in (("Z", z, z_range), ("T", t, t_range)):
         info = dataset.axis_info(name)
         if index is not None and bounds is not None:
             raise ValueError(f"{name} index and range are mutually exclusive")
-        value = index
         if bounds is not None:
             if len(bounds) != 2:
                 raise ValueError(f"{name} range requires a half-open (start, stop) pair")
-            lo,hi=(integer(v,name+" range") for v in bounds)
-            value=slice(lo,hi)
-        elif all_planes and info is not None:
-            value=slice(None)
-        indices=dataset._indices(name,value,0)
-        # select(None) means all in the view factory; resolve absent/singleton here.
-        result[name.lower()]=value if isinstance(value,slice) else indices[0]
-        record[name.lower()]=None if info is None else [indices[0],indices[-1]+1]
-    return result,record
+            lo, hi = (integer(v, name + " range") for v in bounds)
+            value = slice(lo, hi)
+        elif index is not None:
+            value = index
+        else:
+            value = slice(None) if info is not None else None
+        indices = dataset._indices(name, value, 0)
+        result[name.lower()] = value if isinstance(value, slice) else indices[0]
+        record[name.lower()] = None if info is None else [indices[0], indices[-1] + 1]
+    return result, record
 
 
 def process_dataset(input_path, output_path, *, operation, input_type, output_format="ome_tiff",
-        series=0, group="", z=None, t=None, all_planes=False, z_range=None, t_range=None,
+        series=0, group="", z=None, t=None, z_range=None, t_range=None,
         image_type=None, intrinsic_only=False, storage_options=None,
         rename_channels=None, rename_channels_by=None, pixel_size=None,
         z_spacing_um=None, time_increment_s=None, pyramid_axes="xy", pyramid_factors=None,
@@ -49,8 +56,8 @@ def process_dataset(input_path, output_path, *, operation, input_type, output_fo
         range_mode=None, sample_pixels_per_channel=262144, auto_max_normalized_rmse=.005,
         compression=None,tile_size=None,pyramid_levels=None,downsample="mean",max_workers=None,
         display_uuid=True,software=None,overwrite=True,cache_directory=None,
-        jpeg_quality=90,jpeg_subsampling="422"):
-    """Write an explicitly scoped regular stack, preserving fresh metadata policy."""
+        jpeg_quality=90,jpeg_subsampling="422",opened_dataset=None):
+    """Write the selected regular dataset, preserving fresh metadata policy."""
     if operation not in {"convert","mutate"}:
         raise ValueError("Unsupported dataset operation")
     if input_type not in {"ome_tiff","ome_zarr"}:
@@ -81,9 +88,11 @@ def process_dataset(input_path, output_path, *, operation, input_type, output_fo
         float32_mantissa_bits=float32_mantissa_bits,overwrite=overwrite,cache_directory=cache_directory,
         display_uuid=display_uuid,software=software,jpeg_quality=jpeg_quality,jpeg_subsampling=jpeg_subsampling)
     with ExitStack() as stack:
-        original=stack.enter_context(open_dataset(source,input_type=input_type,series=series,group=group,
-            image_type=image_type,intrinsic_only=intrinsic_only,storage_options=storage_options))
-        selection,coordinates=stack_selection(original,all_planes=all_planes,z=z,t=t,
+        original=(opened_dataset if opened_dataset is not None else stack.enter_context(
+            open_dataset(source,input_type=input_type,series=series,group=group,
+            image_type=image_type,intrinsic_only=intrinsic_only,storage_options=storage_options)))
+        original._ensure_open()
+        selection,coordinates=stack_selection(original,z=z,t=t,
                                                z_range=z_range,t_range=t_range)
         selected=stack.enter_context(original.select(**selection))
         names=apply_channel_renames(selected.channel_names,renames,mode)

@@ -9,8 +9,11 @@ not two storage implementations. File readers, array images, and procedural
 images use the same regional Image API once a plane is selected. Omeify does
 not import Mocktome or contain simulator-specific dispatch.
 
-The Image API established in 0.18 remains the current interface. Conversion and
-mutation numeric policies are unchanged. The [0.21 report cleanup](reports.md)
+The established 2D Image API remains the smaller, more thoroughly regression-
+tested interface for ordinary image work. ImageDataset adds Z/T without growing
+that 2D contract. `convert` preserves the entire selected series when Z/T remain
+unselected; `mutate` explicitly changes numeric values. Their existing numeric
+policies are unchanged. The [0.21 report cleanup](reports.md)
 changes serialized report fields and CLI presentation, not this image model. The CLI requires
 `--output` / `-o` for the destination of `convert` and `mutate`; their Python
 call signatures are unchanged. There are no deprecated forwarding APIs. File opening

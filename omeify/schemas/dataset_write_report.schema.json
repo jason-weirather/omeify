@@ -101,22 +101,32 @@
               "exclusiveMinimum": 0
             },
             {
-              "const": "\u00b5m"
+              "const": "µm"
             }
           ],
           "minItems": 3,
           "maxItems": 3
         },
         "z_spacing_um": {
-          "type": [
-            "number",
-            "null"
+          "oneOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "time_increment_s": {
-          "type": [
-            "number",
-            "null"
+          "oneOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "z_origin_um": {

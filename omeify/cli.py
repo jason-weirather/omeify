@@ -46,9 +46,9 @@ def source_options(function):
     for option in reversed((
         click.option("--group", default="", help="OME-Zarr image group within the store."),
         click.option("--z-index", "z", type=click.IntRange(min=0), default=None,
-                     help="Explicit OME-TIFF/OME-Zarr Z plane; required when Z is non-singleton."),
+                     help="OME Z plane; convert/mutate retain other unselected axes."),
         click.option("--t-index", "t", type=click.IntRange(min=0), default=None,
-                     help="Explicit OME-TIFF/OME-Zarr time point; required when T is non-singleton."),
+                     help="OME time point; convert/mutate retain other unselected axes."),
         click.option("--image-type", type=click.Choice(["multichannel", "rgb", "label"]),
                      default=None, help="Explicit pixel interpretation; three channels never imply RGB."),
         click.option("--intrinsic-only", is_flag=True,
@@ -61,12 +61,10 @@ def source_options(function):
 def stack_options(function):
     """Explicit volume scope, without changing the ordinary selected-plane path."""
     for option in reversed((
-        click.option("--all-planes", is_flag=True,
-                     help="Explicitly export all Z/T planes; exclusive with indices and ranges."),
         click.option("--z-range", nargs=2, type=click.IntRange(min=0), default=None,
-                     help="Half-open Z range START STOP; select T explicitly when non-singleton."),
+                     help="Half-open Z range START STOP; omitted T retains its full extent."),
         click.option("--t-range", nargs=2, type=click.IntRange(min=0), default=None,
-                     help="Half-open time range START STOP; select Z explicitly when non-singleton."),
+                     help="Half-open time range START STOP; omitted Z retains its full extent."),
         click.option("--z-spacing-um", type=click.FloatRange(min=0, min_open=True), default=None,
                      help="Explicit regular stack Z-spacing override in micrometers."),
         click.option("--time-increment-s", type=click.FloatRange(min=0, min_open=True), default=None,
@@ -468,7 +466,7 @@ def concat_command(
           "-vvv: also print the complete report unless --output-json is supplied."),
 )
 def convert_command(
-    all_planes: bool, z_range, t_range, z_spacing_um, time_increment_s,
+    z_range, t_range, z_spacing_um, time_increment_s,
     pyramid_axes: str, pyramid_factors, chunk_z: int, max_block_mib: int,
     group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
     output_format: str,
@@ -528,7 +526,7 @@ def convert_command(
             input_type=input_type,  # type: ignore[arg-type]
             output_format=output_format, group=group, z=z, t=t, image_type=image_type,
             intrinsic_only=intrinsic_only,
-            all_planes=all_planes, z_range=z_range, t_range=t_range,
+            z_range=z_range, t_range=t_range,
             z_spacing_um=z_spacing_um, time_increment_s=time_increment_s,
             pyramid_axes=pyramid_axes, pyramid_factors=pyramid_factors or None,
             chunk_z=chunk_z, max_block_bytes=max_block_mib*1024*1024,
@@ -707,7 +705,7 @@ def convert_command(
           "-vvv: also print the complete report unless --output-json is supplied."),
 )
 def mutate_command(
-    all_planes: bool, z_range, t_range, z_spacing_um, time_increment_s,
+    z_range, t_range, z_spacing_um, time_increment_s,
     pyramid_axes: str, pyramid_factors, chunk_z: int, max_block_mib: int,
     group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
     output_format: str,
@@ -776,7 +774,7 @@ def mutate_command(
             input_type=input_type,  # type: ignore[arg-type]
             output_format=output_format, group=group, z=z, t=t, image_type=image_type,
             intrinsic_only=intrinsic_only,
-            all_planes=all_planes, z_range=z_range, t_range=t_range,
+            z_range=z_range, t_range=t_range,
             z_spacing_um=z_spacing_um, time_increment_s=time_increment_s,
             pyramid_axes=pyramid_axes, pyramid_factors=pyramid_factors or None,
             chunk_z=chunk_z, max_block_bytes=max_block_mib*1024*1024,

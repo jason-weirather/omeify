@@ -16,12 +16,13 @@ is supported. Implementation gaps are not reasons to quietly change its meaning.
    interactive viewer policy belong to consumers. Optional extensions must not
    silently change the pixels or semantics of core image operations.
 
-2. **Separate responsibilities, share machinery.** `Image` is a fixed 2D
-   observation; `ImageDataset` organizes one selected image/series across Z, T,
-   and native resolutions. `ImageSource` and `DatasetSource` are complementary
-   contracts, not old and new alternatives. Share source lifecycle and backend
-   decoding. Plane selection yields an ordinary Image. Image semantics belong to
-   images and datasets; storage and publication settings belong to writers.
+2. **Keep 2D simple and tested; add dimensions through datasets.** `Image` is
+   the smaller, established, heavily regression-tested 2D observation API.
+   `ImageDataset` supports Z/T and native resolutions without complicating that
+   contract. `ImageSource` and `DatasetSource` are complementary, not old and new
+   alternatives. Share source lifetime and decoding; explicit plane selection
+   yields an ordinary Image. Image semantics belong to images and datasets;
+   storage and publication settings belong to writers.
 
 3. **Make dimensions predictable.** Public axes, shapes, and returned arrays must
    agree: Images use `YX`, `CYX`, or `YXS`; dataset blocks use `TZYX`, `TCZYX`, or
@@ -30,12 +31,14 @@ is supported. Implementation gaps are not reasons to quietly change its meaning.
    Series, channels, Z, T, and pyramid resolutions are not interchangeable. Write
    documented standard-compatible layouts, not a private raster format.
 
-4. **Keep selection and transformation explicit.** Do not guess ambiguous axes,
-   RGB semantics, source profiles, or stack scope. A read must not silently choose
-   a non-singleton Z/T plane or materialize a volume. Conversion preserves scalar
-   dtype and intensity scale; deliberate numeric changes belong to mutation.
-   Document and report applicable color-management, lossy-encoding, masking, and
-   resampling policies rather than promising that every operation is lossless.
+4. **Convert to preserve; mutate to change values.** `convert` preserves the
+   selected image/series and its complete Z/T extent by default, unless a caller
+   explicitly selects a subset. `mutate` requires a deliberate numerical change
+   to intensity or precision; selecting planes or regions is not a mutation.
+   Reading one 2D observation still requires explicit indices for ambiguous Z/T
+   axes. Never guess image types, RGB semantics, source profiles, or measurements.
+   Document color management, lossy encoding, and resampling instead of claiming
+   every conversion is bitwise lossless.
 
 5. **Never invent geometry.** Distinguish indices, sampling, origins, and measured
    acquisition positions. Honor applicable standard-defined defaults without

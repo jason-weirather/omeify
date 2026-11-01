@@ -453,8 +453,10 @@ omeify convert slide.svs --output slide.ome.tif \
 
 Only the selected image/series is converted. Series 0 is the default. Use
 `--series` when inspection shows the desired image elsewhere. Both OME inputs accept `--z-index` and `--t-index`. Zarr additionally accepts
-`--group`. Explicit `--all-planes`, `--z-range` and `--t-range` scopes select
-regular-stack conversion/mutation; there is no implicit full-stack conversion. The [Zarr reading contract](ome_zarr.md#reading-contract)
+`--group`. `convert` preserves the complete selected series, including Z/T,
+when no dimensional selection is supplied. `--z-range` and `--t-range` select
+half-open subsets; omitted dimensions retain their full extent. Selecting both
+indices explicitly produces an ordinary 2D image. The [Zarr reading contract](ome_zarr.md#reading-contract)
 describes additional-geometry and intrinsic-only restrictions.
 
 #### Channel renaming
@@ -504,7 +506,7 @@ Common conversion options:
 --output-format FORMAT     ome_tiff (default) or ome_zarr
 --series N                 Declared source image/series; default 0
 --group PATH               Zarr image group within the store
---z-index N, --t-index N    Explicit OME-TIFF/Zarr plane selectors when required
+--z-index N, --t-index N    Restrict an OME axis; unselected axes stay complete
 --intrinsic-only           Explicitly discard additional Zarr spatial context
 --compression NAME         TIFF: JPEG for RGB, LZW otherwise; Zarr: ZSTD
 --jpeg-quality N           JPEG quality from 1 through 100; default 90

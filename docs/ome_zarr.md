@@ -279,7 +279,10 @@ omeify inspect normalized.ome.zarr --detail 3 --json -o inspection.json
 ```
 
 `convert` and `mutate` have the same keyword `output_format="ome_zarr"` in Python.
-The same source selectors apply to all image workflows. Native `crop()` retains
+For an OME source, conversion preserves the complete selected Z/T series by
+default. A supplied `--z-index`/`--t-index` or half-open range restricts only
+that axis; the other is retained. The strict one-plane reader and crop APIs
+still require explicit selection of non-singleton Z/T axes. Native `crop()` retains
 its existing GeoJSON ROI naming/grouping and per-output transaction rules, but now
 masks pixels outside GeoJSON polygon exteriors (including holes and multipolygon
 gaps) by default. `--mask-background keep` restores the legacy full bounding box;

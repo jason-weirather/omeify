@@ -92,7 +92,7 @@ artifacts = ["omeify/schemas/*.schema.json"]
 [tool.hatch.build.targets.sdist]
 include = [
   "/omeify", "/tests", "/examples", "/docs", "/constraints",
-  "/pyproject.toml", "/README.md", "/LICENSE", "/Dockerfile", "/environment.yml",
+  "/pyproject.toml", "/README.md", "/CHARTER.md", "/LICENSE", "/Dockerfile", "/environment.yml",
 ]
 
 [tool.hatch.build.targets.wheel]
