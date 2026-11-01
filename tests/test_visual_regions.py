@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sys
 from contextlib import contextmanager
+from importlib.metadata import version as installed_version
 from inspect import signature
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ import numpy as np
 import pytest
 import tifffile
 from click.testing import CliRunner
+from packaging.version import Version
 
 from omeify import ImageLevel, ImageMetadata, ImageSource, MultichannelImage, PixelSize
 from omeify.cli import main
@@ -318,7 +320,9 @@ def test_real_vision_attachment_adapter(tmp_path, monkeypatch):
     from threading import Thread
 
     sheetbend = pytest.importorskip("sheetbend", reason="Optional Sheetbend is not installed")
-    pytest.importorskip("llm", minversion="0.35")
+    pytest.importorskip("llm")
+    if Version(installed_version("llm")) < Version("0.35"):
+        pytest.skip("Optional LLM integration requires llm>=0.35")
     pytest.importorskip("openai", minversion="3")
     import imagecodecs as codecs
     from omeify import RGBImage

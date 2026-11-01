@@ -434,7 +434,7 @@ def test_cli_stdin_utf8_does_not_require_deprecated_click_stream(input_file, tmp
     def deprecated_stream(*args, **kwargs):
         pytest.fail("CLI must not depend on deprecated click.get_text_stream")
 
-    monkeypatch.setattr(click, "get_text_stream", deprecated_stream)
+    monkeypatch.setitem(vars(click), "get_text_stream", deprecated_stream)
     path, pixels = input_file
     name = "Café µm"
     document = collection(rectangle_feature([1, 2, 10, 11], name=name))

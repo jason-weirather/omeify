@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.metadata import version as installed_version
 from threading import Thread
 
 import numpy as np
 import pytest
 import tifffile
+from packaging.version import Version
 
 from omeify import TiffInspector
 from omeify.intelligence import (
@@ -22,7 +24,9 @@ from omeify.intelligence import (
 )
 
 sheetbend = pytest.importorskip("sheetbend", reason="Optional Sheetbend is not installed")
-pytest.importorskip("llm", minversion="0.35", reason="Optional LLM integration is not installed")
+pytest.importorskip("llm", reason="Optional LLM integration is not installed")
+if Version(installed_version("llm")) < Version("0.35"):
+    pytest.skip("Optional LLM integration requires llm>=0.35", allow_module_level=True)
 pytest.importorskip("openai", minversion="3", reason="Optional SDK integration is not installed")
 
 
