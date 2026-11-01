@@ -1,12 +1,47 @@
 # Omeify Charter
 
 Omeify is a dependable microscopy image I/O layer: it makes supported sources
-predictable to read and constructs calibrated, metadata-minimized OME-TIFF and
+predictable to read and constructs physically interpretable, metadata-minimized OME-TIFF and
 OME-Zarr products that other software can use.
 
 This charter records the principles guiding our design. It can evolve through
 intentional discussion and review; it does not claim that every format or workflow
 is supported. Implementation gaps are not reasons to quietly change its meaning.
+
+## Completeness and portability
+
+For supported conversions, Omeify aims to guarantee two kinds of completeness:
+
+- **Format completeness:** the output is a self-contained, standard-compatible image
+  whose encoded pixels, dimensions, channel/plane mapping, and storage organization
+  can be decoded correctly by conforming readers. Validation and sampled readback
+  check construction; they do not constitute an exhaustive pixel audit or certify
+  every downstream application.
+- **Image-interpretation completeness:** the output contains the smallest curated,
+  validated description sufficient to interpret its numeric pixels, channel and
+  RGB meaning, known spatial/temporal sampling, and coordinate relationships.
+  Unknown physical quantities remain unknown, rather than being invented to make
+  a header appear complete. Viewers must not be led to misinterpret axes, channels,
+  color profiles, or physical distances. Identical default pseudocolors and
+  auto-contrast across independent viewers are not guaranteed.
+
+**Study/reproducibility completeness is not an image-output requirement.** Specimen,
+reagent, instrument, acquisition-protocol, processing-history, and broader study
+records may be necessary for reproducible science, but belong in deliberate linked
+records, not wholesale copies of source metadata in every converted image.
+Minimization means *sufficient* metadata, not the fewest fields regardless of meaning.
+
+MITI guides the curated header contract, but format validity, Omeify's image-
+interpretation contract, and strict compliance with the published MITI checklist
+are separate assessments. A published conditional requirement cannot be declared
+satisfied by an undocumented exception. When a Z axis has multiple ordered sections
+and no reliable physical spacing, preserve its indices without inventing a step or
+claiming that missing measurement proves intentional ordinal acquisition. Such an
+index-only image can be OME-valid and interpretation-complete for index-based use,
+while its omission of `PhysicalSizeZ` remains an explicit exception to MITI's
+published multi-Z header requirement. A known or explicitly supplied physical
+Z spacing is written with its unit and validated; unknown is never silently
+replaced with an arbitrary numeric value.
 
 ## Core rules
 
@@ -43,6 +78,8 @@ is supported. Implementation gaps are not reasons to quietly change its meaning.
 5. **Never invent geometry.** Distinguish indices, sampling, origins, and measured
    acquisition positions. Honor applicable standard-defined defaults without
    inventing missing values; unknown calibration or phase remains unknown.
+   When only an ordered Z index is available, preserve that index without
+   pretending the physical Z spacing or acquisition intent is known.
    Rounded raster dimensions do not establish a sampling transform. Dataset
    `native_level` indexes stored resolutions; Image `level` indexes that 2D
    observation's compatible pyramid. A Z-reduced coarse slice must never silently
@@ -53,7 +90,8 @@ is supported. Implementation gaps are not reasons to quietly change its meaning.
    vocabulary instead of copying arbitrary source headers, annotations, paths, or
    ICC payloads. Retain necessary interpretation and explicitly supported
    provenance; do not silently discard geometry an export cannot represent.
-   Metadata minimization is not deidentification. Retained names, diagnostics,
+   Assess format, image-interpretation, and strict external-standard conformance
+   independently. Metadata minimization is not deidentification. Retained names, diagnostics,
    provenance, and image pixels still require review before sharing.
 
 7. **Make resource ownership explicit.** Owners release their resources; borrowed
