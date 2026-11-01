@@ -62,6 +62,10 @@ class ReadCache:
     def __init__(self, max_bytes: int = 64 * 1024 * 1024):
         self.max_bytes = integer(max_bytes, "cache_bytes")
         self._entries: OrderedDict[Hashable, _Entry] = OrderedDict()
+        # OrderedDict keeps the LRU for all entries. An independent index of
+        # speculative keys makes "evict speculation before demand" O(1), even
+        # after tens of thousands of demanded TIFF strips fill the cache.
+        self._speculative: OrderedDict[Hashable, None] = OrderedDict()
         self._flights: dict[Hashable, _Flight] = {}
         self._lock = RLock()
         self._epoch = 0
@@ -79,6 +83,7 @@ class ReadCache:
         entry = self._entries.pop(key)
         self._bytes -= entry.size
         if entry.speculative:
+            del self._speculative[key]
             self._speculative_bytes -= entry.size
             self._counts["prefetched_wasted_bytes"] += entry.size
         self._counts["evictions"] += 1
@@ -92,16 +97,19 @@ class ReadCache:
             return
         while (self._bytes + size > self.max_bytes or
                (speculative and self._speculative_bytes + size > speculative_limit)):
-            victim = next((k for k, v in self._entries.items() if v.speculative), None)
-            if victim is None:
-                if speculative:
-                    return
+            if self._speculative:
+                victim = next(iter(self._speculative))
+            elif speculative:
+                # Never evict a demanded block to admit a guess.
+                return
+            else:
                 victim = next(iter(self._entries))
             self._drop(victim)
         _freeze(value)
         self._entries[key] = _Entry(value, size, speculative)
         self._bytes += size
         if speculative:
+            self._speculative[key] = None
             self._speculative_bytes += size
         self._counts["high_water_bytes"] = max(self._counts["high_water_bytes"], self._bytes)
 
@@ -112,10 +120,16 @@ class ReadCache:
             if entry is not None:
                 self._counts["hits"] += 1
                 self._entries.move_to_end(key)
-                if entry.speculative and not speculative:
-                    entry.speculative = False
-                    self._speculative_bytes -= entry.size
-                    self._counts["prefetched_hits"] += 1
+                if entry.speculative:
+                    if speculative:
+                        self._speculative.move_to_end(key)
+                    else:
+                        # The demanded hit takes this entry out of the
+                        # speculative eviction pool, preserving the LRU order.
+                        entry.speculative = False
+                        del self._speculative[key]
+                        self._speculative_bytes -= entry.size
+                        self._counts["prefetched_hits"] += 1
                 return entry.value
             flight = self._flights.get(key)
             if flight is not None:
@@ -153,6 +167,7 @@ class ReadCache:
             self._epoch += 1
             self._counts["prefetched_wasted_bytes"] += self._speculative_bytes
             self._entries.clear()
+            self._speculative.clear()
             self._bytes = self._speculative_bytes = 0
             # Existing waiters retain their Future. New requests after a clear must
             # not join a load from a previous cache generation.

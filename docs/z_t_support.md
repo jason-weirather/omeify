@@ -250,6 +250,13 @@ waits for current source access before eviction. Concurrent identical block
 requests share a cache load. Source accesses are conservatively serialized where
 needed for backend safety. Ordinary reads do not start speculative workers.
 
+For TIFF time series stored as thousands of narrow strips per plane, the 64 MiB
+cache can contain tens of thousands of small entries. Eviction tracks speculative
+blocks separately and selects its victim in constant time with respect to cache
+entry count. Filling the cache therefore does not introduce a linear scan for
+every new strip. This does not keep a full time series resident or prevent an
+evicted frame from being decoded again when playback loops.
+
 ## Optional read-ahead
 
 ```python
