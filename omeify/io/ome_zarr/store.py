@@ -47,8 +47,9 @@ def read_store(path: str | Path, *, storage_options: dict | None = None,
         backend = zarr.storage.LocalStore(path, read_only=True)
     else:
         if path.startswith("s3://"):
+            # S3 access is an explicit optional extra; credentials are never bundled.
             try:
-                import s3fs  # noqa: F401; explicit optional extra, not bundled AWS credentials
+                import s3fs  # noqa: F401
             except ImportError as error:
                 raise RuntimeError('S3 OME-Zarr requires: python -m pip install "omeify[s3]"') from error
         backend = zarr.storage.FsspecStore.from_url(

@@ -176,11 +176,19 @@ def test_optional_channel_fallback_uses_physical_rgb_sample_group(tmp_path):
 
 def test_selected_zarr_plane_crop_records_group_and_indices(tmp_path):
     # Mandatory Zarr integration, not a mocked backend or an optional skip.
-    from omeify import ImageDataset, OMEZarrWriter
+    from omeify import AxisInfo, ImageDataset, OMEZarrWriter
 
     path = tmp_path / "source.zarr"
     values = np.arange(2 * 1 * 3 * 17 * 19, dtype=np.uint16).reshape(2, 1, 3, 17, 19)
-    with ImageDataset.from_array(values, axes="TCZYX", pixel_size=PixelSize(.5, .5, "µm")) as ds:
+    # The writer requires actual Z calibration for a volume with SizeZ > 1.
+    # Both axes are known here; this test is about selected-plane provenance.
+    with ImageDataset.from_array(
+        values, axes="TCZYX", pixel_size=PixelSize(.5, .5, "µm"),
+        axis_info=(
+            AxisInfo("Z", 3, "space", "µm", 2.0, 0.0),
+            AxisInfo("T", 2, "time", "s", 5.0, 0.0),
+        ),
+    ) as ds:
         OMEZarrWriter(path, tile_size=16, pyramid_levels=0).write_dataset(ds)
     cropped = crop(path, tmp_path / "cropped.zarr", input_type="ome_zarr",
                    output_format="ome_zarr", group="", z=2, t=1,
