@@ -1,6 +1,6 @@
 # Development and release checks
 
-Omeify 0.22 has one **Python 3.11+** image-I/O installation: TIFF and Zarr, including
+Omeify 0.23 has one **Python 3.11+** image-I/O installation: TIFF and Zarr, including
 HTTP(S) reads. A missing codec, Zarr dependency, or OME XSD is a broken development
 installation, not a reason to skip its regression tests. These commands run
 locally and do not depend on GitHub Actions or another CI service.
@@ -88,7 +88,7 @@ POSIX shell example, after `python -m build`:
 CHECKOUT="$(pwd)"
 TEMP_ENV="$(mktemp -d)"
 python -m venv "$TEMP_ENV/venv"
-"$TEMP_ENV/venv/bin/python" -m pip install "$CHECKOUT/dist/omeify-0.22.1-py3-none-any.whl"
+"$TEMP_ENV/venv/bin/python" -m pip install "$CHECKOUT/dist/omeify-0.23.0-py3-none-any.whl"
 "$TEMP_ENV/venv/bin/python" -m pip check
 (cd "$TEMP_ENV" && "$TEMP_ENV/venv/bin/python" -I "$CHECKOUT/tests/installed_smoke.py")
 ```
@@ -117,9 +117,9 @@ These fixtures prove tested boundaries, not vendor-file certification, privacy
 classification, cloud deployment compatibility, or a whole-store audit.
 
 
-## PyPI publication checkpoint for 0.22.1
+## PyPI publication checkpoint for 0.23.0
 
-`pyproject.toml` specifies **omeify 0.22.1**. Complete the Python 3.11 and newer
+`pyproject.toml` specifies **omeify 0.23.0**. Complete the Python 3.11 and newer
 interoperability test lanes and the installed-wheel smoke check before release.
 Publishing is an explicit maintainer action requiring a configured PyPI account
 or trusted-publishing identity; the source checkout does not publish by itself.
@@ -127,13 +127,13 @@ or trusted-publishing identity; the source checkout does not publish by itself.
 ```bash
 python -m pip install 'build>=1.2' 'twine>=6'
 python -m build
-python -m twine check dist/omeify-0.22.1*
+python -m twine check dist/omeify-0.23.0*
 # Authenticate via trusted publishing or an approved PyPI token mechanism.
-python -m twine upload dist/omeify-0.22.1*
+python -m twine upload dist/omeify-0.23.0*
 python -m pip index versions omeify
 ```
 
-Check that `omeify-0.22.1-py3-none-any.whl` installs outside this checkout and
+Check that `omeify-0.23.0-py3-none-any.whl` installs outside this checkout and
 that `omeify version --json`, TIFF read/write and OME-Zarr HTTP/local read/write
 work from that installed distribution. Do not commit `.pypirc`, tokens, or AWS
 credentials. Native S3 uses the optional `omeify[s3]` extra, not an import side
@@ -141,6 +141,20 @@ effect on ordinary TIFF/HTTP users. The repository must also be made public
 separately if you intend to link to it from the package page.
 
 ## Z/T branch validation
+
+Run the six release-compatibility regressions alongside the Z/T tests:
+
+```bash
+python -m pytest -q tests/test_release_compat_023.py
+python -m pytest -q tests/test_dataset*.py tests/test_volume_pyramid.py
+```
+
+The compatibility fixtures include valid external 2D OME-TIFF without optional
+Channel nodes, singleton Z/T metadata, OME/TIFF XY precedence, invalid mutation
+preserving an existing destination, selected-plane report provenance, and
+compact TIFF edge-tile caching. They require the real OME XSD and standard
+encoders where writing is involved; do not replace them with mocks to qualify a
+release.
 
 Run `python -m pytest -q tests/test_dataset*.py tests/test_volume_pyramid.py`,
 then the full suite in the environments above. `test_dataset_zarr.py` and

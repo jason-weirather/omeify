@@ -215,7 +215,11 @@ class TiffPlaneReader:
                 )
             if array.dtype != self.dtype:
                 array = array.astype(self.dtype, copy=False)
-            array = np.ascontiguousarray(array[:valid_h, :valid_w, ...])
+            trimmed = array[:valid_h, :valid_w, ...]
+            # ascontiguousarray can return a view that pins the *entire* decoded
+            # padded tile. Cache only compact owned bytes on partial edge tiles.
+            array = (np.array(trimmed, copy=True, order="C")
+                     if trimmed.shape != array.shape else np.ascontiguousarray(trimmed))
 
         value = (array, origin_y, origin_x)
         return value

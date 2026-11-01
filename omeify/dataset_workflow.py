@@ -63,8 +63,16 @@ def process_dataset(input_path, output_path, *, operation, input_type, output_fo
     if operation == "mutate":
         if (dtype is None) == (float32_mantissa_bits is None):
             raise ValueError("mutate requires exactly one of dtype or float32_mantissa_bits")
-        if float32_mantissa_bits is not None and range_mode is not None:
-            raise ValueError("range_mode requires dtype mutation")
+        if float32_mantissa_bits is not None:
+            from .io._writer.configuration import normalize_float32_mantissa_bits
+            if range_mode is not None:
+                raise ValueError("range_mode requires dtype mutation")
+            float32_mantissa_bits = normalize_float32_mantissa_bits(float32_mantissa_bits)
+            if float32_mantissa_bits == 23:
+                raise ValueError(
+                    "float32_mantissa_bits=23 retains full float32 precision; use convert "
+                    "when no pixel-value mutation is intended"
+                )
     source,destination=validate_image_paths(input_path,output_path,input_type=input_type,
                                            output_format=output_format,overwrite=overwrite)
     renames,mode=validate_channel_rename_mapping(rename_channels,rename_channels_by)

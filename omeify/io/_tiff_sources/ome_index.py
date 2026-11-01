@@ -33,7 +33,7 @@ class PlaneRun:
 
 
 class PlaneMap:
-    def __init__(self, item, *, page_count):
+    def __init__(self, item, *, page_count, samples_per_page):
         self.index = item["index"]
         self.pixels = pixels = item["pixels"]
         if pixels is None or item["unresolved"]:
@@ -45,10 +45,22 @@ class PlaneMap:
         channels = _children(pixels, "Channel")
         samples = tuple(_number(c, "SamplesPerPixel", 1) for c in channels)
         size_c = _number(pixels, "SizeC")
+        if not channels:
+            # Channel declarations are optional in OME 2016-06. The physical
+            # TIFF samples per page distinguish scalar planes from RGB, without
+            # guessing RGB from the mere presence of three scalar channels.
+            if samples_per_page == 1:
+                # Check the physical capacity before expanding optional channel
+                # declarations so a corrupt SizeC cannot allocate a huge tuple.
+                if not 0 < size_c <= page_count:
+                    raise ValueError("OME SizeC exceeds physical TIFF page capacity")
+                samples = (1,) * size_c
+            elif samples_per_page == 3 and size_c == 3:
+                samples = (3,)
         if not samples or any(n not in (1, 3) for n in samples) or sum(samples) != size_c:
             raise ValueError("OME channel sample counts disagree with SizeC")
         self.samples = samples
-        self.sizes = {"C": len(channels), "Z": _number(pixels, "SizeZ"),
+        self.sizes = {"C": len(samples), "Z": _number(pixels, "SizeZ"),
                       "T": _number(pixels, "SizeT")}
         if any(n < 1 for n in self.sizes.values()):
             raise ValueError("OME dimensions must be positive")
@@ -122,7 +134,8 @@ class OMEPlaneIndex:
             raise ValueError("Cannot associate TIFF series: ambiguous_tiff_data or unmapped_ifd")
         item = candidates[0]
         try:
-            mapping = PlaneMap(item, page_count=len(self.tiff.pages))
+            mapping = PlaneMap(item, page_count=len(self.tiff.pages),
+                               samples_per_page=int(series.pages[0].aspage().samplesperpixel))
             if len(series.pages) != mapping.count:
                 raise ValueError("logical plane count disagrees with TIFF series")
             # Compare lightweight IFD identities. Do not decode pixels or collect

@@ -349,6 +349,8 @@ def mutate(
             source_pixel_size,
             always_include_source_miti_header=True,
         )
+        if input_type in {"ome_tiff", "ome_zarr"}:
+            selected_z, selected_t = reader.plane_selection.z, reader.plane_selection.t
 
     output_size = write_report["output_file"]["size_bytes"]
     output_report = dict(write_report["output_file"])
@@ -378,8 +380,10 @@ def mutate(
     else:
         options["float32_mantissa_bits"] = normalized_mantissa_bits
 
+    if input_type in {"ome_tiff", "ome_zarr"}:
+        options.update(z=selected_z, t=selected_t)
     if input_type == "ome_zarr":
-        options.update(group=group, z=z, t=t, image_type=image_type, intrinsic_only=intrinsic_only)
+        options.update(group=group, image_type=image_type, intrinsic_only=intrinsic_only)
     stop_epoch = time.time()
     report: dict[str, object] = {
         "operation": operation,

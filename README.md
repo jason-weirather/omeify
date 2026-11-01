@@ -31,7 +31,7 @@ OME-TIFF without installing Omeify.
 [Metadata and MITI](#metadata-minimization-and-miti-alignment) ·
 [Python library](#python-library) · [Reference][reference]
 
-## Z/T development branch
+## Z/T release candidate
 
 `Image` remains a two-dimensional observation. `open_dataset()` adds persistent
 OME-TIFF/OME-Zarr source sessions, first-class Z/T axis metadata, borrowed plane
@@ -42,8 +42,8 @@ anisotropy-aware pyramids. `convert` and `mutate` accept explicit whole/ranged
 stack scope. Multi-file TIFF is not included.
 
 See [Z/T source sessions, examples, and limitations](docs/z_t_support.md).
-This is an unreleased implementation: complete dependency-backed integration
-tests and real-data checks are required before release. Existing 2D examples,
+This candidate adds dependency-backed Z/T tests and 2D compatibility regressions.
+Complete the release checklist and representative real-data checks before publishing. Existing 2D examples,
 defaults and methods below retain their meaning. The new stack paths do not
 claim full parity for every existing CLI workflow or irregular acquisition data.
 
@@ -162,7 +162,8 @@ as `convert`. For a polygon, `--mask-background auto` (the default) writes white
 outside RGB/H&E and black outside scalar signals. Use `--mask-background black|white|keep`
 explicitly when needed; `--padding N` adds a colored margin, and `--pad-outside`
 allows the crop to extend beyond the scanned image (otherwise use `--clip` to trim).
-The output report and embedded provenance record the ordered source
+The output report and embedded provenance record source series, the selected
+Z/T plane, the requested Zarr group (where applicable), and the ordered source
 to output channel mapping. RGB is one indivisible logical channel, not three
 separate color planes. See the [cropping guide](docs/regions.md).
 

@@ -241,13 +241,28 @@ class OMESource(TiffSource):
             value = pixels.get("PhysicalSizeZ" if name == "Z" else "TimeIncrement")
             unit = pixels.get("PhysicalSizeZUnit", "µm") if name == "Z" else pixels.get("TimeIncrementUnit", "s")
             scale = None if value is None else float(value)
-            if name == "Z" and scale is not None:
-                scale = PixelSize(scale, scale, unit).converted_to("µm").x
-                unit = "µm"
-            elif name == "T" and scale is not None:
-                from ..dataset_metadata import time_unit_seconds
-                scale *= time_unit_seconds(unit)
-                unit = "s"
+            if scale is not None and (not math.isfinite(scale) or scale < 0):
+                raise ValueError("OME Z/T sampling interval must be nonnegative and finite")
+            # A singleton Z/T axis needs no sampling interval to select its
+            # only plane. Accept optional nonphysical/zero acquisition tags on
+            # 2D inputs without pretending they are calibrated intervals.
+            if scale == 0 and count == 1:
+                LOGGER.debug("Ignoring zero %s sampling interval on singleton OME axis", name)
+                scale, unit = None, None
+            elif scale is not None:
+                try:
+                    if name == "Z":
+                        scale = PixelSize(scale, scale, unit).converted_to("µm").x
+                        unit = "µm"
+                    else:
+                        from ..dataset_metadata import time_unit_seconds
+                        scale *= time_unit_seconds(unit)
+                        unit = "s"
+                except (ValueError, NotImplementedError):
+                    if count != 1:
+                        raise
+                    LOGGER.debug("Ignoring nonphysical %s unit %r on singleton OME axis", name, unit)
+                    scale, unit = None, None
             origin = (getattr(self, "_stack_geometry", None) or {}).get(
                 "z_origin_um" if name == "Z" else "time_origin_s")
             if origin is not None and scale is None:
@@ -318,11 +333,17 @@ class OMESource(TiffSource):
                 profile = None if page.iccprofile is None else bytes(page.iccprofile)
                 if self.metadata.image_type == "rgb" and profile != self.metadata.icc_profile:
                     raise ValueError("Selected RGB plane ICC profile differs from the source image")
-            size = consistent_tiff_resolution_pixel_size(pages)
-            if size is not None and expected.pixel_size is not None:
-                a, b = size.converted_to("µm"), expected.pixel_size.converted_to("µm")
-                if not all(math.isclose(x, y, rel_tol=1e-5) for x, y in ((a.x,b.x),(a.y,b.y))):
-                    raise ValueError("Selected OME plane calibration differs from source")
+            # A complete OME PhysicalSizeX/Y pair is authoritative; TIFF
+            # resolution tags are only a fallback when both are absent. Do not
+            # reject a plane for disagreeing *non-authoritative* TIFF tags.
+            pixels = self._plane_map.pixels
+            if pixels.get("PhysicalSizeX") is None and pixels.get("PhysicalSizeY") is None:
+                size = consistent_tiff_resolution_pixel_size(pages)
+                if size is not None and expected.pixel_size is not None:
+                    a, b = size.converted_to("µm"), expected.pixel_size.converted_to("µm")
+                    if not all(math.isclose(x, y, rel_tol=1e-5)
+                               for x, y in ((a.x, b.x), (a.y, b.y))):
+                        raise ValueError("Selected OME plane calibration differs from source")
         if level == 0:
             return self.metadata
         base = replace(descriptor, index=0, downsample_yx=(1., 1.), offset_yx=(0., 0.))
