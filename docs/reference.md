@@ -776,7 +776,19 @@ omeify inspect image.tif
 omeify inspect image.tif --detail 2
 omeify inspect image.tif --detail 3 --max-text-length 500
 omeify inspect image.tif --json --output inspection.json
+omeify inspect image.ome.tif --show-miti
 ```
+
+`--show-miti` appends a table of the actual curated OME header fields to the
+ordinary text tree, which already shows the MITI header profile PASS/FAIL.
+It reports absent optional fields explicitly and shows at most 32 individual
+per-plane `DeltaT` values before indicating how many more exist. The normal
+`--detail 3` dump can show all original Plane elements. This mode performs no
+raster reads, does not expand the JSON report schema, and requires OME-TIFF
+text inspection: it rejects Zarr, `--json`, `--visual` and `--geojson`.
+A foreign OME header may contain additional acquisition metadata; the table
+shows the selected allowlist, not a claim that everything was preserved by
+conversion. Inspecting an unconverted source is not itself minimization.
 
 Detail levels are cumulative:
 

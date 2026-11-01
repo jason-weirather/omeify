@@ -142,6 +142,11 @@ separately if you intend to link to it from the package page.
 
 ## Z/T branch validation
 
+The curated timing and MITI table regressions live in
+`tests/test_curated_delta_t_and_miti_table.py`. Run the ordinary dependency-
+complete suite so its TIFF readback, Zarr roundtrip and OME-XSD paths execute;
+metadata-only tests alone cannot establish those guarantees.
+
 Run the six release-compatibility regressions alongside the Z/T tests:
 
 ```bash

@@ -1142,7 +1142,7 @@ class TiffInspector:
     def to_json(self, *, indent: int = 2) -> str:
         return json.dumps(self.report, indent=indent, ensure_ascii=False)
 
-    def render_text(self) -> str:
+    def render_text(self, *, show_miti: bool = False) -> str:
         report = self.report
         file_info = report["file"]
         root = _TreeNode(file_info["name"])
@@ -1311,9 +1311,25 @@ class TiffInspector:
             root.children.append(warning_node)
         if "intelligence" in report:
             if "answer" in report["intelligence"]:
-                return _render_tree(root) + "\n\n" + _question_block(report["intelligence"])
+                rendered = _render_tree(root) + "\n\n" + _question_block(report["intelligence"])
+                return rendered + "\n\n" + self.render_miti_table() if show_miti else rendered
             root.children.append(_intelligence_tree(report["intelligence"], self.max_text_length))
-        return _render_tree(root)
+        rendered = _render_tree(root)
+        return rendered + "\n\n" + self.render_miti_table() if show_miti else rendered
+
+    def render_miti_table(self) -> str:
+        """Describe actual allowlisted OME header fields; no image pixels are read."""
+        from omeify.utils.miti_header_validator import render_miti_header_table
+        if self.report["ome"] is None:
+            raise ValueError("--show-miti requires a TIFF with a readable OME header")
+        if self._tiff is not None:
+            xml = self._tiff.ome_metadata
+        else:
+            with tifffile.TiffFile(self.file_path, _multifile=False) as source:
+                xml = source.ome_metadata
+        if not xml:
+            raise ValueError("--show-miti requires a readable OME header")
+        return render_miti_header_table(xml.decode("utf-8") if isinstance(xml, bytes) else str(xml))
 
     def __str__(self) -> str:
         return self.render_text()

@@ -360,14 +360,24 @@ upstream codec scratch remains outside this estimate. The Zarr stack encoder is
 serial at the outer block loop; Zarr owns internal I/O. Its ordinary writer
 `max_workers` setting does not create an additional stack thread pool.
 
-Whole-stack export **currently refuses any OME Plane acquisition measurements**
-(DeltaT, ExposureTime or PositionXYZ) rather than dropping them or inventing a
-regular grid. This is conservative, including regularly spaced measurements.
-Reading those planes and explicit 2D export remain possible. Supporting retained
-per-plane measurement output is unfinished work, not claimed here. The output
-contracts are the required OME XSD and `miti_ome_tiff_header.schema.json` for
-TIFF, `ome_zarr_dataset_profile.schema.json` for NGFF attributes, and
-`stack_geometry.schema.json` for intentionally retained Z/T coordinate origins;
+Whole-stack output curates one optional per-plane acquisition measurement:
+**`DeltaT`**, normalized to seconds and associated with its exact logical
+T/C/Z observation. It may describe irregular sampling or channel-dependent
+acquisition delays. A known `TimeIncrement` is sufficient when no `DeltaT` is
+recorded; missing timing does not invent an acquisition clock or prevent ordinal
+T browsing. For TIFF, generated OME `Plane` nodes carry `DeltaT` and explicit
+units; a post-write check confirms their coordinates and values. For NGFF 0.5,
+which does not offer a per-plane timestamp axis, a small, validated
+`omeify.plane_delta_t/1` attribute retains the same sparse T/C/Z/seconds records
+without falsely claiming an irregular uniform axis transform. An Omeify reader
+recovers that extension; another NGFF viewer may ignore it. No source
+`ExposureTime` or `PositionXYZ` is copied, and their mere presence cannot block
+conversion. Their acquisition context belongs in external curated records.
+
+The output contracts are the required OME XSD and
+`miti_ome_tiff_header.schema.json` for TIFF,
+`ome_zarr_dataset_profile.schema.json` for NGFF attributes, and
+`stack_geometry.schema.json` for intrinsic Z/T coordinate origins;
 `dataset_write_report.schema.json` describes both outputs.
 
 ## CLI scopes and mutation

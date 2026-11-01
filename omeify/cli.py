@@ -1130,6 +1130,8 @@ def extract_rgb_command(
     is_flag=True,
     help="Emit the schema-backed report as JSON instead of a text tree.",
 )
+@click.option("--show-miti", is_flag=True,
+              help="After TIFF inspection, show the actual curated OME header fields and values.")
 @click.option(
     "--max-text-length",
     type=click.IntRange(min=0),
@@ -1200,6 +1202,7 @@ def inspect_command(
     input_path: Path,
     detail: int,
     as_json: bool,
+    show_miti: bool,
     max_text_length: int,
     output: Path | None,
     intelligence: bool,
@@ -1232,6 +1235,8 @@ def inspect_command(
     if visual and geojson:
         raise click.UsageError("Choose at most one of --visual or --geojson")
     visual_mode = visual or geojson
+    if show_miti and (as_json or visual_mode):
+        raise click.UsageError("--show-miti is a text-table option; omit --json/--visual/--geojson")
     if visual_mode:
         mode = "--geojson" if geojson else "--visual"
         if not intelligence or question is None:
@@ -1326,6 +1331,8 @@ def inspect_command(
     try:
         zarr_input = input_type == "ome_zarr" or is_remote(input_path) or Path(input_path).is_dir()
         if zarr_input:
+            if show_miti:
+                raise click.UsageError("--show-miti describes the OME-TIFF header, not NGFF JSON")
             if intelligence:
                 raise click.UsageError("Metadata intelligence is TIFF-only; ordinary Zarr inspection and explicit --visual/--geojson are supported")
             inspector = ZarrInspector(
@@ -1354,7 +1361,7 @@ def inspect_command(
                 max_metadata_chars=intelligence_max_chars,
                 max_output_tokens=intelligence_max_output_tokens,
             )
-        rendered = inspector.to_json() if as_json else inspector.render_text()
+        rendered = inspector.to_json() if as_json else inspector.render_text(show_miti=show_miti)
     except Exception as exc:
         raise click.ClickException(escape_terminal(str(exc))) from exc
     _write_or_echo(rendered, output, input_path=input_path)

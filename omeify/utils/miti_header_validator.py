@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
@@ -8,6 +9,8 @@ from typing import Any, Iterable
 
 from jsonschema import Draft202012Validator
 from lxml import etree
+
+from omeify.terminal import escape_terminal
 
 _OME_NAMESPACE = "http://www.openmicroscopy.org/Schemas/OME/2016-06"
 _PYRAMID_NAMESPACE = "openmicroscopy.org/PyramidResolution"
@@ -253,6 +256,7 @@ def _normalized_record(
 
     channels: list[dict[str, Any]] = []
     tiff_data: list[dict[str, Any]] = []
+    plane_delta_t: list[dict[str, Any]] = []
     for child_index, element in enumerate(pixels):
         local = _local_name(element.tag)
         if local == "Channel":
@@ -285,8 +289,33 @@ def _normalized_record(
             if plane_count is not None:
                 item["plane_count"] = plane_count
             tiff_data.append(item)
+        elif local == "Plane" and element.get("DeltaT") is not None:
+            # Per-plane acquisition times are the only curated Plane value.
+            # Other acquisition attributes are informational extras, not prerequisites.
+            row: dict[str, Any] = {}
+            for key, tag in (("t", "TheT"), ("c", "TheC"), ("z", "TheZ")):
+                parsed = _parse_int(element.get(tag), f"Plane {len(plane_delta_t)} {tag}",
+                                    local_errors)
+                if parsed is not None:
+                    row[key] = parsed
+            value = _parse_float(element.get("DeltaT"),
+                                 f"Plane {len(plane_delta_t)} DeltaT", local_errors)
+            if value is not None:
+                from omeify.io.dataset_metadata import time_unit_seconds
+                unit = element.get("DeltaTUnit", "s")
+                try:
+                    value *= time_unit_seconds(unit)
+                    if not math.isfinite(value):
+                        raise ValueError("non-finite or overflowing DeltaT")
+                except (ValueError, NotImplementedError) as exc:
+                    local_errors.append(f"Plane {len(plane_delta_t)} DeltaT unit invalid: {exc}")
+                else:
+                    row["seconds"] = value
+            plane_delta_t.append(row)
     record["channels"] = channels
     record["tiff_data"] = tiff_data
+    if plane_delta_t:
+        record["plane_delta_t"] = plane_delta_t
     errors.extend(f"Image[{image_index}]: {item}" for item in local_errors)
     return record, interleaved
 
@@ -371,6 +400,19 @@ def _validate_record(
             f"fit within Type={pixel_type!r} storage width ({expected_bits})"
         )
 
+    coordinates = set()
+    for row in record.get("plane_delta_t", ()):
+        coords = tuple(row.get(axis) for axis in ("t", "c", "z"))
+        if (not all(isinstance(value, int) and value >= 0 for value in coords)
+                or not all(isinstance(limit, int) for limit in (size_t, size_z))):
+            continue  # The schema identifies the malformed field.
+        t, c, z = coords
+        if t >= size_t or c >= len(channels) or z >= size_z:
+            errors.append(f"Image[{image_index}]: Plane DeltaT coordinate is out of bounds")
+        if coords in coordinates:
+            errors.append(f"Image[{image_index}]: Duplicate Plane DeltaT coordinate")
+        coordinates.add(coords)
+
     channel_ids = [channel.get("id") for channel in channels]
     if len(channel_ids) != len(set(channel_ids)):
         errors.append(f"Image[{image_index}]: Channel IDs must be unique within the Image")
@@ -427,6 +469,7 @@ _ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
     "Channel": {"ID", "Name", "SamplesPerPixel"},
     "LightPath": set(),
     "TiffData": {"IFD", "PlaneCount", "FirstC", "FirstZ", "FirstT"},
+    "Plane": {"TheT", "TheC", "TheZ", "DeltaT", "DeltaTUnit"},
     "AnnotationRef": {"ID"},
     "StructuredAnnotations": set(),
     "MapAnnotation": {"ID", "Namespace"},
@@ -436,10 +479,11 @@ _ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
 _ALLOWED_CHILDREN: dict[str, set[str]] = {
     "OME": {"Image", "StructuredAnnotations"},
     "Image": {"Pixels", "AnnotationRef"},
-    "Pixels": {"Channel", "TiffData"},
+    "Pixels": {"Channel", "TiffData", "Plane"},
     "Channel": {"LightPath"},
     "LightPath": set(),
     "TiffData": set(),
+    "Plane": set(),
     "AnnotationRef": set(),
     "StructuredAnnotations": {"MapAnnotation"},
     "MapAnnotation": {"Value"},
@@ -553,3 +597,95 @@ def validate_miti_ome_tiff_header(xml_string: str) -> MITIHeaderValidation:
         missing_fields=_deduplicate(missing_fields),
         extra_metadata=_find_extra_metadata(root),
     )
+
+
+def render_miti_header_table(xml_string: str) -> str:
+    """Render only our curated OME header vocabulary, from real source attributes.
+
+    This is a metadata-only explanation of the existing MITI-header assessment,
+    not a second validator. Missing optional values remain explicitly absent.
+    """
+    parser = etree.XMLParser(resolve_entities=False, load_dtd=False, no_network=True)
+    root = etree.fromstring(xml_string.encode("utf-8"), parser)
+    if root.getroottree().docinfo.doctype or _local_name(root.tag) != "OME":
+        raise ValueError("--show-miti requires an ordinary OME-XML header")
+    images = [node for node in root if _local_name(node.tag) == "Image"]
+    if not images:
+        raise ValueError("OME-XML contains no Image elements")
+    rows = []
+    for i, image in enumerate(images):
+        issues = []
+        record, _ = _normalized_record(root, image, i, issues)
+        if not record:
+            rows.append((f"Image[{i}]", "Pixels element missing"))
+            continue
+        # Names intentionally authored for a multi-series product are optional.
+        fields = (
+            ("OME/@Creator", record.get("creator")),
+            ("OME/@UUID", record.get("uuid")),
+            (f"Image[{i}]/@ID", record.get("image_id")),
+            (f"Image[{i}]/@Name", image.get("Name")),
+        )
+        rows.extend(fields)
+        for key, xml_name in (
+            ("pixels_id", "ID"), ("big_endian", "BigEndian"),
+            ("dimension_order", "DimensionOrder"), ("interleaved", "Interleaved"),
+            ("size_x", "SizeX"), ("size_y", "SizeY"),
+            ("size_z", "SizeZ"), ("size_c", "SizeC"), ("size_t", "SizeT"),
+            ("pixel_type", "Type"), ("significant_bits", "SignificantBits"),
+            ("physical_size_x", "PhysicalSizeX"),
+            ("physical_size_x_unit", "PhysicalSizeXUnit"),
+            ("physical_size_y", "PhysicalSizeY"),
+            ("physical_size_y_unit", "PhysicalSizeYUnit"),
+            ("physical_size_z", "PhysicalSizeZ"),
+            ("physical_size_z_unit", "PhysicalSizeZUnit"),
+            ("time_increment", "TimeIncrement"),
+            ("time_increment_unit", "TimeIncrementUnit"),
+        ):
+            rows.append((f"Image[{i}]/Pixels/@{xml_name}", record.get(key)))
+        for j, channel in enumerate(record.get("channels", [])):
+            for key, attr in (("id", "ID"), ("name", "Name"),
+                              ("samples_per_pixel", "SamplesPerPixel")):
+                rows.append((f"Image[{i}]/Channel[{j}]/@{attr}", channel.get(key)))
+        for j, entry in enumerate(record.get("tiff_data", [])):
+            rows.extend(((f"Image[{i}]/TiffData[{j}]/@IFD", entry.get("ifd")),
+                         (f"Image[{i}]/TiffData[{j}]/@PlaneCount", entry.get("plane_count"))))
+        pixels = next((node for node in image if _local_name(node.tag) == "Pixels"), None)
+        if pixels is not None:
+            for j, node in enumerate(child for child in pixels if _local_name(child.tag) == "Channel"):
+                paths = [child for child in node if _local_name(child.tag) == "LightPath"]
+                rows.append((f"Image[{i}]/Channel[{j}]/LightPath",
+                             "present (empty)" if paths else None))
+            for j, node in enumerate(child for child in pixels if _local_name(child.tag) == "TiffData"):
+                for attr in ("FirstC", "FirstZ", "FirstT"):
+                    rows.append((f"Image[{i}]/TiffData[{j}]/@{attr}", node.get(attr)))
+        planes = [] if pixels is None else [node for node in pixels if _local_name(node.tag) == "Plane"
+                                               and node.get("DeltaT") is not None]
+        rows.append((f"Image[{i}]/Plane/@DeltaT", f"{len(planes)} recorded plane(s)" if planes
+                     else None))
+        for j, plane in enumerate(planes[:32]):
+            location = "T={0} C={1} Z={2}".format(*(plane.get("The" + axis, "?") for axis in "TCZ"))
+            rows.append((f"Image[{i}]/Plane DeltaT [{location}]",
+                         f"{plane.get('DeltaT')} {plane.get('DeltaTUnit', 's')}"))
+        if len(planes) > 32:
+            rows.append((f"Image[{i}]/Plane DeltaT", f"... {len(planes)-32} further records; "
+                         "use inspect --detail 3 for the original OME Plane nodes"))
+        refs = [node.get("ID") for node in image if _local_name(node.tag) == "AnnotationRef"]
+        if refs:
+            annotations = [node for node in root.iter() if _local_name(node.tag) == "MapAnnotation"]
+            lookup = {node.get("ID"): node.get("Namespace") for node in annotations}
+            for j, ref in enumerate(refs):
+                rows.append((f"Image[{i}]/AnnotationRef[{j}]", f"{ref} ({lookup.get(ref,'unknown namespace')})"))
+
+    heading = "Curated OME header fields (MITI-guided image profile)"
+    lines = [heading, "=" * len(heading),
+             "Optional fields shown as (absent); this is not study-wide MITI certification.",
+             f"{'Field':<46}  Value", f"{'-'*46}  {'-'*25}"]
+    for field, value in rows:
+        rendered = "(absent)" if value is None or value == "" else str(value)
+        rendered = escape_terminal(rendered) if isinstance(rendered, str) else rendered
+        # Long free-text labels are metadata, not executable terminal controls.
+        if len(rendered) > 180:
+            rendered = rendered[:177] + "..."
+        lines.append(f"{field:<46}  {rendered}")
+    return "\n".join(lines)

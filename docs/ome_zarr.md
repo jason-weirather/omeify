@@ -226,6 +226,17 @@ selection. Label IDs and pixel values are never renumbered.
 
 ### Metadata minimization
 
+The stack writer retains optional per-plane `DeltaT` as an allowlisted
+`omeify.plane_delta_t/1` extension (`unit: second`, sparse `[t,c,z,seconds]`
+entries). It is needed because NGFF 0.5's ordinary time-axis scale cannot express
+irregular observation times. It does not change the nominal `t` scale or pretend
+a nonuniform acquisition was uniform. A downstream viewer ignoring the extension
+can still navigate frames but may not reproduce their actual elapsed timing.
+`TimeIncrement` remains sufficient by itself when no `DeltaT` exists. Exposure
+and stage positions are not copied. The extension is validated against the
+packaged `ome_zarr_dataset_profile.schema.json` and roundtrips through Omeify's
+reader and standard OME-TIFF Plane fields.
+
 Omeify builds new JSON instead of copying source dictionaries. Unrelated groups,
 array attributes, source filenames, dates, scanner descriptions, free-text patient
 fields, source display settings and arbitrary annotation properties are not

@@ -6,6 +6,7 @@ from contextlib import ExitStack
 from ._reader_sequence import ReaderSequence
 from .dataset import ImageDataset
 from .rgb_color import SRGB_ICC, canonical_rgb, color_management_report
+from .plane_times import plane_delta_t, verify_tiff_delta_t
 from .spec import OMEImageSpec
 
 
@@ -57,6 +58,7 @@ class DatasetPlaneSource:
                 origin_yx=metadata.levels[0].origin_yx,
                 z_spacing_um=dz, time_increment_s=dt, z_origin_um=oz, time_origin_s=ot)
             self.background_label = metadata.background_label
+        self.plane_delta_t = plane_delta_t(dataset)
 
     @property
     def backing_paths(self):
@@ -123,9 +125,8 @@ def write_tiff_dataset(writer, dataset):
     from omeify.utils.generate_ome_xml import generate_ome_xml
 
     source = DatasetPlaneSource(dataset)
-    # Per-plane measured coordinates are not silently collapsed into a regular
-    # axis. This initial stack output contract accepts regular intrinsic rasters.
-    dataset.require_regular_export()
+    # DatasetPlaneSource has already validated the curated DeltaT measurements.
+    # Exposure and instrument stage coordinates deliberately are not output metadata.
     protect_source_paths(source, writer.path)
     settings = writer._settings
     from omeify.path_safety import check_output_path
@@ -133,10 +134,15 @@ def write_tiff_dataset(writer, dataset):
     item = prepare_image(source, source.spec, name=None, downsample=writer._downsample,
         compression_name=settings.compression_name, settings=settings, lossy_policy="rgb-only")
     xml = generate_ome_xml(item.spec, item.level_shapes,
-                          display_uuid=settings.display_uuid, output_byteorder=OUTPUT_BYTEORDER)
+                          display_uuid=settings.display_uuid, output_byteorder=OUTPUT_BYTEORDER,
+                          plane_delta_t=source.plane_delta_t)
     validation = validate_ome_xml(xml["xml_string"], context="Z/T dataset")
-    result = WriterEngine(settings).write((item,), xml["xml_string"],
-        verify=lambda path: verify_single_output(item, path, software=settings.software))
+    def verify(path):
+        checked = verify_single_output(item, path, software=settings.software)
+        verify_tiff_delta_t(path, source.plane_delta_t)
+        return checked
+
+    result = WriterEngine(settings).write((item,), xml["xml_string"], verify=verify)
     return complete_report({
         "output_file": {"path": str(writer.path), "format": "ome_tiff",
             "size_bytes": result.output_size, "axes": item.spec.axes,

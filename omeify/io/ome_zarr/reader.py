@@ -130,6 +130,7 @@ class ZarrSource(ImageSource):
         self.entries = ()
         self.parsed = None
         self.attributes = {}
+        self._delta_t = {}
         self.discovery_metadata = {}
         self.zarr_format = None
         self.array_metadata = ()
@@ -170,6 +171,22 @@ class ZarrSource(ImageSource):
             allow_default_selection=self._allow_default_selection,
         )
         self._metadata = self.parsed.metadata
+        from ..plane_times import validate_plane_delta_t
+        extension = self.attributes.get("omeify", {})
+        timing = extension.get("plane_delta_t") if isinstance(extension, dict) else None
+        if timing is not None:
+            if (not isinstance(timing, dict) or set(timing) != {"schema", "unit", "entries"}
+                    or timing["schema"] != "omeify.plane_delta_t/1" or timing["unit"] != "second"
+                    or not isinstance(timing["entries"], list)):
+                raise ValueError("Malformed curated Zarr Plane DeltaT metadata")
+            axes = self.parsed.dataset_levels[0]
+            sz = axes.axis("Z").size if axes.axis("Z") else 1
+            st = axes.axis("T").size if axes.axis("T") else 1
+            sc = self._metadata.logical_channel_count
+            self._delta_t = dict(((t, c, z), sec) for t, c, z, sec in
+                validate_plane_delta_t(timing["entries"], size_t=st, size_c=sc, size_z=sz))
+        else:
+            self._delta_t = {}
         if self.parsed.additional_spatial_context and not self.intrinsic_only:
             LOGGER.warning("Reading the selected intrinsic raster, not additional coordinate systems "
                            "or scene registration; export requires explicit intrinsic_only=True")
@@ -180,6 +197,7 @@ class ZarrSource(ImageSource):
         self.entries = ()
         self.parsed = None
         self.attributes = {}
+        self._delta_t = {}
         self.discovery_metadata = {}
         self.zarr_format = None
         self.array_metadata = ()
@@ -197,6 +215,12 @@ class ZarrSource(ImageSource):
     def dataset_levels(self):
         self._ensure_open()
         return self.parsed.dataset_levels
+
+    def acquisition_plane(self, *, z, t, channel=0):
+        from types import MappingProxyType
+        self._ensure_open()
+        value = self._delta_t.get((t or 0, channel, z or 0))
+        return MappingProxyType({} if value is None else {"DeltaT": (value, "s")})
 
     def plane_metadata(self, *, z=None, t=None, level=0):
         self._ensure_open()

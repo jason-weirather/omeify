@@ -381,6 +381,7 @@ MITI's published multi-Z calibration requirement or study-wide MITI compliance**
 | Physical pixel size | Taken from supported calibration declarations or an explicit override | Required for quantitative spatial interpretation. |
 | RGB ICC profile | Interpreted to convert RGB pixels to sRGB, then discarded | Output carries only Omeify's fixed, audited sRGB profile, never source ICC metadata. |
 | Vendor descriptions, filenames, scanner fields, dates, user names, unrelated free text | Not copied into generated OME-XML or NGFF JSON | Avoids an uncontrolled metadata passthrough. |
+| `Plane/@ExposureTime`, `Plane/@PositionXYZ` | Deliberately omitted | Detector and microscope-stage measurements belong in separate acquisition records. |
 | Biospecimen, reagent, acquisition, processing, and analysis metadata | Not inferred or manufactured | Belongs in deliberate accompanying study records. |
 
 ### What does Omeify put in OME-TIFF?
@@ -394,6 +395,8 @@ The generated header is checked against
 | `BigEndian`, `DimensionOrder`, `Interleaved` | Required and storage-checked | Describes the pixel layout. |
 | `PhysicalSizeX`, `PhysicalSizeY`, units | Required | Carries physical calibration. |
 | `PhysicalSizeZ`, `PhysicalSizeZUnit` | When known or explicitly supplied; both omitted only for declared ordinal multi-Z conversion | Never labels section indices as physical distances. |
+| `TimeIncrement`, `TimeIncrementUnit` | When known | Regular T interval; no invented playback rate. |
+| `Plane/@DeltaT`, `DeltaTUnit` | Retained when provided, per T/C/Z observation | Captures actual timing, including irregular acquisition. Not required when TimeIncrement suffices. |
 | `SizeX`, `SizeY`, `SizeC`, `SizeZ`, `SizeT` | Required | Declares image dimensions. |
 | `Type`, `SignificantBits` | Required and sample-checked | Declares pixel representation and precision. |
 | Channel `ID`, `Name`, `SamplesPerPixel` | Required | Identifies logical channels and RGB sample grouping. |
@@ -411,7 +414,9 @@ certificate. In particular, **metadata minimization is not deidentification**:
 retained channel/ROI names, caller-supplied provenance, source coordinates,
 and pixels (including burned-in labels) still need independent review before
 sharing. `inspect` exposes original metadata; it does not minimize or rewrite
-it. The [metadata retention and sharing policy](docs/reports.md#metadata-retention-and-sharing)
+it. Use `omeify inspect image.ome.tiff --show-miti` to append the actual
+curated header fields and values to the regular inspection tree and MITI check.
+The [metadata retention and sharing policy](docs/reports.md#metadata-retention-and-sharing)
 describes these boundaries for both output formats.
 
 ## Python library

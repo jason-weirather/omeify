@@ -93,9 +93,15 @@ multi-Z physical-size checklist.
    vocabulary instead of copying arbitrary source headers, annotations, paths, or
    ICC payloads. Retain necessary interpretation and explicitly supported
    provenance; do not silently discard geometry an export cannot represent.
-   Assess format, image-interpretation, and strict external-standard conformance
-   independently. Metadata minimization is not deidentification. Retained names, diagnostics,
-   provenance, and image pixels still require review before sharing.
+   For time series, a regular `TimeIncrement` suffices when known; curate optional
+   per-plane `DeltaT` where recorded to preserve actual acquisition timing,
+   including irregular timing within nominal T points. Neither is required to
+   navigate an ordinal time sequence. Detector exposure and microscope stage
+   `PositionXYZ` belong in external acquisition records, not the minimized image.
+   Never invent frame times. Assess format, image-interpretation, and strict
+   external-standard conformance independently. Metadata minimization is not
+   deidentification. Retained names, diagnostics, provenance, and image pixels
+   still require review before sharing.
 
 7. **Make resource ownership explicit.** Owners release their resources; borrowed
    views never close their parents. Closing is idempotent, failed opens clean up,

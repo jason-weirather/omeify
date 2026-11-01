@@ -564,19 +564,13 @@ class ImageDataset:
         return function(z=selected.z, t=selected.t, channel=channel)
 
     def require_regular_export(self):
-        """Refuse to discard per-plane acquisition coordinates in stack output."""
-        self._ensure_open()
-        source = self._source
-        while hasattr(source, "parent"):
-            source = source.parent._source
-        mapping = getattr(source, "_plane_map", None)
-        if mapping is not None:
-            from omeify._calibration import _children
-            if any(any(key in node.attrib for key in ("DeltaT", "ExposureTime", "PositionX",
-                                                      "PositionY", "PositionZ"))
-                   for node in _children(mapping.pixels, "Plane")):
-                raise NotImplementedError("Stack export cannot preserve per-plane acquisition "
-                    "coordinates yet; select an explicit 2D plane instead. No uniform grid is inferred.")
+        """Validate representability of curated temporal metadata before export.
+
+        Exposure and microscope stage positions are intentionally outside the
+        minimized image contract; their presence is not an export blocker.
+        """
+        from .plane_times import plane_delta_t
+        plane_delta_t(self)
 
     @classmethod
     def from_array(cls, array, *, axes, **metadata):

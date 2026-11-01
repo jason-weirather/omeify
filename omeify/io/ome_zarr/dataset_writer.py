@@ -68,6 +68,9 @@ def dataset_attributes(source, plan, *, method, windows, bits=None):
                      "channel_name": spec.channel_names[0]}
     if bits is not None:
         extension["float32_mantissa_bits"] = bits
+    if source.plane_delta_t:
+        extension["plane_delta_t"] = {"schema": "omeify.plane_delta_t/1", "unit": "second",
+            "entries": [list(record) for record in source.plane_delta_t]}
     if extension:
         attrs["omeify"] = extension
     return attrs
@@ -118,7 +121,7 @@ def write_zarr_dataset(writer, dataset, *, pyramid_axes="xy", pyramid_factors=No
     import zarr
 
     source = DatasetPlaneSource(dataset)
-    dataset.require_regular_export()
+    # DatasetPlaneSource has already curated and validated any recorded DeltaT.
     spec = source.spec
     chunk_z = integer(chunk_z, "chunk_z", minimum=1)
     max_block_bytes = integer(max_block_bytes, "max_block_bytes", minimum=1)

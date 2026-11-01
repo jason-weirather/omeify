@@ -277,8 +277,10 @@ def test_acquisition_measurements_are_separate_and_selection_aware(tmp_path):
         assert record["PositionZ"] == (24., "reference frame")
         with dataset.select(z=slice(1, 3), t=1) as selected:
             assert selected.acquisition_plane(z=1, t=0) == record
-        with pytest.raises(NotImplementedError, match="per-plane acquisition"):
-            dataset.require_regular_export()
+        # Only DeltaT is curated by export; stage positions no longer block conversion.
+        dataset.require_regular_export()
+        from omeify.io.plane_times import plane_delta_t
+        assert plane_delta_t(dataset)[-1] == (1, 0, 2, 12.)
         with dataset.plane(z=2, t=1) as plane:
             np.testing.assert_array_equal(plane.asarray(), a[1, 2])
 
