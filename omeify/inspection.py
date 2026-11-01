@@ -364,8 +364,26 @@ def _ome_summary(xml: str, max_text_length: int | None) -> dict[str, Any]:
             }
         )
 
+    # OME ROI annotations are separate from pixels and from crop GeoJSON.
+    # Count immediate shape elements only; never decode Mask/BinData or emit
+    # thousands of annotation records in routine inspection.
+    roi_count = 0
+    shape_count = 0
+    image_roi_refs = sum(
+        1 for image in image_elements for child in image if child.tag == tag("ROIRef")
+    )
+    for roi in root:
+        if roi.tag != tag("ROI"):
+            continue
+        roi_count += 1
+        for union in roi:
+            if union.tag == tag("Union"):
+                shape_count += sum(isinstance(child.tag, str) for child in union)
+
     xml_value, xml_truncated = _truncate_text(xml, max_text_length)
     return {
+        "rois": {"count": roi_count, "shapes": shape_count,
+                 "image_references": image_roi_refs},
         "namespace": namespace,
         "version": namespace.rsplit("/", 1)[-1] if namespace else None,
         "creator": root.get("Creator"),
@@ -1165,6 +1183,11 @@ class TiffInspector:
             if ome.get("uuid"):
                 ome_bits.append(f"UUID={ome['uuid']}")
             ome_node = _TreeNode(", ".join(ome_bits))
+            rois = ome["rois"]
+            ome_node.children.append(_TreeNode(
+                f"ROI annotations: {rois['count']} ROI(s), {rois['shapes']} shape(s), "
+                f"{rois['image_references']} image reference(s); metadata only"
+            ))
             miti = ome["miti"]
             miti_node = _TreeNode(
                 f"MITI header profile: {str(miti['status']).upper()}"

@@ -41,6 +41,7 @@
             "ome_zarr"
           ]
         },
+        "preserve_rois": {"type": "boolean"},
         "series": {
           "type": "integer",
           "minimum": 0

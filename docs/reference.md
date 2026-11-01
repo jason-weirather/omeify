@@ -363,6 +363,16 @@ omeify version   Show package and dependency versions
 
 The former pre-subcommand form is not accepted or forwarded.
 
+`convert` and `mutate` drop embedded source OME ROI annotations by default. The
+optional `--preserve-rois` flag copies linked OME 2016-06 ROI objects and their
+Z/T/C plane selectors without decoding shape masks, and verifies the output
+references before publication. It is supported only for OME-TIFF to OME-TIFF
+operations retaining the source X/Y/Z/T/C dimensions. Subsetting planes,
+changing format to OME-Zarr, unresolved ROI references, and ROI annotation
+references requiring external metadata fail explicitly. A selected image without
+ROIs still converts normally. Python uses `preserve_rois=True`. This is explicit
+source-metadata retention, not deidentification.
+
 `convert` and `mutate` take one positional `INPUT_PATH` and require an output
 file through `--output FILE` or `-o FILE`:
 
@@ -804,6 +814,12 @@ The JSON representation is defined by:
 ```text
 omeify/schemas/tiff_inspection.schema.json
 ```
+
+Inspection summarizes top-level OME ROI counts, contained shape counts, and
+Image ROIRef counts, without decoding pixels or expanding per-ROI paths. The
+MITI additional-metadata list is bounded to 64 distinct paths plus a truncation
+count; unexpected non-ROI metadata remains visible. The normal report's
+`ome.rois` object records `count`, `shapes` and `image_references`.
 
 Inspection reports TIFF-tag-derived and OME-declared calibration separately. For OME-TIFF,
 channel names, dimensions, dimension order, and OME physical sizes are parsed from OME-XML rather

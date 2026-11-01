@@ -175,6 +175,7 @@ def generate_ome_xml(
     display_uuid: bool = True,
     output_byteorder: Literal["<", ">"] = "<",
     plane_delta_t: Sequence[tuple[int, int, int, float]] = (),
+    preserved_rois=None,
 ) -> dict[str, str | None]:
     """Generate minimal OME-XML for one planar, RGB, or label image."""
 
@@ -193,6 +194,9 @@ def generate_ome_xml(
     )
     attach_geometry(root, image_elements, (tiff_features,))
     attach_stack_geometry(root, image_elements, (tiff_features,))
+    if preserved_rois is not None:
+        preserved_rois.require_matching_geometry(tiff_features)
+        preserved_rois.attach(root, image_elements[0])
     if plane_delta_t:
         from omeify.io.plane_times import validate_plane_delta_t
         records = validate_plane_delta_t(plane_delta_t, size_t=tiff_features.size_t,

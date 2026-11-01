@@ -226,6 +226,13 @@ are not copied and no longer prevent a conversion. `inspect --show-miti` is a
 text-only rendering of selected real OME header values and does not add a
 second validation result or alter the JSON inspection schema.
 
+Convert and mutate record optional `options.preserve_rois` (or
+`input.preserve_rois` for dataset operations) as a boolean. False remains the
+metadata-minimized default. True explicitly retains selected OME-TIFF ROI
+geometry and links after rejecting incompatible source/output geometry or
+unresolved metadata dependencies. The generated OME-XML in the operation report
+contains the retained ROI content and should be reviewed before sharing.
+
 `metadata_minimization=true` records application of the construction policy.
 A MITI minimum-header pass permits additional OME metadata and reports it
 separately; it is not a minimization certificate. A canonical Zarr attribute

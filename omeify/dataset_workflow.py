@@ -96,6 +96,7 @@ def resolve_z_spacing(dataset, *, z_spacing_size=None, z_spacing_unit=None,
 
 def process_dataset(input_path, output_path, *, operation, input_type, output_format="ome_tiff",
         series=0, group="", z=None, t=None, z_range=None, t_range=None,
+        preserve_rois=False,
         image_type=None, intrinsic_only=False, storage_options=None,
         rename_channels=None, rename_channels_by=None, pixel_size=None,
         z_spacing_size=None, z_spacing_unit=None, z_spacing_ordinal=False,
@@ -106,6 +107,8 @@ def process_dataset(input_path, output_path, *, operation, input_type, output_fo
         display_uuid=True,software=None,overwrite=True,cache_directory=None,
         jpeg_quality=90,jpeg_subsampling="422",opened_dataset=None):
     """Write the selected regular dataset, preserving fresh metadata policy."""
+    if preserve_rois and (input_type != "ome_tiff" or output_format != "ome_tiff"):
+        raise ValueError("--preserve-rois requires OME-TIFF input and OME-TIFF output")
     if operation not in {"convert","mutate"}:
         raise ValueError("Unsupported dataset operation")
     if input_type not in {"ome_tiff","ome_zarr"}:
@@ -143,6 +146,13 @@ def process_dataset(input_path, output_path, *, operation, input_type, output_fo
         selection,coordinates=stack_selection(original,z=z,t=t,
                                                z_range=z_range,t_range=t_range)
         selected=stack.enter_context(original.select(**selection))
+        preserved_rois = None
+        if preserve_rois:
+            from .roi_metadata import load_preserved_rois
+            preserved_rois = load_preserved_rois(source, series=series)
+            # Fail before scanning the selected stack for an integer mutation.
+            from .io.dataset_writer import DatasetPlaneSource
+            preserved_rois.require_matching_geometry(DatasetPlaneSource(selected).spec)
         z_override, z_policy = resolve_z_spacing(
             selected, z_spacing_size=z_spacing_size, z_spacing_unit=z_spacing_unit,
             z_spacing_ordinal=z_spacing_ordinal)
@@ -170,9 +180,11 @@ def process_dataset(input_path, output_path, *, operation, input_type, output_fo
             report=writer.write_dataset(prepared,pyramid_axes=pyramid_axes,pyramid_factors=pyramid_factors,
                                         chunk_z=chunk_z,max_block_bytes=max_block_bytes)
         else:
-            report=writer.write_dataset(prepared)
+            report=(writer.write_dataset(prepared, preserved_rois=preserved_rois)
+                    if preserve_rois else writer.write_dataset(prepared))
     return complete_report({"operation":operation,"input":{"path":str(source),"format":input_type,
             "series":series,"group":group,"z_range":coordinates["z"],"t_range":coordinates["t"],
+            "preserve_rois": preserve_rois,
             "z_spacing_policy":z_policy,
             "z_spacing_override": (None if z_spacing_size is None else {
                 "size": float(z_spacing_size),

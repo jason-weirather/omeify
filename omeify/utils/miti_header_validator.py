@@ -492,43 +492,65 @@ _ALLOWED_CHILDREN: dict[str, set[str]] = {
 }
 
 
-def _indexed_child_path(parent_path: str, child: etree._Element) -> str:
-    tag = _local_name(child.tag)
-    parent = child.getparent()
-    if parent is None:
-        return f"{parent_path}/{tag}"
-    siblings = [item for item in parent if _local_name(item.tag) == tag]
-    index = siblings.index(child)
-    return f"{parent_path}/{tag}[{index}]"
+_MAX_EXTRA_PATHS = 64
 
 
 def _find_extra_metadata(root: etree._Element) -> tuple[str, ...]:
+    """Report bounded non-profile metadata without expanding ROI trees.
+
+    Children are indexed in one pass per parent; the old sibling lookup was
+    quadratic for OME headers containing thousands of ROI or Plane elements.
+    Shapes and large binary Mask payloads are deliberately never inspected.
+    """
     extras: list[str] = []
+    omitted = 0
+
+    def add(path: str) -> None:
+        nonlocal omitted
+        if len(extras) < _MAX_EXTRA_PATHS:
+            extras.append(path)
+        else:
+            omitted += 1
 
     def visit(element: etree._Element, path: str) -> None:
         tag = _local_name(element.tag)
-        allowed_attributes = _ALLOWED_ATTRIBUTES.get(tag, set())
         for raw_name in element.attrib:
             name = _local_name(raw_name)
-            if name not in allowed_attributes:
-                extras.append(f"{path}/@{name}")
+            if name not in _ALLOWED_ATTRIBUTES.get(tag, set()):
+                add(f"{path}/@{name}")
 
         if tag == "MapAnnotation" and element.get("Namespace") != _PYRAMID_NAMESPACE:
-            extras.append(path)
+            add(path)
             return
 
-        allowed_children = _ALLOWED_CHILDREN.get(tag, set())
+        # This is deliberately a summary, not ROI parsing or Mask decoding.
+        # Unknown children are also opaque: record their *type*, not every subtree.
+        counts: dict[str, int] = {}
+        unknown: dict[str, int] = {}
+        small_unknown: dict[str, list[str]] = {}
+        allowed = _ALLOWED_CHILDREN.get(tag, set())
         for child in element:
             if not isinstance(child.tag, str):
-                continue  # Comments/PIs are not OME model elements.
-            child_path = _indexed_child_path(path, child)
-            child_tag = _local_name(child.tag)
-            if child_tag not in allowed_children:
-                extras.append(child_path)
                 continue
-            visit(child, child_path)
+            name = _local_name(child.tag)
+            index = counts.get(name, 0)
+            counts[name] = index + 1
+            if name not in allowed:
+                unknown[name] = unknown.get(name, 0) + 1
+                if name != "ROI" and unknown[name] <= 4:
+                    small_unknown.setdefault(name, []).append(f"{path}/{name}[{index}]")
+                continue
+            visit(child, f"{path}/{name}[{index}]")
+        for name, count in unknown.items():
+            if name != "ROI" and count <= 4:
+                for entry in small_unknown[name]:
+                    add(entry)
+            else:
+                add(f"{path}/{name}: {count} element(s) outside the minimized profile")
 
     visit(root, "OME")
+    if omitted:
+        extras.append(f"{omitted} further additional metadata paths omitted")
     return _deduplicate(sorted(extras))
 
 

@@ -408,6 +408,16 @@
           "type": "integer",
           "minimum": 0
         },
+        "rois": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["count", "shapes", "image_references"],
+          "properties": {
+            "count": {"type": "integer", "minimum": 0},
+            "shapes": {"type": "integer", "minimum": 0},
+            "image_references": {"type": "integer", "minimum": 0}
+          }
+        },
         "images": {
           "type": "array",
           "items": {

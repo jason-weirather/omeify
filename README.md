@@ -85,6 +85,24 @@ Each command has a distinct job:
 `convert`, `crop`, `extract-rgb`, and `mutate` can write either output format with
 `--output-format ome_tiff|ome_zarr`. `concat` writes OME-TIFF only.
 
+OME ROI annotations are **omitted by default** in `convert` and `mutate`, keeping
+image products metadata-minimized. To retain linked ROI geometry and plane
+assignments, use `--preserve-rois` with **OME-TIFF input and output**:
+
+```bash
+omeify convert input.ome.tif -o kept.ome.tif --type ome_tiff --preserve-rois
+omeify mutate float.ome.tif -o kept-float.ome.tif --type ome_tiff \
+  --float32-mantissa-bits 11 --preserve-rois
+```
+
+Preservation requires unchanged X/Y/Z/T/C geometry; partial Z/T selections and
+ROI-linked external annotations are not supported. The operation refuses unsafe
+preservation rather than silently dropping or misplacing annotations. Source ROI
+names and geometry may be sensitive. OME-Zarr output has no equivalent ROI
+preservation contract in this release; `--preserve-rois` there is rejected.
+`inspect` reports ROI, shape and image-reference counts without decoding masks or
+listing every ROI by default.
+
 ### Quick start
 
 Inspect a slide, turn it into a standardized OME-TIFF, then inspect the output:

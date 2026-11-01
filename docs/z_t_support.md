@@ -409,6 +409,14 @@ omeify mutate float.zarr -o compact.zarr --type ome_zarr \
   --output-format ome_zarr --dtype uint16 --range-mode full
 ```
 
+The opt-in `--preserve-rois` (Python `preserve_rois=True`) is limited to
+OME-TIFF -> OME-TIFF operations that retain the complete source Z/T extent and
+unchanged X/Y/C dimensions. Linked ROIs, including plane-specific TheZ/TheT/TheC,
+are retained without coordinate transformation and checked during TIFF readback.
+Partial Z/T selections are refused with this flag, rather than misleadingly
+reassigning ROI plane coordinates. Without the flag, source ROIs are omitted.
+OME-Zarr is not an ROI-preserving output in this release.
+
 Omitted Z/T selectors retain every plane of the selected image/series. A single
 index restricts that axis while retaining the other; two indices select a 2D
 observation. A range is half-open and can be combined with an index on the other

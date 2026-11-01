@@ -56,6 +56,7 @@ def mutate(
     range_mode: RangeMode | None = None,
     series: int = 0,
     output_format: OutputFormat = "ome_tiff",
+    preserve_rois: bool = False,
     group: str = "", z: int | None = None, t: int | None = None,
     z_range=None, t_range=None,
     z_spacing_size: float | None = None, z_spacing_unit: str | None = None,
@@ -94,6 +95,11 @@ def mutate(
     selects a new local NGFF 0.5 / Zarr v3 store.
     """
 
+    if not isinstance(preserve_rois, bool):
+        raise TypeError("preserve_rois must be bool")
+    if preserve_rois and (input_type != "ome_tiff" or output_format != "ome_tiff"):
+        raise ValueError("--preserve-rois requires OME-TIFF input and OME-TIFF output")
+
     from .dataset_workflow import process_dataset, stack_requested
     from .io.dataset import open_dataset
 
@@ -107,6 +113,7 @@ def mutate(
                 if channel_name_field is not None:
                     raise ValueError("channel_name_field does not apply to OME stack workflows")
                 return process_dataset(input_path, output_path, opened_dataset=dataset, operation='mutate',
+                    preserve_rois=preserve_rois,
                     input_type=input_type, output_format=output_format, series=series, group=group,
                     z=z, t=t, z_range=z_range, t_range=t_range,
                     image_type=image_type, intrinsic_only=intrinsic_only, storage_options=storage_options,
@@ -192,6 +199,10 @@ def mutate(
         storage_options=storage_options,
     )
     with reader, ExitStack() as stack:
+        preserved_rois = None
+        if preserve_rois:
+            from .roi_metadata import load_preserved_rois
+            preserved_rois = load_preserved_rois(input_file, series=series)
         if reader._metadata.unrepresented_geometry:
             raise ValueError("Additional NGFF spatial relationships require an explicit intrinsic_only export")
         if reader.image_type == "rgb":
@@ -351,7 +362,8 @@ def mutate(
         with transformed.with_metadata(
             channel_names=output_channel_names, pixel_size=effective_pixel_size,
         ) as output_image:
-            write_report = writer.write(output_image)
+            write_report = (writer.write(output_image, preserved_rois=preserved_rois)
+                            if preserve_rois else writer.write(output_image))
         LOGGER.info(
             "Shared writer path completed in %s",
             readable_runtime(time.monotonic() - writer_started),
@@ -374,6 +386,7 @@ def mutate(
             "operation": operation,
             "input_type": input_type,
             "series": int(series),
+            "preserve_rois": preserve_rois,
             "channel_name_field": channel_name_field,
             "rename_channels": {str(key): value for key, value in normalized_renames.items()},
             "rename_channels_by": normalized_rename_mode,

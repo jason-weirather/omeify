@@ -116,7 +116,7 @@ class _PhysicalPlane:
             self._channel = None
 
 
-def write_tiff_dataset(writer, dataset):
+def write_tiff_dataset(writer, dataset, *, preserved_rois=None):
     from ._writer import WriterEngine, prepare_image, validate_ome_xml
     from ._writer.configuration import OUTPUT_BYTEORDER
     from ._writer.single_verification import verify_single_output
@@ -135,11 +135,14 @@ def write_tiff_dataset(writer, dataset):
         compression_name=settings.compression_name, settings=settings, lossy_policy="rgb-only")
     xml = generate_ome_xml(item.spec, item.level_shapes,
                           display_uuid=settings.display_uuid, output_byteorder=OUTPUT_BYTEORDER,
-                          plane_delta_t=source.plane_delta_t)
+                          plane_delta_t=source.plane_delta_t, preserved_rois=preserved_rois)
     validation = validate_ome_xml(xml["xml_string"], context="Z/T dataset")
     def verify(path):
         checked = verify_single_output(item, path, software=settings.software)
         verify_tiff_delta_t(path, source.plane_delta_t)
+        if preserved_rois is not None:
+            from omeify.roi_metadata import verify_preserved_rois
+            verify_preserved_rois(path, preserved_rois)
         return checked
 
     result = WriterEngine(settings).write((item,), xml["xml_string"], verify=verify)

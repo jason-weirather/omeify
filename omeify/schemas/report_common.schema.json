@@ -1695,6 +1695,7 @@
             "ome_zarr"
           ]
         },
+        "preserve_rois": {"type": "boolean"},
         "series": {
           "type": "integer",
           "minimum": 0
@@ -1871,6 +1872,7 @@
         "input_type": {
           "$ref": "#/$defs/conversion_options/properties/input_type"
         },
+        "preserve_rois": {"type": "boolean"},
         "series": {
           "$ref": "#/$defs/conversion_options/properties/series"
         },
@@ -2425,6 +2427,7 @@
             "ome_zarr"
           ]
         },
+        "preserve_rois": {"type": "boolean"},
         "series": {
           "type": "integer",
           "minimum": 0
@@ -2558,6 +2561,7 @@
         "input_type": {
           "$ref": "#/$defs/conversion_options/properties/input_type"
         },
+        "preserve_rois": {"type": "boolean"},
         "series": {
           "$ref": "#/$defs/conversion_options/properties/series"
         },

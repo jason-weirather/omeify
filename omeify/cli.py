@@ -397,6 +397,8 @@ def concat_command(
     default=None,
     help="Interpret rename JSON keys explicitly as channel names or indices.",
 )
+@click.option("--preserve-rois", is_flag=True,
+              help="Preserve linked OME-TIFF ROIs on unchanged TIFF geometry; default: omit.")
 @click.option("--omit-uuid", is_flag=True, help="Omit the optional OME root UUID.")
 @click.option(
     "--output-json",
@@ -481,6 +483,7 @@ def convert_command(
     channel_name_field: str | None,
     rename_channels_json: Path | None,
     rename_channels_by: str | None,
+    preserve_rois: bool,
     omit_uuid: bool,
     output_json: Path | None,
     cache_directory: Path | None,
@@ -540,6 +543,7 @@ def convert_command(
             rename_channels=rename_channels,
             rename_channels_by=rename_mode,
             pixel_size=pixel_size,
+            preserve_rois=preserve_rois,
             display_uuid=not omit_uuid,
             compression=compression,
             jpeg_quality=jpeg_quality,
@@ -652,6 +656,8 @@ def convert_command(
         "strong integer-lattice evidence."
     ),
 )
+@click.option("--preserve-rois", is_flag=True,
+              help="Preserve linked OME-TIFF ROIs on unchanged TIFF geometry; default: omit.")
 @click.option("--omit-uuid", is_flag=True, help="Omit the optional OME root UUID.")
 @click.option(
     "--output-json",
@@ -726,6 +732,7 @@ def mutate_command(
     series: int,
     sample_pixels_per_channel: int,
     auto_max_normalized_rmse: float,
+    preserve_rois: bool,
     omit_uuid: bool,
     output_json: Path | None,
     cache_directory: Path | None,
@@ -799,6 +806,7 @@ def mutate_command(
             pyramid_levels=pyramid_levels,
             downsample=downsample,  # type: ignore[arg-type]
             max_workers=workers,
+            preserve_rois=preserve_rois,
             display_uuid=not omit_uuid,
             overwrite=overwrite,
             cache_directory=cache_directory,

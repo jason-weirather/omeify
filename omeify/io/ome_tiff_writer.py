@@ -85,21 +85,21 @@ class OMETiffWriter:
     def path(self) -> Path:
         return self._settings.output_path
 
-    def write(self, image: Image, *, level: int = 0) -> dict[str, object]:
+    def write(self, image: Image, *, level: int = 0, preserved_rois=None) -> dict[str, object]:
         """Borrow an open Image and materialize its selected level, tile by tile.
 
         Metadata belongs to the image. Storage settings belong to this writer.
         Pyramids are rebuilt from the selected level; source arrays are not mutated.
         """
         with canonical_rgb(image) as normalized:
-            return self._write_normalized(normalized, level=level)
+            return self._write_normalized(normalized, level=level, preserved_rois=preserved_rois)
 
-    def write_dataset(self, dataset) -> dict[str, object]:
+    def write_dataset(self, dataset, *, preserved_rois=None) -> dict[str, object]:
         """Stream an explicitly selected Z/T dataset with per-plane XY pyramids."""
         from .dataset_writer import write_tiff_dataset
-        return write_tiff_dataset(self, dataset)
+        return write_tiff_dataset(self, dataset, preserved_rois=preserved_rois)
 
-    def _write_normalized(self, image: Image, *, level: int) -> dict[str, object]:
+    def _write_normalized(self, image: Image, *, level: int, preserved_rois=None) -> dict[str, object]:
         source = ImagePlaneSource(image, level=level)
         spec = source.output_spec()
         if spec.is_rgb:
@@ -122,6 +122,7 @@ class OMETiffWriter:
             prepared.level_shapes,
             display_uuid=self._settings.display_uuid,
             output_byteorder=OUTPUT_BYTEORDER,
+            preserved_rois=preserved_rois,
         )
         omexml = str(xml_info["xml_string"])
         metadata = validate_ome_xml(omexml, context="single-series")
@@ -134,10 +135,8 @@ class OMETiffWriter:
         result = WriterEngine(self._settings).write(
             (prepared,),
             omexml,
-            verify=lambda path: verify_single_output(
-                prepared,
-                path,
-                software=self._settings.software,
+            verify=lambda path: self._verify_with_rois(
+                prepared, path, preserved_rois=preserved_rois,
             ),
         )
         compression = prepared.compression
@@ -205,6 +204,13 @@ class OMETiffWriter:
             },
         }
         return complete_report(report, "write_report.schema.json")
+
+    def _verify_with_rois(self, prepared, path, *, preserved_rois):
+        verified = verify_single_output(prepared, path, software=self._settings.software)
+        if preserved_rois is not None:
+            from omeify.roi_metadata import verify_preserved_rois
+            verify_preserved_rois(path, preserved_rois)
+        return verified
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(path={str(self.path)!r})"

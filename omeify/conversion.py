@@ -42,6 +42,7 @@ def convert(
     input_type: InputType,
     series: int = 0,
     output_format: OutputFormat = "ome_tiff",
+    preserve_rois: bool = False,
     group: str = "", z: int | None = None, t: int | None = None,
     z_range=None, t_range=None,
     z_spacing_size: float | None = None, z_spacing_unit: str | None = None,
@@ -87,6 +88,11 @@ def convert(
     into those same semantic values before calling this function.
     """
 
+    if not isinstance(preserve_rois, bool):
+        raise TypeError("preserve_rois must be bool")
+    if preserve_rois and (input_type != "ome_tiff" or output_format != "ome_tiff"):
+        raise ValueError("--preserve-rois requires OME-TIFF input and OME-TIFF output")
+
     from .dataset_workflow import process_dataset, stack_requested
     from .io.dataset import open_dataset
 
@@ -100,6 +106,7 @@ def convert(
                 if channel_name_field is not None:
                     raise ValueError("channel_name_field does not apply to OME stack workflows")
                 return process_dataset(input_path, output_path, opened_dataset=dataset, operation='convert',
+                    preserve_rois=preserve_rois,
                     input_type=input_type, output_format=output_format, series=series, group=group,
                     z=z, t=t, z_range=z_range, t_range=t_range,
                     image_type=image_type, intrinsic_only=intrinsic_only, storage_options=storage_options,
@@ -152,6 +159,10 @@ def convert(
     )
 
     with reader:
+        preserved_rois = None
+        if preserve_rois:
+            from .roi_metadata import load_preserved_rois
+            preserved_rois = load_preserved_rois(input_file, series=series)
         source_pixel_size = reader.pixel_size
         effective_pixel_size = pixel_size or source_pixel_size
         if effective_pixel_size is None:
@@ -221,7 +232,8 @@ def convert(
         with reader.with_metadata(
             channel_names=output_channel_names, pixel_size=effective_pixel_size,
         ) as output_image:
-            write_report = writer.write(output_image)
+            write_report = (writer.write(output_image, preserved_rois=preserved_rois)
+                            if preserve_rois else writer.write(output_image))
         LOGGER.info(
             "Shared writer path completed in %s",
             readable_runtime(time.monotonic() - writer_started),
@@ -240,6 +252,7 @@ def convert(
         {
             "input_type": input_type,
             "series": int(series),
+            "preserve_rois": preserve_rois,
             "rename_channels": {str(key): value for key, value in normalized_renames.items()},
             "rename_channels_by": normalized_rename_mode,
             "channel_name_field": channel_name_field,
