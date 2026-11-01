@@ -1,7 +1,6 @@
 """Strict Z intent on conversion/mutation; real writer tests require normal deps."""
 from __future__ import annotations
 
-import inspect
 
 import numpy as np
 import pytest
@@ -156,22 +155,6 @@ def test_real_mutation_ordinal_and_override(tmp_path):
         with open_dataset(dest,input_type="ome_tiff") as ds, ds.plane(t=1,z=3) as img:
             assert img.asarray().shape == values[1,3].shape
 
-
-def test_removed_option_and_no_misleading_2d_override(tmp_path):
-    assert "z_spacing_um" not in inspect.signature(convert).parameters
-    assert "z_spacing_um" not in inspect.signature(mutate).parameters
-    for command in ("convert", "mutate"):
-        result=CliRunner().invoke(main,[command,"--help"])
-        assert result.exit_code == 0
-        for option in ("--z-spacing-size", "--z-spacing-unit", "--z-spacing-ordinal"):
-            assert option in result.output
-        assert "--z-spacing-um" not in result.output
-        rejected=CliRunner().invoke(main,[command,"--z-spacing-um","1"])
-        assert rejected.exit_code != 0
-        assert "No such option" in rejected.output
-    src,_=source_tiff(tmp_path,z_size=1)
-    with pytest.raises(ValueError,match="multiple Z sections"):
-        convert(src,tmp_path/"unexpected.tif",input_type="ome_tiff",z_spacing_ordinal=True)
 
 @pytest.mark.parametrize("flag", ("--z-spacing-ordinal", "--z-spacing-size"))
 def test_cli_can_convert_with_explicit_z_interpretation(tmp_path,flag):

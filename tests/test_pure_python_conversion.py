@@ -910,10 +910,6 @@ def test_click_group_exposes_version_inspect_mutate_and_convert() -> None:
     assert version_info["omeify"] == __version__
     assert "tifffile" in version_info
 
-    eager_result = CliRunner().invoke(main, ["--version"])
-    assert eager_result.exit_code != 0
-    assert "No such option" in eager_result.output
-
     empty_result = CliRunner().invoke(main, [])
     assert empty_result.exit_code == 0
     assert "Commands:" in empty_result.output
@@ -927,7 +923,6 @@ def test_click_group_exposes_version_inspect_mutate_and_convert() -> None:
 
     convert_help = CliRunner().invoke(main, ["convert", "--help"])
     assert convert_help.exit_code == 0
-    assert "--strict-miti" not in convert_help.output
     assert "qptiff_he" in convert_help.output
     assert "svs" in convert_help.output
     assert "indica_mif" in convert_help.output

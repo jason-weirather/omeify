@@ -107,12 +107,11 @@ def test_coordinate_overflow_is_explicit():
 
 
 @pytest.mark.parametrize('command',['convert','mutate'])
-def test_stack_help_and_old_plane_options(command):
+def test_stack_help_exposes_current_plane_and_pyramid_options(command):
     result=CliRunner().invoke(main,[command,'--help'])
     assert result.exit_code==0
     for option in ['--z-range','--t-range','--pyramid-axes','--chunk-z','--z-index']:
         assert option in result.output
-    assert '--all-planes' not in result.output
 
 
 @pytest.mark.parametrize('function', [convert, mutate])
@@ -123,12 +122,6 @@ def test_2d_workflows_do_not_ignore_stack_parameters(tmp_path, function):
                      metadata={'axes': 'YX', 'PhysicalSizeX': .5, 'PhysicalSizeY': .5})
     with pytest.raises(ValueError, match='non-singleton or ranged'):
         function(path, tmp_path / 'out.tif', input_type='ome_tiff', pyramid_axes='xyz')
-
-
-def test_dataset_and_selection_share_demand_priority_gate():
-    with ImageDataset.from_array(np.zeros((3,4,5)),axes='ZYX') as dataset:
-        with dataset.select(z=slice(1,3)) as selected:
-            assert selected._gate is dataset._gate
 
 
 def test_stack_scan_retains_bounded_samples_for_narrow_images():

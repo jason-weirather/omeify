@@ -1,4 +1,4 @@
-"""Release regressions: pre-Z/T 2D reads and Z/T publication/provenance guarantees.
+"""2D compatibility and selected-plane provenance regressions.
 
 All fixtures are tiny synthetic TIFFs and use real encoders/readers and schemas.
 """

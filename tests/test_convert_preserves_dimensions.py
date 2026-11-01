@@ -6,7 +6,6 @@ Their absence is an environment failure, not a reason to skip these tests.
 from __future__ import annotations
 
 import copy
-import inspect
 
 import numpy as np
 import pytest
@@ -178,7 +177,7 @@ def test_convert_two_selected_indices_uses_2d_report(tmp_path):
                                           values[2, 1])
 
 
-def test_convert_ordinary_2d_keeps_old_report_and_samples(tmp_path):
+def test_convert_ordinary_2d_retains_report_and_samples(tmp_path):
     source = tmp_path / "2d.ome.tif"
     values = np.arange(16 * 20, dtype=np.uint16).reshape(16, 20)
     tifffile.imwrite(source, values, ome=True, metadata={
@@ -288,19 +287,6 @@ def test_mutate_requires_numerical_intent_and_preserves_whole_zt_scope(tmp_path)
         assert ds.axis_info("Z").size == 4 and ds.axis_info("T").size == 3
 
 
-def test_all_planes_is_no_longer_an_api_or_cli_option():
-    assert "all_planes" not in inspect.signature(convert).parameters
-    assert "all_planes" not in inspect.signature(mutate).parameters
-    for command in ("convert", "mutate"):
-        runner = CliRunner()
-        help_result = runner.invoke(main, [command, "--help"])
-        assert help_result.exit_code == 0
-        assert "--all-planes" not in help_result.output
-        invalid = runner.invoke(main, [command, "--all-planes"])
-        assert invalid.exit_code != 0
-        assert "No such option" in invalid.output
-
-
 @pytest.mark.parametrize("operation", ("convert", "mutate"))
 @pytest.mark.parametrize("selection", ({}, {"z": 2}, {"t": 1}, {"z_range": (1, 3)}))
 def test_dispatch_borrows_one_dataset_session_without_plane_guessing(
@@ -315,7 +301,6 @@ def test_dispatch_borrows_one_dataset_session_without_plane_guessing(
         assert dataset.is_open
         assert dataset.axis_info("Z").size == 4
         assert dataset.axis_info("T").size == 3
-        assert "all_planes" not in kwargs
         seen.append(kwargs)
         return {"route": "dataset"}
 

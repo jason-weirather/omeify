@@ -5,10 +5,8 @@ classification. Retained channel/ROI names and explicit provenance remain visibl
 """
 from __future__ import annotations
 
-import importlib
 import json
 from pathlib import Path
-from typing import get_args
 
 import numpy as np
 import pytest
@@ -24,8 +22,8 @@ from omeify import (
 from omeify.cli import main
 from omeify.io.akoya_qptiff import parse_akoya_qpi_channel_metadata
 from omeify.io.image_planes import ImagePlaneSource
+from omeify.io.source_reader import source_reader
 from omeify.io.ome_zarr.metadata import output_attributes, profile_errors
-from omeify.io.source_reader import INPUT_TYPES, PLANAR_INPUT_TYPES, InputType, source_reader
 from omeify.provenance import canonical_provenance
 from omeify.utils.generate_ome_xml import generate_ome_xml
 from zarr_fixture import fixture
@@ -63,26 +61,9 @@ def metadata_text(path: Path) -> str:
         return "\n".join(values)
 
 
-@pytest.mark.parametrize("module", ["omeify", "omeify.io", "omeify.io.vendor_tiff_readers"])
-def test_component_reader_is_removed_without_alias(module):
-    assert not hasattr(importlib.import_module(module), "AkoyaComponentTiffReader")
-    assert "component" not in INPUT_TYPES
-    assert "component" not in PLANAR_INPUT_TYPES
-    assert "component" not in get_args(InputType)
+def test_unknown_source_profile_is_rejected_before_io():
     with pytest.raises(ValueError, match="Unsupported input_type"):
-        source_reader("not-opened.tif", input_type="component")
-
-
-@pytest.mark.parametrize("command", ["convert", "mutate", "crop"])
-def test_component_cli_profile_is_rejected_before_io(tmp_path, command):
-    source = tmp_path / "retired.tif"
-    source.touch()
-    args = [command, str(source), "-o", str(tmp_path / "out"), "--type", "component"]
-    if command == "crop":
-        args += ["--bounds", "0", "0", "16", "16"]
-    result = CliRunner().invoke(main, args)
-    assert result.exit_code == 2
-    assert not (tmp_path / "out").exists()
+        source_reader("not-opened.tif", input_type="unknown_profile")
 
 
 @pytest.mark.parametrize("reader", [AkoyaMIFQPTiffReader, AkoyaFusionQPTiffReader])

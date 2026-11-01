@@ -706,13 +706,10 @@ def test_whitespace_only_record_cannot_become_a_finding(packet, model_double):
         ai.summarize_metadata(packet)
 
 
-@pytest.mark.parametrize("schema_version,prompt_version", [
-    ("1.0", "1.0"), ("1.0", "2.0"), ("1.1", "2.1"), ("1.2", "3.0"),
-])
-def test_retired_report_protocols_are_rejected(packet, model_double, schema_version, prompt_version):
+@pytest.mark.parametrize("field", ["schema_version", "prompt_version"])
+def test_intelligence_report_requires_supported_protocol(packet, model_double, field):
     report = ai.summarize_metadata(packet)
-    report["schema_version"] = schema_version
-    report["prompt_version"] = prompt_version
+    report[field] = "unsupported"
     resource = files("omeify.schemas").joinpath("metadata_intelligence.schema.json")
     assert not Draft202012Validator(json.loads(resource.read_text())).is_valid(report)
 

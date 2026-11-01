@@ -110,25 +110,16 @@ def test_report_identifier_is_current_and_input_record_is_not_mutated(provenance
     original = deepcopy(provenance)
     result = complete_report(provenance, "crop_provenance.schema.json")
     assert result["schema"] == "omeify.crop_provenance/3" and provenance == original
-    result["schema"] = "omeify.crop/2"
+    result["schema"] = "unsupported"
     with pytest.raises(ValueError, match="const"):
         validate_report(result, "crop_provenance.schema.json")
 
 
-def test_legacy_reserved_crop_provenance_cannot_bypass_current_validation():
+def test_reserved_crop_provenance_namespace_requires_current_schema():
     from omeify.provenance import canonical_provenance
 
     with pytest.raises(ValueError, match="Unsupported crop provenance version"):
-        canonical_provenance({"schema": "omeify.crop_provenance/1", "patient": "private"})
-
-
-@pytest.mark.parametrize("key", ["deidentify_ome", "significant_bits_matches_dtype",
-                                "compression_ratio", "level_shapes_cyx", "shape_cyx",
-                                "channels_checked", "points_per_channel"])
-def test_removed_wire_fields_are_not_preserved_in_schema_properties(key):
-    for name in SCHEMAS:
-        for node in walk(load_schema(name)):
-            assert key not in node.get("properties", {})
+        canonical_provenance({"schema": "omeify.crop_provenance/999", "patient": "private"})
 
 
 def test_inspection_and_preview_emit_current_json_without_writer_dependencies(tmp_path):

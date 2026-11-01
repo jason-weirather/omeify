@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 
-import click
 import numpy as np
 import pytest
 import tifffile
@@ -409,7 +408,6 @@ def test_whole_batch_preflight_and_inputs_are_protected(input_file, tmp_path, wr
     ("by_index", ["out-01.ome.tiff", "out-02.ome.tiff", "out-03.ome.tiff"]),
     ("by_name", ["out-right.ome.tiff", "out-left.ome.tiff"]),
 ])
-@pytest.mark.filterwarnings("error:.*get_text_stream.*:DeprecationWarning")
 def test_cli_stdin_and_coordinate_guard(input_file, tmp_path, writer_spy, shatter, filenames):
     path, _ = input_file
     doc = collection(*[rectangle_feature([1, 2, 10, 11], name=n) for n in ("right", "left", "right")])
@@ -427,14 +425,8 @@ def test_cli_stdin_and_coordinate_guard(input_file, tmp_path, writer_spy, shatte
     assert len(writer_spy) == len(filenames)
 
 
-def test_cli_stdin_utf8_does_not_require_deprecated_click_stream(input_file, tmp_path,
-                                                                  writer_spy, monkeypatch):
-    # Click 8.5 deprecates get_text_stream; Click 9 will remove it. Enforce
-    # the migration even when testing against older supported Click versions.
-    def deprecated_stream(*args, **kwargs):
-        pytest.fail("CLI must not depend on deprecated click.get_text_stream")
-
-    monkeypatch.setitem(vars(click), "get_text_stream", deprecated_stream)
+def test_cli_stdin_preserves_utf8_region_names(input_file, tmp_path, writer_spy):
+    # Test the user-visible stdin/GeoJSON contract, not Click's former internals.
     path, pixels = input_file
     name = "Café µm"
     document = collection(rectangle_feature([1, 2, 10, 11], name=name))

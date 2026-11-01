@@ -10,6 +10,21 @@ Keep that version and the application's existing numerical requirements in legac
 environments. This checkout no longer contains a Python 3.10 test environment,
 TOML backport, or a TIFF-only dependency mode.
 
+## Test maintenance policy
+
+Keep tests for current observable behavior, scientific pixel/axis correctness,
+metadata boundaries, output safety, external-format interoperability, and supported
+Python/dependency combinations. A regression can remain valuable after its original
+bug is fixed: future changes can recreate the same failure. Prefer tiny independent
+readbacks for critical numerical and format contracts, with real codecs and the OME XSD.
+
+Avoid tests that merely prove retired CLI flags, removed import aliases, or obsolete
+serialized field names are still absent. Test the replacement's **current** behavior
+instead. Keep optional external-consumer checks explicit and distinguish their skips
+from required TIFF/Zarr tests. Test runtime behavior rather than the spelling of
+Python annotations or exact dependency pins when the compatibility range is the
+actual contract. Periodically consolidate duplicate cases without weakening coverage.
+
 ## Ordinary development
 
 Create a dedicated environment rather than upgrading an active analysis or model
@@ -147,10 +162,10 @@ The curated timing and MITI table regressions live in
 complete suite so its TIFF readback, Zarr roundtrip and OME-XSD paths execute;
 metadata-only tests alone cannot establish those guarantees.
 
-Run the six release-compatibility regressions alongside the Z/T tests:
+Run the 2D compatibility regressions alongside the Z/T tests:
 
 ```bash
-python -m pytest -q tests/test_release_compat_023.py
+python -m pytest -q tests/test_2d_compatibility.py
 python -m pytest -q tests/test_dataset*.py tests/test_volume_pyramid.py
 ```
 
