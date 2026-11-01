@@ -125,7 +125,14 @@ def test_real_converter_writes_explicit_interpretation(tmp_path,format,args,mode
         else:
             assert (zinfo.unit,zinfo.scale)==("µm",expected)
         with ds.plane(t=1,z=3) as image:
-            np.testing.assert_array_equal(image.asarray(),values[1,3])
+            assert image.channel_count == 1
+            actual = image.asarray()
+            # NGFF stack metadata contains an explicit C=1 component, whereas
+            # TIFF can expose the same singleton observation directly as YX.
+            assert image.axes in ("YX", "CYX")
+            np.testing.assert_array_equal(
+                actual[0] if image.axes == "CYX" else actual, values[1,3]
+            )
     if format=="ome_tiff":
         with tifffile.TiffFile(dest) as tif:
             ns="{http://www.openmicroscopy.org/Schemas/OME/2016-06}"

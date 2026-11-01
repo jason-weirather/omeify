@@ -17,6 +17,7 @@ from lxml import etree
 from omeify import AxisInfo, ImageDataset, OMEZarrWriter, PixelSize, convert, mutate, open_dataset
 from omeify.cli import main
 from omeify.io.ome_zarr.metadata import profile_errors
+from omeify.io.plane_times import plane_delta_t
 from omeify.io.spec import OMEImageSpec
 from omeify.io.volume_pyramid import plan_volume_pyramid
 from omeify.reports import report_validator, validate_report
@@ -92,7 +93,10 @@ def test_zarr_stack_schema_distinguishes_unknown_z_time_units():
     plan = plan_volume_pyramid((4, 16, 20), levels=0, axes="xy")
     dummy = {"min": 0, "max": 1, "start": 0, "end": 1}
     from omeify.io.ome_zarr.dataset_writer import dataset_attributes
-    attrs = dataset_attributes(SimpleNamespace(spec=spec), plan, method="mean", windows=[dummy])
+    attrs = dataset_attributes(
+        SimpleNamespace(spec=spec, plane_delta_t=()),
+        plan, method="mean", windows=[dummy],
+    )
     assert not profile_errors(attrs)
     axes = attrs["ome"]["multiscales"][0]["axes"]
     assert "unit" not in axes[0] and "unit" not in axes[2]
@@ -240,15 +244,26 @@ def test_convert_from_ome_zarr_preserves_every_plane_by_default(tmp_path):
                                                   values[t, z])
 
 
-def test_convert_fails_without_silently_dropping_acquisition_measurements(tmp_path):
-    source, _ = make_source_tiff(tmp_path, axes="TZYX", acquisition_plane=True)
-    dest = tmp_path / "refused.ome.tif"
-    with pytest.raises(NotImplementedError, match="per-plane acquisition"):
-        convert(source, dest, input_type="ome_tiff", compression="Deflate",
-                tile_size=16, pyramid_levels=0)
-    assert not dest.exists()
-    # Explicit single-plane export remains available, without asserting that
-    # the output carries the source's per-plane acquisition metadata.
+def test_convert_preserves_delta_t_without_acquisition_metadata_passthrough(tmp_path):
+    source, values = make_source_tiff(tmp_path, axes="TZYX", acquisition_plane=True)
+    dest = tmp_path / "curated.ome.tif"
+    report = convert(source, dest, input_type="ome_tiff", compression="Deflate",
+                     tile_size=16, pyramid_levels=0)
+    validate_report(report, "dataset_operation_report.schema.json")
+    assert dest.is_file()
+    with open_dataset(dest, input_type="ome_tiff") as ds:
+        assert plane_delta_t(ds) == tuple(
+            (t, 0, z, float(t * 4 + z)) for t in range(3) for z in range(4)
+        )
+        np.testing.assert_array_equal(
+            ds.read_block(0, 16, 0, 20, z=slice(None), t=slice(None)), values
+        )
+    with tifffile.TiffFile(dest) as tiff:
+        xml = tiff.ome_metadata
+        assert "ExposureTime" not in xml and "PositionZ" not in xml
+        assert len(etree.fromstring(xml.encode()).findall(f".//{{{OME}}}Plane")) == 12
+
+    # Explicit one-plane export retains the established 2D report contract.
     selected = tmp_path / "selected.ome.tif"
     report = convert(source, selected, input_type="ome_tiff", z=1, t=1,
                      compression="Deflate", tile_size=16, pyramid_levels=0)

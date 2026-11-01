@@ -253,9 +253,15 @@ class ZarrSource(ImageSource):
             starts = tuple(k * size for k, size in zip(coordinates, chunks))
             ends = tuple(min(lo + size, length) for lo, size, length
                          in zip(starts, chunks, array.shape))
-            block = self._block_cache.load((array.path, coordinates),
-                lambda: np.array(array[tuple(slice(lo, hi) for lo, hi in zip(starts, ends))],
-                                 copy=True, order="C"), speculative=speculative)
+            block = self._block_cache.load(
+                (array.path, coordinates),
+                lambda starts=starts, ends=ends: np.array(
+                    array[tuple(slice(lo, hi) for lo, hi in zip(starts, ends, strict=True))],
+                    copy=True,
+                    order="C",
+                ),
+                speculative=speculative,
+            )
             local, target = [], []
             for i, sel in enumerate(selection):
                 if isinstance(sel, slice):

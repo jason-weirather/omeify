@@ -115,7 +115,7 @@ class PrefetchQueue:
             try:
                 if self.cancelled(epoch):
                     raise CancelledError()
-                self.execute(request, lambda: self.cancelled(epoch))
+                self.execute(request, lambda current_epoch=epoch: self.cancelled(current_epoch))
                 if self.cancelled(epoch):
                     raise CancelledError()
             except CancelledError as error:

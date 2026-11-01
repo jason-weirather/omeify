@@ -71,7 +71,8 @@ def validate_plane_delta_t(records, *, size_t, size_c, size_z):
         for value, size, name in ((t, size_t, "T"), (c, size_c, "C"), (z, size_z, "Z")):
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < size:
                 raise ValueError(f"Plane DeltaT {name} index is outside the image")
-        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds):
+        if (isinstance(seconds, bool) or not isinstance(seconds, (int, float))
+                or not math.isfinite(seconds)):
             raise ValueError("Plane DeltaT seconds must be finite")
         key = (t, c, z)
         if key in seen:
