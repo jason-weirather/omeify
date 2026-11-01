@@ -953,7 +953,8 @@ def crop_command(
         if geojson_path == "-":
             from omeify.regions import MAX_GEOJSON_CHARS, load_geojson
 
-            geojson = load_geojson(click.get_text_stream("stdin").read(MAX_GEOJSON_CHARS + 1))
+            with click.open_file("-", mode="r", encoding="utf-8") as stdin:
+                geojson = load_geojson(stdin.read(MAX_GEOJSON_CHARS + 1))
         else:
             geojson = geojson_path
         document, auxiliary = load_crop_document(bounds=bounds, geojson=geojson)
