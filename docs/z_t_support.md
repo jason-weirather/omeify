@@ -305,10 +305,18 @@ with open_dataset("input.ome.tif", input_type="ome_tiff") as dataset:
     )
 ```
 
-Both outputs require calibrated XY. Unknown Z spacing and time intervals remain
-unknown: the TIFF header omits the corresponding optional OME fields, and NGFF
-records unitless index axes rather than pretending they are micrometers/seconds.
-XYZ automatic physical-anisotropy pyramids still require calibrated Z. Explicit overrides are borrowed views:
+Both low-level `write_dataset()` writers require calibrated XY. Unknown Z spacing
+and time intervals remain unknown: the TIFF header omits the corresponding optional
+OME fields, and NGFF records unitless index axes rather than pretending they are
+micrometers/seconds. **Higher-level `convert` and `mutate` refuse multi-Z output
+without physical Z spacing unless the caller explicitly declares
+`--z-spacing-ordinal`.** Explicit `--z-spacing-size` and optional
+`--z-spacing-unit` override physical Z spacing using the same length units as XY;
+the default input unit is µm. The physical value is canonicalized to µm at the
+writer boundary. This gate is a workflow policy, not a new requirement for
+`open_dataset()`, `dataset.plane()`, or direct `write_dataset()`. XYZ automatic
+physical-anisotropy pyramids still require calibrated Z, even if ordinal mode
+was declared. Low-level metadata overrides remain borrowed views:
 `dataset.with_metadata(pixel_size=..., z_spacing_um=..., time_increment_s=...)`.
 Regular intrinsic Z/T origins are kept separately from acquisition measurements.
 
@@ -373,6 +381,14 @@ omeify convert input.ome.tif -o full.zarr --type ome_tiff \
 omeify convert input.zarr -o subset.ome.tif --type ome_zarr \
   --z-range 10 30 --compression Deflate --no-overwrite
 
+# For a source without a physical Z step, explicitly authorize index-only Z.
+omeify convert ordinal.zarr -o ordinal.ome.tif --type ome_zarr \
+  --z-spacing-ordinal --compression Deflate
+
+# Or supply a measured/known Z step with an independent physical unit.
+omeify convert ordinal.zarr -o calibrated.ome.tif --type ome_zarr \
+  --z-spacing-size 500 --z-spacing-unit nm --compression Deflate
+
 # Restrict both Z and T to export an ordinary 2D observation.
 omeify convert input.ome.tif -o plane.ome.tif --type ome_tiff \
   --t-index 3 --z-index 12 --no-overwrite
@@ -386,10 +402,15 @@ Omitted Z/T selectors retain every plane of the selected image/series. A single
 index restricts that axis while retaining the other; two indices select a 2D
 observation. A range is half-open and can be combined with an index on the other
 axis. Singleton/absent Z/T input retains the established 2D conversion path and
-report schema. `--all-planes` is not supported. Other workflows requiring one
-2D Image still reject unselected non-singleton axes. Additional stack flags are `--z-spacing-um`, `--time-increment-s`,
-`--pyramid-axes`, repeated `--pyramid-step Z Y X`, `--chunk-z`, and
-`--max-block-mib`. Incompatible TIFF/Zarr-only options fail.
+report schema. `--all-planes` and `--z-spacing-um` are not supported. Other workflows
+requiring one 2D Image still reject unselected non-singleton axes. With multi-Z
+output, missing physical Z spacing fails before writing unless the user chooses
+`--z-spacing-ordinal`; a physical override is `--z-spacing-size VALUE`
+`[--z-spacing-unit UNIT]` (default µm). The two choices are mutually exclusive.
+An explicit ordinal claim is an interpretation decision and is recorded in the
+operation report, not an invented instrument measurement. Other stack flags are
+`--time-increment-s`, `--pyramid-axes`, repeated `--pyramid-step Z Y X`, `--chunk-z`,
+and `--max-block-mib`. Incompatible TIFF/Zarr-only options fail.
 
 Integer mutation reuses the established mapping algorithms but scans the entire
 selected T/Z extent for each channel. The scan's bounded deterministic sample

@@ -107,6 +107,37 @@ source's numerical type and intensity scale, although lossy output compression
 and sRGB color conversion can change RGB values. Existing OME-TIFF and supported OME-Zarr images
 can also be converted into a fresh, normalized output.
 
+### Z-axis calibration for conversions
+
+If the selected output has **more than one Z section**, `convert` and `mutate`
+require either known physical Z spacing from the source or an explicit user
+choice. A missing value is **not** silently assumed to be ordinal. The two
+supported declarations are:
+
+```bash
+# Known physical step. The separate Z unit defaults to µm when omitted.
+omeify convert input.zarr --type ome_zarr --z-spacing-size 500 \
+  --z-spacing-unit nm -o calibrated.ome.tiff
+
+# Intentionally index-only Z: preserve all sections, with no physical Z scale.
+omeify convert input.zarr --type ome_zarr --z-spacing-ordinal \
+  -o ordinal.ome.tiff
+```
+
+`--z-spacing-size` is a deliberate override, even if the source has a physical
+spacing. The output canonicalizes known physical spacing to µm; ordinal output
+omits `PhysicalSizeZ`/`PhysicalSizeZUnit` in TIFF and the Z-axis physical unit
+in Zarr. Both workflows preserve T, C, and all unselected Z sections. Selecting
+one Z section needs no Z spacing. `--z-spacing-ordinal` cannot override a source
+that already provides usable physical spacing. The operation report records
+`input.z_spacing_policy` as `source`, `override`, `ordinal`, or `not_applicable`,
+and records the caller's explicit size/unit in `input.z_spacing_override` when
+one was supplied.
+The Python `convert()`/`mutate()` arguments are `z_spacing_size`,
+`z_spacing_unit`, and `z_spacing_ordinal`; the low-level dataset view retains its
+existing canonical `z_spacing_um` representation. These flags are not a substitute
+for studying an acquisition's actual physical sampling or irregular plane positions.
+
 ### Supported file conversions
 
 | Input | `--type` | Image representation |
@@ -280,7 +311,7 @@ compression, and content can differ, but the construction is predictable.
 | Image layout | Grayscale (`YX`), multiplex channel stacks (`CYX`), or interleaved RGB (`YXS`). RGB is three samples within one logical channel, not three fluorescence channels. |
 | Pixel types | Scalar images support 8-, 16-, and 32-bit signed or unsigned integers and 32- or 64-bit floats. RGB requires `uint8`. |
 | Pixel values | `convert` preserves scalar dtype and intensity scale; RGB is mapped to sRGB, which can change color samples. Lossless encoding retains output values; JPEG is lossy. `mutate` makes requested numerical changes. |
-| Calibration | X and Y physical pixel sizes are required, stored in **µm**, and checked against TIFF resolution tags. Supply them explicitly if missing. |
+| Calibration | X and Y physical pixel sizes are required and stored in **µm**. Multi-Z `convert`/`mutate` additionally require physical Z spacing or an explicit ordinal declaration. No missing measurement is invented. |
 | Pyramids | Tiled SubIFDs are rebuilt, not copied from the source. Intensity images default to 2× mean reduction; declared label images use nearest-neighbor reduction. |
 | Metadata | Fresh, controlled OME-XML instead of arbitrary vendor descriptions; crop outputs also retain region names and source-image coordinates. |
 | Verification | Generated metadata, TIFF organization, canonical ICC bytes, encoding, and sampled pixels are checked before the temporary output replaces the destination. |
@@ -337,8 +368,9 @@ MITI covers the broader imaging study, including biospecimen, reagent,
 instrument, acquisition, processing, and analysis records. Omeify addresses a
 **narrower image-header contract**: retain what is necessary to interpret the
 pixels, and leave other experimental records alongside the image rather than
-inventing them in the header. This is MITI-aligned construction, **not a claim of
-study-wide MITI compliance**.
+inventing them in the header. This is MITI-guided construction with a deliberate,
+explicitly declared ordinal-Z exception, **not a claim of exact compliance with
+MITI's published multi-Z calibration requirement or study-wide MITI compliance**.
 
 ### What can cross from the source?
 
@@ -361,6 +393,7 @@ The generated header is checked against
 | `Image ID`, `Pixels ID` | Generated | Unambiguous internal OME references without copying source IDs. |
 | `BigEndian`, `DimensionOrder`, `Interleaved` | Required and storage-checked | Describes the pixel layout. |
 | `PhysicalSizeX`, `PhysicalSizeY`, units | Required | Carries physical calibration. |
+| `PhysicalSizeZ`, `PhysicalSizeZUnit` | When known or explicitly supplied; both omitted only for declared ordinal multi-Z conversion | Never labels section indices as physical distances. |
 | `SizeX`, `SizeY`, `SizeC`, `SizeZ`, `SizeT` | Required | Declares image dimensions. |
 | `Type`, `SignificantBits` | Required and sample-checked | Declares pixel representation and precision. |
 | Channel `ID`, `Name`, `SamplesPerPixel` | Required | Identifies logical channels and RGB sample grouping. |

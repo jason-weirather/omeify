@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jason-weirather/omeify/schemas/miti_ome_tiff_header.schema.json",
   "title": "omeify MITI OME-TIFF header profile",
-  "description": "A normalized JSON representation of the OME-TIFF header fields required by omeify's interpretation of the MITI header minimums for planar mIF and interleaved RGB images. Pixel types follow the OME 2016-06 scalar numeric types supported by omeify, including uint8.",
+  "description": "Omeify's curated MITI-guided OME-TIFF image-header profile for scalar, multiplex, RGB, and Z/T images. The published MITI multi-Z checklist requires physical Z spacing, but this profile permits its omission only under the explicit ordinal-only multi-Z convert/mutate policy; callers must not equate that exception with literal checklist conformity. Pixel types follow the OME 2016-06 supported numeric types.",
   "type": "object",
   "additionalProperties": false,
   "required": [

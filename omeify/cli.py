@@ -65,8 +65,12 @@ def stack_options(function):
                      help="Half-open Z range START STOP; omitted T retains its full extent."),
         click.option("--t-range", nargs=2, type=click.IntRange(min=0), default=None,
                      help="Half-open time range START STOP; omitted Z retains its full extent."),
-        click.option("--z-spacing-um", type=click.FloatRange(min=0, min_open=True), default=None,
-                     help="Explicit regular stack Z-spacing override in micrometers."),
+        click.option("--z-spacing-size", type=click.FloatRange(min=0, min_open=True), default=None,
+                     help="Override physical Z spacing; unit defaults to micrometers."),
+        click.option("--z-spacing-unit", type=str, default=None,
+                     help="Physical Z-spacing unit with --z-spacing-size; default µm."),
+        click.option("--z-spacing-ordinal", is_flag=True,
+                     help="Explicitly allow multiple Z sections without physical spacing (index-only Z)."),
         click.option("--time-increment-s", type=click.FloatRange(min=0, min_open=True), default=None,
                      help="Explicit regular stack time-interval override in seconds."),
         click.option("--pyramid-axes", type=click.Choice(["xy", "xyz", "auto"]), default="xy",
@@ -466,7 +470,7 @@ def concat_command(
           "-vvv: also print the complete report unless --output-json is supplied."),
 )
 def convert_command(
-    z_range, t_range, z_spacing_um, time_increment_s,
+    z_range, t_range, z_spacing_size, z_spacing_unit, z_spacing_ordinal, time_increment_s,
     pyramid_axes: str, pyramid_factors, chunk_z: int, max_block_mib: int,
     group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
     output_format: str,
@@ -527,7 +531,8 @@ def convert_command(
             output_format=output_format, group=group, z=z, t=t, image_type=image_type,
             intrinsic_only=intrinsic_only,
             z_range=z_range, t_range=t_range,
-            z_spacing_um=z_spacing_um, time_increment_s=time_increment_s,
+            z_spacing_size=z_spacing_size, z_spacing_unit=z_spacing_unit,
+            z_spacing_ordinal=z_spacing_ordinal, time_increment_s=time_increment_s,
             pyramid_axes=pyramid_axes, pyramid_factors=pyramid_factors or None,
             chunk_z=chunk_z, max_block_bytes=max_block_mib*1024*1024,
             series=series,
@@ -705,7 +710,7 @@ def convert_command(
           "-vvv: also print the complete report unless --output-json is supplied."),
 )
 def mutate_command(
-    z_range, t_range, z_spacing_um, time_increment_s,
+    z_range, t_range, z_spacing_size, z_spacing_unit, z_spacing_ordinal, time_increment_s,
     pyramid_axes: str, pyramid_factors, chunk_z: int, max_block_mib: int,
     group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
     output_format: str,
@@ -775,7 +780,8 @@ def mutate_command(
             output_format=output_format, group=group, z=z, t=t, image_type=image_type,
             intrinsic_only=intrinsic_only,
             z_range=z_range, t_range=t_range,
-            z_spacing_um=z_spacing_um, time_increment_s=time_increment_s,
+            z_spacing_size=z_spacing_size, z_spacing_unit=z_spacing_unit,
+            z_spacing_ordinal=z_spacing_ordinal, time_increment_s=time_increment_s,
             pyramid_axes=pyramid_axes, pyramid_factors=pyramid_factors or None,
             chunk_z=chunk_z, max_block_bytes=max_block_mib*1024*1024,
             channel_name_field=channel_name_field,  # type: ignore[arg-type]

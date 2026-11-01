@@ -60,6 +60,22 @@
             "minimum": 0
           }
         },
+        "z_spacing_policy": {
+          "enum": ["source", "override", "ordinal", "not_applicable"]
+        },
+        "z_spacing_override": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["size", "unit"],
+              "properties": {
+                "size": {"type": "number", "exclusiveMinimum": 0},
+                "unit": {"enum": ["m", "cm", "mm", "µm", "nm", "pm", "fm", "Å", "in"]}
+              }
+            }
+          ]
+        },
         "t_range": {
           "type": [
             "array",
@@ -152,5 +168,53 @@
         }
       ]
     }
-  }
+
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"input": {
+          "required": ["z_spacing_policy"],
+          "properties": {"z_spacing_policy": {"const": "ordinal"}}
+        }}
+      },
+      "then": {
+        "properties": {"writer_report": {"properties": {"image": {
+          "properties": {"z_spacing_um": {"type": "null"}}
+        }}}}
+      }
+    },
+    {
+      "if": {
+        "properties": {"input": {
+          "required": ["z_spacing_policy"],
+          "properties": {"z_spacing_policy": {"enum": ["source", "override"]}}
+        }}
+      },
+      "then": {
+        "properties": {"writer_report": {"properties": {"image": {
+          "properties": {"z_spacing_um": {"type": "number", "exclusiveMinimum": 0}}
+        }}}}
+      }
+    },
+    {
+      "if": {"properties": {"input": {
+        "required": ["z_spacing_policy"],
+        "properties": {"z_spacing_policy": {"const": "override"}}
+      }}},
+      "then": {"properties": {"input": {
+        "required": ["z_spacing_override"],
+        "properties": {"z_spacing_override": {"type": "object"}}
+      }}}
+    },
+    {
+      "if": {"properties": {"input": {
+        "required": ["z_spacing_policy"],
+        "properties": {"z_spacing_policy": {"enum": ["source", "ordinal", "not_applicable"]}}
+      }}},
+      "then": {"properties": {"input": {
+        "properties": {"z_spacing_override": {"type": "null"}}
+      }}}
+    }
+  ]
 }

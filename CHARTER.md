@@ -35,13 +35,16 @@ MITI guides the curated header contract, but format validity, Omeify's image-
 interpretation contract, and strict compliance with the published MITI checklist
 are separate assessments. A published conditional requirement cannot be declared
 satisfied by an undocumented exception. When a Z axis has multiple ordered sections
-and no reliable physical spacing, preserve its indices without inventing a step or
-claiming that missing measurement proves intentional ordinal acquisition. Such an
-index-only image can be OME-valid and interpretation-complete for index-based use,
-while its omission of `PhysicalSizeZ` remains an explicit exception to MITI's
-published multi-Z header requirement. A known or explicitly supplied physical
-Z spacing is written with its unit and validated; unknown is never silently
-replaced with an arbitrary numeric value.
+and no reliable physical spacing, `convert` and `mutate` must refuse to export
+a multi-Z product until the caller explicitly declares ordinal-only sampling or
+supplies a positive physical Z spacing and its unit (µm by default). Missing
+measurements do not prove intentional ordinal acquisition: the declaration is
+an informed export decision, not an instrument fact. A known or explicitly
+supplied physical spacing is written with an explicit unit and validated;
+no arbitrary numeric step is invented. Index-only output remains OME-valid and
+interpretation-complete for index-based use under Omeify's documented MITI-
+guided exception, rather than a claim of literal satisfaction of the published
+multi-Z physical-size checklist.
 
 ## Core rules
 
@@ -78,8 +81,8 @@ replaced with an arbitrary numeric value.
 5. **Never invent geometry.** Distinguish indices, sampling, origins, and measured
    acquisition positions. Honor applicable standard-defined defaults without
    inventing missing values; unknown calibration or phase remains unknown.
-   When only an ordered Z index is available, preserve that index without
-   pretending the physical Z spacing or acquisition intent is known.
+   When an ordinal-only Z interpretation is explicitly authorized, preserve
+   indices without pretending physical spacing or acquisition intent is known.
    Rounded raster dimensions do not establish a sampling transform. Dataset
    `native_level` indexes stored resolutions; Image `level` indexes that 2D
    observation's compatible pyramid. A Z-reduced coarse slice must never silently

@@ -528,6 +528,14 @@ def validate_miti_ome_tiff_header(xml_string: str) -> MITIHeaderValidation:
     for image_index, image in enumerate(images):
         record, interleaved = _normalized_record(root, image, image_index, errors)
         records.append(record)
+        if (isinstance(record.get("size_z"), int) and record["size_z"] > 1
+                and "physical_size_z" not in record):
+            warnings.append(
+                f"Image[{image_index}]: Z has multiple sections without a physical Z "
+                "spacing; only ordinal Z interpretation is supported. This is "
+                "Omeify's deliberate MITI-guided exception, not a physical "
+                "distance measurement."
+            )
         _validate_record(
             record,
             image_index=image_index,

@@ -456,8 +456,12 @@ Only the selected image/series is converted. Series 0 is the default. Use
 `--group`. `convert` preserves the complete selected series, including Z/T,
 when no dimensional selection is supplied. `--z-range` and `--t-range` select
 half-open subsets; omitted dimensions retain their full extent. Selecting both
-indices explicitly produces an ordinary 2D image. The [Zarr reading contract](ome_zarr.md#reading-contract)
-describes additional-geometry and intrinsic-only restrictions.
+indices explicitly produces an ordinary 2D image. A multi-Z output with no
+physical Z sampling requires `--z-spacing-ordinal` or a physical
+`--z-spacing-size VALUE [--z-spacing-unit UNIT]`; the unit defaults to µm.
+The former `--z-spacing-um` option is removed, not aliased. Known source Z spacing
+needs no declaration; an explicit size overrides it. See the [Z/T contract](z_t_support.md)
+and [Zarr reading contract](ome_zarr.md#reading-contract) for details.
 
 #### Channel renaming
 
@@ -507,6 +511,9 @@ Common conversion options:
 --series N                 Declared source image/series; default 0
 --group PATH               Zarr image group within the store
 --z-index N, --t-index N    Restrict an OME axis; unselected axes stay complete
+--z-spacing-size VALUE     Physical step between Z sections (overrides source)
+--z-spacing-unit UNIT      Override unit, default µm; requires --z-spacing-size
+--z-spacing-ordinal        Declare multi-Z output to be index-only if uncalibrated
 --intrinsic-only           Explicitly discard additional Zarr spatial context
 --compression NAME         TIFF: JPEG for RGB, LZW otherwise; Zarr: ZSTD
 --jpeg-quality N           JPEG quality from 1 through 100; default 90

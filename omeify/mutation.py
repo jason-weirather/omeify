@@ -58,7 +58,8 @@ def mutate(
     output_format: OutputFormat = "ome_tiff",
     group: str = "", z: int | None = None, t: int | None = None,
     z_range=None, t_range=None,
-    z_spacing_um: float | None = None, time_increment_s: float | None = None,
+    z_spacing_size: float | None = None, z_spacing_unit: str | None = None,
+    z_spacing_ordinal: bool = False, time_increment_s: float | None = None,
     pyramid_axes: str = "xy", pyramid_factors=None, chunk_z: int = 1,
     max_block_bytes: int = 64 * 1024 * 1024,
     image_type: str | None = None, intrinsic_only: bool = False,
@@ -110,7 +111,8 @@ def mutate(
                     z=z, t=t, z_range=z_range, t_range=t_range,
                     image_type=image_type, intrinsic_only=intrinsic_only, storage_options=storage_options,
                     rename_channels=rename_channels, rename_channels_by=rename_channels_by,
-                    pixel_size=pixel_size, z_spacing_um=z_spacing_um, time_increment_s=time_increment_s,
+                    pixel_size=pixel_size, z_spacing_size=z_spacing_size, z_spacing_unit=z_spacing_unit,
+                    z_spacing_ordinal=z_spacing_ordinal, time_increment_s=time_increment_s,
                     pyramid_axes=pyramid_axes, pyramid_factors=pyramid_factors, chunk_z=chunk_z,
                     max_block_bytes=max_block_bytes, compression=compression, tile_size=tile_size,
                     pyramid_levels=pyramid_levels, downsample=downsample, max_workers=max_workers,
@@ -121,7 +123,8 @@ def mutate(
 
     elif z_range is not None or t_range is not None:
         raise ValueError("Z/T ranges require OME-TIFF or OME-Zarr input")
-    if (z_spacing_um is not None or time_increment_s is not None or pyramid_axes != "xy"
+    if (z_spacing_size is not None or z_spacing_unit is not None or z_spacing_ordinal
+            or time_increment_s is not None or pyramid_axes != "xy"
             or pyramid_factors is not None or chunk_z != 1 or max_block_bytes != 64*1024*1024):
         raise ValueError("Stack calibration/pyramid options require a non-singleton or ranged Z/T selection")
 

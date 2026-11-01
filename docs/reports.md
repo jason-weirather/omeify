@@ -260,8 +260,15 @@ can contain identifying information, and pixels are not screened for burned-in t
 Dataset conversions (including automatic full-series selection) and scoped stack
 mutations return `omeify.dataset_operation/1`, containing the selected half-open Z/T ranges, an `omeify.dataset_write/1` writer report and any
 fixed whole-stack mutation mapping. Ordinary 2D operation schemas are unchanged.
-Numeric axis geometry is allowlisted; cache statistics, full source file paths,
-acquisition free text and execution histories are not embedded in generated image metadata.
+The operation report's optional `input.z_spacing_policy` is `source`, `override`,
+`ordinal`, or `not_applicable`; the writer report independently contains the
+actual canonical `image.z_spacing_um` value or null. The separate optional
+`input.z_spacing_override` contains the caller-declared positive size and normalized
+length unit when an override was applied, and null otherwise. This records how the output
+interpreted the Z axis without transferring acquisition free text or a private
+provenance document into the image. Numeric axis geometry is allowlisted; cache
+statistics, full source file paths, acquisition free text and execution histories
+are not embedded in generated image metadata.
 Crop provenance intentionally retains the requested relative Zarr group path (which
 may contain identifying names), in addition to region/channel names and offsets.
 Reports may still contain paths and need review before sharing.

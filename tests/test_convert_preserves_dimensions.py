@@ -55,7 +55,9 @@ def test_metadata_schema_allows_unknown_z_spacing_but_rejects_dangling_units():
         ("Signal",), PixelSize(.5, .6, "µm"),
     )
     xml = generate_ome_xml(spec, (spec.shape,))["xml_string"]
-    assert validate_miti_ome_tiff_header(xml).is_valid
+    profile = validate_miti_ome_tiff_header(xml)
+    assert profile.is_valid
+    assert any("ordinal Z interpretation" in warning for warning in profile.warnings)
     pixels = etree.fromstring(xml.encode()).find(f"{{{OME}}}Image/{{{OME}}}Pixels")
     assert pixels is not None
     assert pixels.attrib["SizeZ"] == "4"
@@ -112,6 +114,7 @@ def test_convert_defaults_to_entire_selected_ome_tiff_stack(tmp_path, dest_fmt):
     assert report["input"]["z_range"] == [0, 4]
     assert report["input"]["t_range"] == [0, 3]
     assert report["writer_report"]["image"]["z_spacing_um"] == 2.5
+    assert report["input"]["z_spacing_policy"] == "source"
     assert report["writer_report"]["image"]["time_increment_s"] == 7.
     with open_dataset(dest, input_type=dest_fmt) as dataset:
         assert dataset.axes == "TCZYX"
@@ -185,14 +188,16 @@ def test_convert_ordinary_2d_keeps_old_report_and_samples(tmp_path):
 
 
 @pytest.mark.parametrize("dest_fmt", ("ome_tiff", "ome_zarr"))
-def test_conversion_without_z_or_time_measurements_never_fabricates_them(tmp_path, dest_fmt):
+def test_ordinal_declared_conversion_without_z_or_time_measurements_never_fabricates_them(tmp_path, dest_fmt):
     source, values = make_source_tiff(tmp_path, axes="TZYX", physical_z=False,
                                       physical_t=False)
     dest = tmp_path / ("unknown.ome.tif" if dest_fmt == "ome_tiff" else "unknown.zarr")
     report = convert(source, dest, input_type="ome_tiff", output_format=dest_fmt,
+                     z_spacing_ordinal=True,
                      compression="Deflate" if dest_fmt == "ome_tiff" else "ZSTD",
                      tile_size=16, pyramid_levels=0)
     validate_report(report, "dataset_operation_report.schema.json")
+    assert report["input"]["z_spacing_policy"] == "ordinal"
     assert report["writer_report"]["image"]["z_spacing_um"] is None
     assert report["writer_report"]["image"]["time_increment_s"] is None
     with open_dataset(dest, input_type=dest_fmt) as ds:

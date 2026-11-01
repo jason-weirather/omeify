@@ -5,6 +5,7 @@ from contextlib import ExitStack
 
 from .io.dataset import open_dataset
 from .io.image_metadata import integer
+from .io.pixel_size import PixelSize, canonical_length_unit
 from .io.output import image_writer
 from .reports import complete_report
 from .workflow import apply_channel_renames, validate_channel_rename_mapping, validate_image_paths
@@ -47,11 +48,58 @@ def stack_selection(dataset, *, z=None, t=None, z_range=None, t_range=None):
     return result, record
 
 
+def resolve_z_spacing(dataset, *, z_spacing_size=None, z_spacing_unit=None,
+                      z_spacing_ordinal=False):
+    """Enforce deliberate physical or index-only Z semantics for Z/T operations.
+
+    `z_spacing_size` and unit are a caller-authored physical calibration, not
+    a source inference. They are normalized to µm at the writer boundary.
+    ``None`` means retain the source scale, not set it to a numerical default.
+    """
+    if not isinstance(z_spacing_ordinal, bool):
+        raise TypeError("z_spacing_ordinal must be bool")
+    if z_spacing_ordinal and (z_spacing_size is not None or z_spacing_unit is not None):
+        raise ValueError("--z-spacing-ordinal conflicts with --z-spacing-size/--z-spacing-unit")
+    if z_spacing_size is None and z_spacing_unit is not None:
+        raise ValueError("--z-spacing-unit requires --z-spacing-size")
+    override = None
+    if z_spacing_size is not None:
+        # Match the established XY physical-length conversions, and reject
+        # non-finite, nonpositive, unsupported and underflowed units.
+        override = PixelSize(z_spacing_size, z_spacing_size,
+                             z_spacing_unit or "µm").converted_to("µm").x
+    info = dataset.axis_info("Z")
+    if info is None or info.size <= 1:
+        if override is not None or z_spacing_ordinal:
+            raise ValueError("Z spacing options require an output with multiple Z sections")
+        return None, "not_applicable"
+
+    from .io.dataset_writer import _physical_axis
+    source, _ = _physical_axis(dataset, "Z", "µm")
+    if z_spacing_ordinal:
+        if source is not None:
+            raise ValueError("Source Z spacing is already calibrated; --z-spacing-ordinal "
+                             "cannot discard known physical spacing")
+        return None, "ordinal"
+    if override is not None:
+        return override, "override"
+    if source is None:
+        raise ValueError(
+            f"Selected dataset contains {info.size} Z sections without physical Z spacing. "
+            "If Z is intentionally index-only, use --z-spacing-ordinal "
+            "(Python: z_spacing_ordinal=True). Otherwise provide --z-spacing-size "
+            "VALUE [--z-spacing-unit UNIT] (Python: z_spacing_size=VALUE, "
+            "z_spacing_unit='µm'); the default unit is µm."
+        )
+    return None, "source"
+
+
 def process_dataset(input_path, output_path, *, operation, input_type, output_format="ome_tiff",
         series=0, group="", z=None, t=None, z_range=None, t_range=None,
         image_type=None, intrinsic_only=False, storage_options=None,
         rename_channels=None, rename_channels_by=None, pixel_size=None,
-        z_spacing_um=None, time_increment_s=None, pyramid_axes="xy", pyramid_factors=None,
+        z_spacing_size=None, z_spacing_unit=None, z_spacing_ordinal=False,
+        time_increment_s=None, pyramid_axes="xy", pyramid_factors=None,
         chunk_z=1, max_block_bytes=64*1024*1024, dtype=None, float32_mantissa_bits=None,
         range_mode=None, sample_pixels_per_channel=262144, auto_max_normalized_rmse=.005,
         compression=None,tile_size=None,pyramid_levels=None,downsample="mean",max_workers=None,
@@ -95,9 +143,12 @@ def process_dataset(input_path, output_path, *, operation, input_type, output_fo
         selection,coordinates=stack_selection(original,z=z,t=t,
                                                z_range=z_range,t_range=t_range)
         selected=stack.enter_context(original.select(**selection))
+        z_override, z_policy = resolve_z_spacing(
+            selected, z_spacing_size=z_spacing_size, z_spacing_unit=z_spacing_unit,
+            z_spacing_ordinal=z_spacing_ordinal)
         names=apply_channel_renames(selected.channel_names,renames,mode)
         prepared=stack.enter_context(selected.with_metadata(channel_names=names,pixel_size=pixel_size,
-                            z_spacing_um=z_spacing_um,time_increment_s=time_increment_s))
+                            z_spacing_um=z_override,time_increment_s=time_increment_s))
         mutation=None
         if operation == "mutate":
             if prepared.image_type != "multichannel" or prepared.dtype.kind != "f":
@@ -121,5 +172,10 @@ def process_dataset(input_path, output_path, *, operation, input_type, output_fo
         else:
             report=writer.write_dataset(prepared)
     return complete_report({"operation":operation,"input":{"path":str(source),"format":input_type,
-            "series":series,"group":group,"z_range":coordinates["z"],"t_range":coordinates["t"]},
+            "series":series,"group":group,"z_range":coordinates["z"],"t_range":coordinates["t"],
+            "z_spacing_policy":z_policy,
+            "z_spacing_override": (None if z_spacing_size is None else {
+                "size": float(z_spacing_size),
+                "unit": canonical_length_unit(z_spacing_unit or "µm"),
+            })},
         "writer_report":report,"mutation":mutation},"dataset_operation_report.schema.json")

@@ -281,7 +281,11 @@ omeify inspect normalized.ome.zarr --detail 3 --json -o inspection.json
 `convert` and `mutate` have the same keyword `output_format="ome_zarr"` in Python.
 For an OME source, conversion preserves the complete selected Z/T series by
 default. A supplied `--z-index`/`--t-index` or half-open range restricts only
-that axis; the other is retained. The strict one-plane reader and crop APIs
+that axis; the other is retained. If the resulting image retains multiple Z
+sections with unknown physical spacing, `convert`/`mutate` require an explicit
+`--z-spacing-ordinal` or `--z-spacing-size` (optional `--z-spacing-unit`, default µm).
+An ordinal Z axis is written without a physical unit; its numerical index scale
+must not be mistaken for a measurement in micrometers. The strict one-plane reader and crop APIs
 still require explicit selection of non-singleton Z/T axes. Native `crop()` retains
 its existing GeoJSON ROI naming/grouping and per-output transaction rules, but now
 masks pixels outside GeoJSON polygon exteriors (including holes and multipolygon
