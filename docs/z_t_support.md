@@ -1,4 +1,4 @@
-# Z/T source sessions (development branch)
+# Z/T source sessions (0.23)
 
 This addition keeps **Image two-dimensional**. `Image`, `ImageSource`, channel
 handles, `read_region()`, `asarray()`, and ordinary `writer.write(image)` retain
@@ -7,11 +7,12 @@ native Z/T axes and owns shared storage resources; it is not another renderer or
 a multidimensional subclass of Image. No additional package or runtime framework
 is required.
 
-This is an unreleased branch implementation. The mandatory real Zarr, codec and
-OME-XSD tests must pass in a complete development environment before release.
-The dependency-limited implementation environment did not establish those
-integration results. See the accompanying implementation test report for the
-actual runs, not an implied compatibility certification.
+The 0.23 release adds Z/T support to Omeify without changing the existing 2D
+Image contract. Required real Zarr, TIFF codec, and OME-XSD tests are part of the
+ordinary test suite, not optional integrations. See [development and release
+checks](development.md) for supported Python/dependency environments, installed-wheel
+verification, and independent interoperability tests. Synthetic test fixtures do
+not establish compatibility with every third-party acquisition.
 
 ## Open once, select ordinary Images
 

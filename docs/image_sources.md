@@ -20,7 +20,7 @@ call signatures are unchanged. There are no deprecated forwarding APIs. File ope
 now validates the complete advertised level description; inconsistent metadata
 can fail earlier than a later regional read in the former reader implementation.
 
-## Z/T source sessions (development)
+## Z/T source sessions (0.23)
 
 The existing Image API remains 2D. `open_dataset()` describes a complete native
 OME-TIFF/OME-Zarr source and yields ordinary Images with `.plane(z=..., t=...)`.

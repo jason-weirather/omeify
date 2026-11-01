@@ -12,7 +12,7 @@ see [Images and sources](image_sources.md).
 [Python API](#python-api) · [Verification](#validation-and-verification) ·
 [I/O and failure behavior](#io-scratch-space-and-failure-behavior)
 
-## Z/T source sessions (development)
+## Z/T source sessions (0.23)
 
 [Z/T source sessions](z_t_support.md) is the reference for `open_dataset()`,
 `ImageDataset`, source-axis metadata, immutable plane Images, shared cache,

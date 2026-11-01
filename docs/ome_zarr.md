@@ -5,7 +5,7 @@ Omeify 0.22 reads **OME-Zarr 0.4, 0.5 and 0.6**. Its canonical writer produces
 OME-TIFF remains the default output; choose Zarr explicitly. This is a restricted
 use of an open format, not a requirement for a private Omeify reader.
 
-## Z/T source sessions and volume pyramids (development)
+## Z/T source sessions and volume pyramids (0.23)
 
 The [Z/T guide](z_t_support.md) extends this 2D reference with persistent source
 sessions and explicit regular-stack output. Z-downsampled native levels are now

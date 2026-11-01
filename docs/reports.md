@@ -263,7 +263,7 @@ Successful structural report validation does not independently repeat those chec
 Metadata minimization is not deidentification. Reports and allowed image metadata
 can contain identifying information, and pixels are not screened for burned-in text.
 
-## Z/T development branch reports
+## Z/T dataset operation reports
 
 Dataset conversions (including automatic full-series selection) and scoped stack
 mutations return `omeify.dataset_operation/1`, containing the selected half-open Z/T ranges, an `omeify.dataset_write/1` writer report and any

@@ -31,7 +31,7 @@ OME-TIFF without installing Omeify.
 [Metadata and MITI](#metadata-minimization-and-miti-alignment) ·
 [Python library](#python-library) · [Charter](CHARTER.md) · [Reference][reference]
 
-## Z/T release candidate
+## Z/T image stacks (0.23)
 
 `Image` remains a two-dimensional observation. `open_dataset()` adds persistent
 OME-TIFF/OME-Zarr source sessions, first-class Z/T axis metadata, borrowed plane
@@ -42,10 +42,11 @@ anisotropy-aware pyramids. `convert` preserves complete selected Z/T series by d
 `mutate` makes explicit numerical changes over the selected extent. Multi-file TIFF is not included.
 
 See [Z/T source sessions, examples, and limitations](docs/z_t_support.md).
-This candidate adds dependency-backed Z/T tests and 2D compatibility regressions.
-Complete the release checklist and representative real-data checks before publishing. Existing 2D examples,
-defaults and methods below retain their meaning. The new stack paths do not
-claim full parity for every existing CLI workflow or irregular acquisition data.
+Version 0.23 adds dependency-backed Z/T tests and 2D compatibility regressions.
+The [release checks](docs/development.md) describe baseline and independent interoperability
+validation. Existing 2D examples, defaults and methods below retain their meaning.
+Stack paths do not claim full parity for every existing CLI workflow or
+irregular acquisition data.
 
 ## Installation
 
