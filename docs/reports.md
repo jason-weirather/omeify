@@ -289,7 +289,7 @@ may contain identifying names), in addition to region/channel names and offsets.
 Reports may still contain paths and need review before sharing.
 See [Z/T source sessions](z_t_support.md) for implementation and validation limits.
 
-## Plane-selection provenance additions (0.23.0)
+## Plane-selection provenance additions (0.23)
 
 Single-plane `convert` and `mutate` reports record the resolved `z` and `t`
 indices in `options` for both OME-TIFF and OME-Zarr input. Where an axis is

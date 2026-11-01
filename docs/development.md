@@ -103,7 +103,7 @@ POSIX shell example, after `python -m build`:
 CHECKOUT="$(pwd)"
 TEMP_ENV="$(mktemp -d)"
 python -m venv "$TEMP_ENV/venv"
-"$TEMP_ENV/venv/bin/python" -m pip install "$CHECKOUT/dist/omeify-0.23.0-py3-none-any.whl"
+"$TEMP_ENV/venv/bin/python" -m pip install "$CHECKOUT/dist/omeify-0.23.1-py3-none-any.whl"
 "$TEMP_ENV/venv/bin/python" -m pip check
 (cd "$TEMP_ENV" && "$TEMP_ENV/venv/bin/python" -I "$CHECKOUT/tests/installed_smoke.py")
 ```
@@ -132,9 +132,9 @@ These fixtures prove tested boundaries, not vendor-file certification, privacy
 classification, cloud deployment compatibility, or a whole-store audit.
 
 
-## PyPI publication checkpoint for 0.23.0
+## PyPI publication checkpoint for 0.23.1
 
-`pyproject.toml` specifies **omeify 0.23.0**. Complete the Python 3.11 and newer
+`pyproject.toml` specifies **omeify 0.23.1**. Complete the Python 3.11 and newer
 interoperability test lanes and the installed-wheel smoke check before release.
 Publishing is an explicit maintainer action requiring a configured PyPI account
 or trusted-publishing identity; the source checkout does not publish by itself.
@@ -142,13 +142,13 @@ or trusted-publishing identity; the source checkout does not publish by itself.
 ```bash
 python -m pip install 'build>=1.2' 'twine>=6'
 python -m build
-python -m twine check dist/omeify-0.23.0*
+python -m twine check dist/omeify-0.23.1*
 # Authenticate via trusted publishing or an approved PyPI token mechanism.
-python -m twine upload dist/omeify-0.23.0*
+python -m twine upload dist/omeify-0.23.1*
 python -m pip index versions omeify
 ```
 
-Check that `omeify-0.23.0-py3-none-any.whl` installs outside this checkout and
+Check that `omeify-0.23.1-py3-none-any.whl` installs outside this checkout and
 that `omeify version --json`, TIFF read/write and OME-Zarr HTTP/local read/write
 work from that installed distribution. Do not commit `.pypirc`, tokens, or AWS
 credentials. Native S3 uses the optional `omeify[s3]` extra, not an import side
