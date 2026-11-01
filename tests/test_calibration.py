@@ -137,6 +137,10 @@ def test_missing_ome_units_use_schema_default_without_fabricating_attributes(tmp
     assert result["ome"]["x"]["unit"] is None
     assert result["ome"]["x"]["unit_defaulted"] is True
     assert inspector.report["ome"]["images"][0]["physical_size"]["x"]["unit"] is None
+    # The reader uses the OME schema's default µm without rewriting source
+    # metadata or pretending absent raw unit attributes were explicitly present.
+    with OMETiffReader(path) as image:
+        assert image.pixel_size == PixelSize(0.5, 0.6, "µm")
     assert any(
         "PhysicalSizeXUnit" in key for key in inspector.report["ome"]["miti"]["missing_fields"]
     )

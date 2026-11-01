@@ -19,7 +19,11 @@ instead of a TIFF suffix. Names and crop provenance are intentional retained
 metadata; `by_index` does not remove names from metadata. Known physical origins
 are shifted with the crop. See [OME-Zarr](ome_zarr.md) for complete examples and
 new-directory publication restrictions. Current crop report: `omeify.crop/6`;
-embedded provenance: `omeify.crop_provenance/3`.
+embedded provenance: `omeify.crop_provenance/3`. Both include the
+selected source Z/T plane (`source_z`, `source_t`) and the requested Zarr group
+(`source_group`, null for TIFF) so a cropped plane is traceable to its source.
+The group path and region/channel names should be reviewed for identifying text
+before sharing the resulting image.
 
 ## Crop known coordinates
 

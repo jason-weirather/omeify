@@ -137,7 +137,8 @@ def verify_prepared_images(
         item.compression.subsampling is not None for item in images
     )
     any_icc = any(item.spec.icc_profile is not None for item in images)
-    top_level_pages = list(output.pages)
+    from .._reader_sequence import SequenceWindow
+    top_level_pages = output.pages
 
     for series_index, (series, item) in enumerate(
         zip(output.series, images, strict=True)
@@ -183,7 +184,7 @@ def verify_prepared_images(
                     f"{tuple(level.shape)} does not match {expected_shape}"
                 )
 
-        frames = top_level_pages[page_offset : page_offset + spec.plane_count]
+        frames = SequenceWindow(top_level_pages, page_offset, page_offset + spec.plane_count)
         page_offset += spec.plane_count
         verify_storage(frames, item)
         coordinates = representative_coordinates(spec.size_y, spec.size_x)
@@ -397,9 +398,12 @@ def verify_output_icc(page: tifffile.TiffPage, *, spec: OMEImageSpec) -> None:
 
 def frame_readers(
     frames: Sequence[tifffile.TiffPage | tifffile.TiffFrame],
-) -> list[TiffPlaneReader]:
-    lock = threading.RLock()
-    return [TiffPlaneReader(frame.aspage(), lock=lock) for frame in frames]
+) -> Sequence[TiffPlaneReader]:
+    from .._reader_sequence import ReaderSequence
+    from ..read_cache import ReadCache
+    lock, cache = threading.RLock(), ReadCache()
+    return ReaderSequence(len(frames), lambda i: TiffPlaneReader(
+        frames[i].aspage(), lock=lock, cache=cache))
 
 
 def verify_page_layout(

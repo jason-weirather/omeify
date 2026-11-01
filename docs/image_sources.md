@@ -1,9 +1,13 @@
 # Images and sources
 
-Omeify has one library input model: an **Image** backed by an **ImageSource**.
-File readers, array images, and procedural images use the same lifecycle,
-regional reads, logical channels, and writer bridge. Omeify does not import
-Mocktome or contain simulator-specific dispatch.
+Omeify retains two deliberately distinct source interfaces. An **Image** backed
+by **ImageSource** represents a fixed 2D observation (YX, CYX or YXS). An
+**ImageDataset** backed by **DatasetSource** describes native Z/T observations and
+creates ordinary 2D Images through `dataset.plane()`. They share the same private
+source-session lifecycle and, for TIFF and Zarr, one underlying pixel decoder,
+not two storage implementations. File readers, array images, and procedural
+images use the same regional Image API once a plane is selected. Omeify does
+not import Mocktome or contain simulator-specific dispatch.
 
 The Image API established in 0.18 remains the current interface. Conversion and
 mutation numeric policies are unchanged. The [0.21 report cleanup](reports.md)
@@ -12,6 +16,25 @@ changes serialized report fields and CLI presentation, not this image model. The
 call signatures are unchanged. There are no deprecated forwarding APIs. File opening
 now validates the complete advertised level description; inconsistent metadata
 can fail earlier than a later regional read in the former reader implementation.
+
+## Z/T source sessions (development)
+
+The existing Image API remains 2D. `open_dataset()` describes a complete native
+OME-TIFF/OME-Zarr source and yields ordinary Images with `.plane(z=..., t=...)`.
+It shares handles, metadata and cache ownership across those immutable views.
+`dataset.axes`/`dataset.shape` and `read_block()` use canonical logical layouts,
+while `dataset.native_axes`/`dataset.native_shape` report original storage order.
+A dataset-level resolution is selected by `native_level=`; 2D Image readers
+continue using `level=`. The dataset-specific array/borrowed backends implement
+`DatasetSource`, not a misleading unresolved 2D `ImageSource`. Both source
+contracts share only a private, metadata-neutral lifecycle. Dataset-only sources
+validate native `DatasetLevel` descriptions rather than exposing a duplicate 2D
+metadata record. `dataset.plane()` constructs the ordinary 2D Image bridge.
+`OMETiffReader` and `OMEZarrReader` borrow navigation from their existing
+backend; neither opens a second file/store for the `.dataset` property.
+The [Z/T guide](z_t_support.md) documents source axes, native-level selection,
+bounded block reads, optional prefetch and explicit `write_dataset()` output.
+This adds no multidimensional `Image.asarray()` behavior or mutable Z/T cursor.
 
 ## OME-Zarr and coordinates (0.22)
 

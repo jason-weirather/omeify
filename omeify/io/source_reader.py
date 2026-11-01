@@ -73,8 +73,10 @@ def source_reader(
         return OMEZarrReader(input_path, series=series, group=group, z=z, t=t,
                              image_type=image_type, intrinsic_only=intrinsic_only,
                              storage_options=storage_options)
-    if group or z is not None or t is not None or intrinsic_only or storage_options is not None:
-        raise ValueError("group, Z/T selection, intrinsic_only and remote options require OME-Zarr input")
+    if group or intrinsic_only or storage_options is not None:
+        raise ValueError("group, intrinsic_only and remote options require OME-Zarr input")
+    if (z is not None or t is not None) and input_type != "ome_tiff":
+        raise ValueError("Z/T selection requires OME-TIFF or OME-Zarr input")
     if "://" in str(input_path):
         raise ValueError("Remote input currently requires input_type='ome_zarr'")
     if image_type not in {None, "label"} or (image_type == "label" and input_type != "ome_tiff"):
@@ -104,7 +106,7 @@ def source_reader(
     if input_type == "ome_tiff":
         if channel_name_field is not None:
             raise ValueError("channel_name_field is only valid for qptiff_fusion input")
-        return (OMETiffLabelReader if image_type == "label" else OMETiffReader)(input_path, series=series)
+        return (OMETiffLabelReader if image_type == "label" else OMETiffReader)(input_path, series=series, z=z, t=t)
     if input_type == "indica_mif":
         if channel_name_field is not None:
             raise ValueError("channel_name_field is only valid for qptiff_fusion input")

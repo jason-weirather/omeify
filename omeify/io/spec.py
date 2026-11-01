@@ -40,8 +40,21 @@ class OMEImageSpec:
     significant_bits_override: int | None = None
     origin_yx: tuple[float, float] | None = None
     pyramid_method: str = "mean"
+    # Writer-only multidimensional descriptors. ImageMetadata/Image stay 2D.
+    z_spacing_um: float | None = None
+    time_increment_s: float | None = None
+    z_origin_um: float | None = None
+    time_origin_s: float | None = None
 
     def __post_init__(self) -> None:
+        for field in ("z_spacing_um", "time_increment_s", "z_origin_um", "time_origin_s"):
+            value = getattr(self, field)
+            if value is not None:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                    raise ValueError(f"{field} must be a finite number or None")
+                if field in {"z_spacing_um", "time_increment_s"} and value <= 0:
+                    raise ValueError(f"{field} must be positive")
+                object.__setattr__(self, field, float(value))
         if self.origin_yx is not None:
             if len(self.origin_yx) != 2 or any(
                 isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float))
@@ -97,9 +110,9 @@ class OMEImageSpec:
             raise ValueError("OME logical channel names must be non-empty")
 
         if image_type == "rgb":
-            if self.axes != "YXS" or self.shape[-1] != 3:
+            if self.axes not in {"YXS", "TZYXS"} or self.shape[-1] != 3:
                 raise ValueError(
-                    "RGB OME-TIFF output requires axes='YXS' and shape (Y, X, 3); "
+                    "RGB OME-TIFF output requires YXS or TZYXS with S=3; "
                     f"found axes={self.axes!r}, shape={self.shape}."
                 )
             if self.dtype != np.dtype("uint8"):
@@ -109,9 +122,9 @@ class OMEImageSpec:
                     "RGB OME metadata requires one logical channel name, normally 'RGB'"
                 )
         elif image_type == "label":
-            if self.axes != "YX" or len(self.shape) != 2:
+            if self.axes not in {"YX", "TZYX"}:
                 raise ValueError(
-                    "Label OME-TIFF output requires one YX label raster; "
+                    "Label OME-TIFF output requires YX or TZYX label rasters; "
                     f"found axes={self.axes!r}, shape={self.shape}."
                 )
             if not np.issubdtype(self.dtype, np.integer):
@@ -123,12 +136,12 @@ class OMEImageSpec:
             if self.icc_profile is not None:
                 raise ValueError("ICC profiles are only valid for RGB images")
         else:
-            if self.axes not in {"YX", "CYX"}:
+            if self.axes not in {"YX", "CYX", "TCZYX"}:
                 raise ValueError(
-                    "Multichannel OME-TIFF output currently requires axes='YX' or 'CYX'; "
+                    "Multichannel OME-TIFF output requires YX, CYX, or TCZYX; "
                     f"found {self.axes!r}."
                 )
-            expected_channels = self.shape[0] if self.axes == "CYX" else 1
+            expected_channels = self.shape[self.axes.index("C")] if "C" in self.axes else 1
             if len(self.channel_names) != expected_channels:
                 raise ValueError(
                     f"Expected {expected_channels} logical channel names for {self.axes} shape "
@@ -136,6 +149,13 @@ class OMEImageSpec:
                 )
             if self.icc_profile is not None:
                 raise ValueError("ICC profiles are only valid for RGB images")
+
+        if self.size_z > 1 and self.z_spacing_um is None:
+            raise ValueError("Calibrated volume output requires z_spacing_um")
+        if self.z_origin_um is not None and self.z_spacing_um is None:
+            raise ValueError("A physical Z origin requires Z calibration")
+        if self.time_origin_s is not None and self.time_increment_s is None:
+            raise ValueError("A time origin requires time calibration")
 
     @classmethod
     def from_shape(
@@ -193,7 +213,15 @@ class OMEImageSpec:
 
     @property
     def plane_count(self) -> int:
-        return self.logical_channel_count
+        return self.logical_channel_count * self.size_z * self.size_t
+
+    @property
+    def size_z(self) -> int:
+        return self.shape[self.axes.index("Z")] if "Z" in self.axes else 1
+
+    @property
+    def size_t(self) -> int:
+        return self.shape[self.axes.index("T")] if "T" in self.axes else 1
 
     @property
     def significant_bits(self) -> int:

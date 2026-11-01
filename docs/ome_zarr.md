@@ -5,6 +5,20 @@ Omeify 0.22 reads **OME-Zarr 0.4, 0.5 and 0.6**. Its canonical writer produces
 OME-TIFF remains the default output; choose Zarr explicitly. This is a restricted
 use of an open format, not a requirement for a private Omeify reader.
 
+## Z/T source sessions and volume pyramids (development)
+
+The [Z/T guide](z_t_support.md) extends this 2D reference with persistent source
+sessions and explicit regular-stack output. Z-downsampled native levels are now
+readable, but are excluded from a base-plane Image's interchangeable XY pyramid.
+Use a native-level plane selection explicitly for such a coarse observation.
+The existing `write(image)` profile stays unchanged; `write_dataset()` uses a
+separate strict stored `tczyx` attribute profile and can construct XY/XYZ pyramids.
+The public logical dataset/block axes are `TCZYX` for multiplex, `TZYXS` for RGB,
+and `TZYX` for a single scalar/labels. Stored RGB uses the NGFF C components,
+not a nonstandard S axis; `native_axes` records the physical layout. Dataset
+native-level selection uses `native_level=`; 2D image pyramid reads retain
+`level=`.
+
 ## Installation and dependencies
 
 ```bash
@@ -79,7 +93,8 @@ are not treated as a second 0.5-style coordinate declaration.
 pixels, resample registration, stitch scenes, scan for a convenient image, or
 follow metadata paths outside the selected store. Custom axis names, array-valued
 transform parameters, reflected intrinsic grids, arbitrary affine/nonlinear
-intrinsic transforms and Z-downsampled selected-plane pyramids fail explicitly.
+intrinsic transforms fail explicitly. Z-downsampled levels require explicit
+native-level selection; they are not silently treated as the same optical plane.
 This is not a claim to implement every feature of the three NGFF specifications.
 
 A 0.6 image can have additional spatial relationships beyond its intrinsic raster.
@@ -305,8 +320,10 @@ with OMEZarrReader("https://example.org/datasets/tonsil-v1/image.ome.zarr") as i
 That URL is illustrative, not a hosted Omeify dataset. An ordinary static HTTP
 server can serve an unsharded store. No directory listing, complete download or
 persistent disk cache is required. A read transfers metadata and encoded chunks
-needed for its region. Each reader has a bounded 64 MiB encoded-byte cache;
-`cache_bytes=0` disables it and `image.clear_cache()` evicts it.
+needed for its region. Each source session has a bounded 64 MiB retained-payload budget, shared across
+plane views: one quarter encoded responses and three quarters decoded native
+blocks. `cache_bytes=0` disables retention and `image.clear_cache()` evicts it.
+This does not bound codec scratch, in-flight buffers or returned arrays.
 
 Library `storage_options` are passed deliberately to fsspec for transport settings.
 Use plain store-root URLs, not credentials or signed query parameters embedded in

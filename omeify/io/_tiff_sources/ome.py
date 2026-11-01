@@ -13,6 +13,9 @@ from lxml import etree
 from omeify.utils.ome_geometry import calibrated_levels, read_geometry
 
 from ..image_metadata import ImageLevel, ImageMetadata
+from ..dataset_metadata import AxisInfo, DatasetLevel, selected_index
+from ..tiff import TiffPlaneReader
+from .ome_index import OMEPlaneIndex
 from ..pixel_size import PixelSize, consistent_tiff_resolution_pixel_size, pixel_size_from_xy_units
 from .base import TiffSource
 
@@ -20,13 +23,20 @@ LOGGER = logging.getLogger(__name__)
 
 
 class OMESource(TiffSource):
+    supports_prefetch = True
+
     def __init__(
         self, path: str | Path, *, series: int = 0, labels: bool = False,
-        background_label: int = 0,
+        background_label: int = 0, z=None, t=None,
+        cache_bytes=64 * 1024 * 1024, _allow_default_selection=False,
     ) -> None:
-        super().__init__(path, series=series)
+        super().__init__(path, series=series, cache_bytes=cache_bytes)
         self._labels = labels
         self._background_label = background_label
+        self.z, self.t = z, t
+        self._allow_default_selection = _allow_default_selection
+        self._plane_index = None
+        self._plane_map = None
 
     def _load_file(self, tiff: tifffile.TiffFile) -> None:
         if not tiff.is_ome:
@@ -36,28 +46,20 @@ class OMESource(TiffSource):
                 f"Series {self.series_index} does not exist ({len(tiff.series)} series)",
             )
         self._series = tiff.series[self.series_index]
-        self._ome_image_summary()
+        self._plane_index = OMEPlaneIndex(tiff)
+        self._plane_map = self._plane_index.map_series(self.series_index)
+        from omeify.utils.stack_geometry import read_stack_geometry
+        pixels = self._plane_map.pixels
+        self._stack_geometry = read_stack_geometry(pixels.getroottree().getroot(), pixels.getparent())
+        self.z = selected_index(self._axis_info("Z"), self.z, name="Z",
+                                default=self._allow_default_selection)
+        self.t = selected_index(self._axis_info("T"), self.t, name="T",
+                                default=self._allow_default_selection)
 
     def _mapped_ome_image(self, series_index: int) -> dict[str, Any]:
-        """Resolve metadata through inspection's authoritative local TiffData map.
-
-        Ordinals, names and equal dimensions are not evidence of identity.
-        Incomplete/ambiguous/scan-limited mappings must not become generated
-        channel names or TIFF-calibration fallbacks during conversion.
-        """
-
-        report = self.inspect().report
-        ome = report.get("ome")
-        mappings = report["calibration"]["series"]
-        mapping = mappings[series_index]
-        image_index = mapping["ome_image_index"]
-        images = [] if ome is None else ome.get("images", [])
-        if image_index is None or not 0 <= image_index < len(images):
-            raise ValueError(
-                f"Cannot associate TIFF series {series_index} with an OME Image: "
-                f"{mapping['mapping_reason']}. Refusing to guess channel identity or calibration."
-            )
-        return images[image_index]
+        if self._plane_index is None:
+            raise RuntimeError("TIFF source is not open")
+        return self._plane_index.summary(series_index)
 
     def _ome_image_summary(self) -> dict[str, Any]:
         return self._mapped_ome_image(self.series_index)
@@ -67,15 +69,21 @@ class OMESource(TiffSource):
         physical = (image.get("physical_size") or {}) if image is not None else {}
         x = physical.get("x")
         y = physical.get("y")
-        x_complete = bool(x and x.get("value") is not None and x.get("unit"))
-        y_complete = bool(y and y.get("value") is not None and y.get("unit"))
+        # OME-XML 2016-06 defaults omitted PhysicalSize*Unit attributes to µm.
+        # The inspection summary deliberately retains the *raw* absent units;
+        # use its schema-aware calibration interpreter for effective read units.
+        # This does not invent missing numeric PhysicalSizeX/Y measurements.
+        from omeify._calibration import ome_calibration
+        effective = ome_calibration(self._plane_map.pixels)
+        x_unit = effective["x"]["effective_unit"]
+        y_unit = effective["y"]["effective_unit"]
+        x_complete = bool(x and x.get("value") is not None and x_unit)
+        y_complete = bool(y and y.get("value") is not None and y_unit)
         if x_complete and y_complete:
             assert x is not None and y is not None
             return pixel_size_from_xy_units(
-                float(x["value"]),
-                str(x["unit"]),
-                float(y["value"]),
-                str(y["unit"]),
+                float(x["value"]), str(x_unit),
+                float(y["value"]), str(y_unit),
             )
 
         if x is not None or y is not None:
@@ -173,9 +181,9 @@ class OMESource(TiffSource):
         native = self.native_levels[0]
         layout = dict(zip(str(native.axes), native.shape))
         if "Y" not in layout or "X" not in layout or any(
-            n != 1 for axis, n in layout.items() if axis not in "CSYX"
+            n != 1 for axis, n in layout.items() if axis not in "TCZSYX"
         ):
-            raise NotImplementedError("OME images require Y/X and singleton non-spatial axes")
+            raise NotImplementedError("OME images require Y/X and supported T/C/Z/sample axes")
         pages = self._level_pages(0)
         summaries = list(self._ome_image_summary().get("channels", []))
         count = len(summaries) or int(layout.get("C", 1))
@@ -225,6 +233,178 @@ class OMESource(TiffSource):
             icc_profile=None if profile is None else bytes(profile),
             background_label=self._background_label,
         )
+
+    def _axis_info(self, name, *, size=None):
+        pixels = self._plane_map.pixels
+        if name in "ZT":
+            count = self._plane_map.sizes[name] if size is None else size
+            value = pixels.get("PhysicalSizeZ" if name == "Z" else "TimeIncrement")
+            unit = pixels.get("PhysicalSizeZUnit", "µm") if name == "Z" else pixels.get("TimeIncrementUnit", "s")
+            scale = None if value is None else float(value)
+            if scale is not None and (not math.isfinite(scale) or scale < 0):
+                raise ValueError("OME Z/T sampling interval must be nonnegative and finite")
+            # A singleton Z/T axis needs no sampling interval to select its
+            # only plane. Accept optional nonphysical/zero acquisition tags on
+            # 2D inputs without pretending they are calibrated intervals.
+            if scale == 0 and count == 1:
+                LOGGER.debug("Ignoring zero %s sampling interval on singleton OME axis", name)
+                scale, unit = None, None
+            elif scale is not None:
+                try:
+                    if name == "Z":
+                        scale = PixelSize(scale, scale, unit).converted_to("µm").x
+                        unit = "µm"
+                    else:
+                        from ..dataset_metadata import time_unit_seconds
+                        scale *= time_unit_seconds(unit)
+                        unit = "s"
+                except (ValueError, NotImplementedError):
+                    if count != 1:
+                        raise
+                    LOGGER.debug("Ignoring nonphysical %s unit %r on singleton OME axis", name, unit)
+                    scale, unit = None, None
+            origin = (getattr(self, "_stack_geometry", None) or {}).get(
+                "z_origin_um" if name == "Z" else "time_origin_s")
+            if origin is not None and scale is None:
+                raise ValueError("Intrinsic stack origin requires axis calibration")
+            return AxisInfo(name, count, "space" if name == "Z" else "time",
+                            unit if scale is not None else None, scale, origin)
+        raise ValueError("Expected Z or T")
+
+    @property
+    def dataset_levels(self):
+        self._ensure_open()
+        result = []
+        for level in self.metadata.levels:
+            size = None if level.pixel_size is None else level.pixel_size.converted_to("µm")
+            origin = level.origin_yx
+            axes = [self._axis_info("T")]
+            if self.metadata.axes == "CYX":
+                axes.append(AxisInfo("C", self.metadata.logical_channel_count, "channel"))
+            axes.append(self._axis_info("Z"))
+            for j, name in enumerate("YX"):
+                axes.append(AxisInfo(name, level.spatial_shape[j], "space",
+                    "µm" if size else None, (size.y, size.x)[j] if size else None,
+                    origin[j] if origin else None))
+            if self.metadata.axes == "YXS":
+                axes.append(AxisInfo("S", 3, "channel"))
+            base = replace(level, index=0, downsample_yx=(1., 1.), offset_yx=(0., 0.))
+            meta = replace(self.metadata, shape=base.shape, pixel_size=base.pixel_size,
+                           levels=(base,))
+            result.append(DatasetLevel(level.index, tuple(axes), meta))
+        return tuple(result)
+
+    def _pages_for(self, z, t, level):
+        pages = []
+        for c in range(self._plane_map.sizes["C"]):
+            index = self._plane_map.ifd(z=z, t=t, c=c)
+            base = self._tiff.pages[index].aspage()
+            if level:
+                if base.subifds is None or level > len(base.subifds):
+                    raise ValueError("Selected OME plane has no matching SubIFD level")
+                page = base.pages[level - 1].aspage()
+                if page.offset != base.subifds[level - 1]:
+                    raise ValueError("Invalid selected-plane SubIFD linkage")
+            else:
+                page = base
+                if page.is_reduced:
+                    raise ValueError("OME base plane cannot be a reduced IFD")
+            pages.append(page)
+        return pages
+
+    def _level_pages(self, level):
+        return self._pages_for(self.z, self.t, level)
+
+    def plane_metadata(self, *, z=None, t=None, level=0):
+        self._ensure_open()
+        z = selected_index(self._axis_info("Z"), z, name="Z")
+        t = selected_index(self._axis_info("T"), t, name="T")
+        descriptor = self.metadata.level(level)
+        # Validate metadata for the selected planes, not just a keyframe inherited
+        # by tifffile's lightweight frames. No pixel decode is performed here.
+        for i in range(level, len(self.metadata.levels) if level == 0 else level + 1):
+            expected = self.metadata.level(i)
+            pages = self._pages_for(z, t, i)
+            for page in pages:
+                if ((int(page.imagelength), int(page.imagewidth)) != expected.spatial_shape or
+                        np.dtype(page.dtype).newbyteorder("=") != self.metadata.dtype or
+                        int(page.samplesperpixel) != self.metadata.samples_per_pixel):
+                    raise ValueError("Selected OME plane geometry/dtype/samples disagree with source")
+                profile = None if page.iccprofile is None else bytes(page.iccprofile)
+                if self.metadata.image_type == "rgb" and profile != self.metadata.icc_profile:
+                    raise ValueError("Selected RGB plane ICC profile differs from the source image")
+            # A complete OME PhysicalSizeX/Y pair is authoritative; TIFF
+            # resolution tags are only a fallback when both are absent. Do not
+            # reject a plane for disagreeing *non-authoritative* TIFF tags.
+            pixels = self._plane_map.pixels
+            if pixels.get("PhysicalSizeX") is None and pixels.get("PhysicalSizeY") is None:
+                size = consistent_tiff_resolution_pixel_size(pages)
+                if size is not None and expected.pixel_size is not None:
+                    a, b = size.converted_to("µm"), expected.pixel_size.converted_to("µm")
+                    if not all(math.isclose(x, y, rel_tol=1e-5)
+                               for x, y in ((a.x, b.x), (a.y, b.y))):
+                        raise ValueError("Selected OME plane calibration differs from source")
+        if level == 0:
+            return self.metadata
+        base = replace(descriptor, index=0, downsample_yx=(1., 1.), offset_yx=(0., 0.))
+        return replace(self.metadata, shape=base.shape, pixel_size=base.pixel_size, levels=(base,))
+
+    def read_plane_region(self, y0, y1, x0, x1, *, z, t, level, channels, speculative=False):
+        pages = self._pages_for(z, t, level)
+        values = []
+        for c in channels:
+            page = pages[c]
+            key = (int(page.offset),)
+            with self._read_lock:
+                if key not in self._planes:
+                    self._planes[key] = TiffPlaneReader(page, lock=self._read_lock,
+                                                        cache=self._block_cache)
+                reader = self._planes[key]
+                self._planes.move_to_end(key)
+                while len(self._planes) > 32:
+                    self._planes.popitem(last=False)
+            values.append(reader.read_region(y0, y1, x0, x1, speculative=speculative))
+        return np.stack(values) if self.metadata.axes == "CYX" else values[0]
+
+    def _read_region(self, y0, y1, x0, x1, *, level, channels):
+        return self.read_plane_region(y0, y1, x0, x1, z=self.z, t=self.t,
+                                      level=level, channels=channels)
+
+    def cache_info(self):
+        return self._block_cache.info()
+
+    def acquisition_plane(self, *, z, t, channel=0):
+        """Declared per-plane measurements, separate from intrinsic grid coordinates."""
+        from omeify._calibration import _children
+        from types import MappingProxyType
+        self._ensure_open()
+        self._plane_map.linear(z=z, t=t, c=channel)
+        records = getattr(self, "_acquisition_records", None)
+        if records is None:
+            records = {}
+            for node in _children(self._plane_map.pixels, "Plane"):
+                key = tuple(int(node.get("The" + a, "-1")) for a in "ZTC")
+                self._plane_map.linear(z=key[0], t=key[1], c=key[2])
+                if key in records:
+                    raise ValueError("Duplicate OME acquisition plane declarations")
+                fields = {}
+                for name in ("DeltaT", "ExposureTime", "PositionX", "PositionY", "PositionZ"):
+                    raw = node.get(name)
+                    if raw is not None:
+                        value = float(raw)
+                        if not math.isfinite(value):
+                            raise ValueError("Non-finite acquisition plane coordinate")
+                        unit = node.get(name + "Unit", "s" if name in {"DeltaT", "ExposureTime"}
+                                        else "reference frame")
+                        fields[name] = (value, unit)
+                records[key] = MappingProxyType(fields)
+            self._acquisition_records = records
+        return records.get((z,t,channel), MappingProxyType({}))
+
+    def _close(self):
+        super()._close()
+        self._plane_map = self._plane_index = None
+        self._acquisition_records = None
 
     def series_name(self) -> str | None:
         name = self._ome_image_summary().get("name")

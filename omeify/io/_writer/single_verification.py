@@ -115,6 +115,18 @@ def verify_single_output(
                 "OME TiffData PlaneCount does not match the physical top-level "
                 f"plane count ({spec.plane_count})"
             )
+        for axis, expected in (("X", spec.size_x), ("Y", spec.size_y),
+                               ("Z", spec.size_z), ("T", spec.size_t), ("C", spec.size_c)):
+            if int(pixels.get("Size" + axis, "0")) != expected:
+                raise ValueError(f"OME Size{axis} differs from the writer specification")
+        for xml, value, unit in (("PhysicalSizeZ", spec.z_spacing_um, "µm"),
+                                 ("TimeIncrement", spec.time_increment_s, "s")):
+            if value is not None and (float(pixels.get(xml, "nan")) != value or
+                                      pixels.get(xml + "Unit") != unit):
+                raise ValueError(f"OME {xml} differs from the writer specification")
+        from omeify.utils.stack_geometry import read_stack_geometry, stack_record
+        if read_stack_geometry(root, image) != stack_record(spec):
+            raise ValueError("Intrinsic Z/T geometry differs from the writer specification")
         verification["tiff_data_mapping_matches"] = True
 
         if len(prepared.level_shapes) > 1:

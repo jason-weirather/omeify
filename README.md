@@ -31,6 +31,22 @@ OME-TIFF without installing Omeify.
 [Metadata and MITI](#metadata-minimization-and-miti-alignment) ·
 [Python library](#python-library) · [Reference][reference]
 
+## Z/T release candidate
+
+`Image` remains a two-dimensional observation. `open_dataset()` adds persistent
+OME-TIFF/OME-Zarr source sessions, first-class Z/T axis metadata, borrowed plane
+Images, canonical logical block axes (`TCZYX`, `TZYXS`, `TZYX`) distinct from
+native storage axes, shared bounded caching and explicit optional read-ahead. Both writers
+have `write_dataset()` for regular stacks; Zarr adds explicit XY/XYZ and
+anisotropy-aware pyramids. `convert` and `mutate` accept explicit whole/ranged
+stack scope. Multi-file TIFF is not included.
+
+See [Z/T source sessions, examples, and limitations](docs/z_t_support.md).
+This candidate adds dependency-backed Z/T tests and 2D compatibility regressions.
+Complete the release checklist and representative real-data checks before publishing. Existing 2D examples,
+defaults and methods below retain their meaning. The new stack paths do not
+claim full parity for every existing CLI workflow or irregular acquisition data.
+
 ## Installation
 
 Omeify requires **Python 3.11 or newer**. A normal installation includes both
@@ -106,8 +122,8 @@ can also be converted into a fresh, normalized output.
 
 Source support is intentionally specific, not a promise to convert every TIFF or
 all variations of a vendor format. `--series` selects an image where supported;
-OME-Zarr also provides `--group`, `--z-index`, and `--t-index` selectors for its
-supported image and plane model. See [supported inputs and calibration][supported-inputs]
+Both OME readers accept `--z-index` and `--t-index`; OME-Zarr additionally
+accepts `--group`. Explicit stack scopes are documented in the Z/T guide. See [supported inputs and calibration][supported-inputs]
 for the exact rules. Ordinary TIFF `inspect` can describe metadata from layouts
 that `convert` does not support.
 
@@ -146,7 +162,8 @@ as `convert`. For a polygon, `--mask-background auto` (the default) writes white
 outside RGB/H&E and black outside scalar signals. Use `--mask-background black|white|keep`
 explicitly when needed; `--padding N` adds a colored margin, and `--pad-outside`
 allows the crop to extend beyond the scanned image (otherwise use `--clip` to trim).
-The output report and embedded provenance record the ordered source
+The output report and embedded provenance record source series, the selected
+Z/T plane, the requested Zarr group (where applicable), and the ordered source
 to output channel mapping. RGB is one indivisible logical channel, not three
 separate color planes. See the [cropping guide](docs/regions.md).
 
@@ -472,10 +489,10 @@ store without replacing an existing directory. See [verification][verification],
 
 ## Scope and further documentation
 
-Omeify currently writes two-dimensional scalar (`YX`), multiplex (`CYX`), and
-RGB (`YXS`) images; RGB requires three `uint8` samples. Zarr readers can select
-supported Z/T planes but do not provide general multidimensional or registered
-scene output. Omeify does **not** perform segmentation, registration, stain
+Ordinary Image writing uses scalar (`YX`), multiplex (`CYX`), and RGB (`YXS`)
+observations. Explicit `write_dataset()` and scoped convert/mutate operations
+also write regular Z/T stacks; RGB still requires three `uint8` samples.
+Registered scenes and multi-file TIFF are not supported. Omeify does **not** perform segmentation, registration, stain
 normalization, object measurements, or scientific quality assessment.
 
 Optional `inspect -i` can request advisory metadata answers using a configured

@@ -46,7 +46,14 @@
       "type": "boolean"
     },
     "dimension_order": {
-      "enum": ["XYZCT", "XYZTC", "XYCTZ", "XYCZT", "XYTCZ", "XYTZC"]
+      "enum": [
+        "XYZCT",
+        "XYZTC",
+        "XYCTZ",
+        "XYCZT",
+        "XYTCZ",
+        "XYTZC"
+      ]
     },
     "interleaved": {
       "type": "boolean"
@@ -100,7 +107,16 @@
       "minimum": 1
     },
     "pixel_type": {
-      "enum": ["int8", "int16", "int32", "uint8", "uint16", "uint32", "float", "double"]
+      "enum": [
+        "int8",
+        "int16",
+        "int32",
+        "uint8",
+        "uint16",
+        "uint32",
+        "float",
+        "double"
+      ]
     },
     "channels": {
       "type": "array",
@@ -108,7 +124,11 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "name", "samples_per_pixel"],
+        "required": [
+          "id",
+          "name",
+          "samples_per_pixel"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -131,7 +151,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["ifd", "plane_count"],
+        "required": [
+          "ifd",
+          "plane_count"
+        ],
         "properties": {
           "ifd": {
             "type": "integer",
@@ -143,6 +166,14 @@
           }
         }
       }
+    },
+    "time_increment": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "time_increment_unit": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "allOf": [
@@ -155,8 +186,19 @@
         }
       },
       "then": {
-        "required": ["physical_size_z", "physical_size_z_unit"]
+        "required": [
+          "physical_size_z",
+          "physical_size_z_unit"
+        ]
       }
     }
-  ]
+  ],
+  "dependentRequired": {
+    "time_increment": [
+      "time_increment_unit"
+    ],
+    "time_increment_unit": [
+      "time_increment"
+    ]
+  }
 }

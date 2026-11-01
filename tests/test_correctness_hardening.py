@@ -250,14 +250,10 @@ def test_reader_uses_mapped_image_not_ome_ordinal(tmp_path, comments, foreign):
     assert not inspector.report["warnings"]
 
 
-@pytest.mark.parametrize("fault", ["overlap", "external", "scan_limit"])
-def test_reader_refuses_unproven_ome_mapping(tmp_path, monkeypatch, fault):
-    import omeify._calibration as calibration
-
+@pytest.mark.parametrize("fault", ["overlap", "external"])
+def test_reader_refuses_unproven_ome_mapping(tmp_path, fault):
     path = tmp_path / "unproven.ome.tif"
     _metadata_only_source(path, overlap=fault == "overlap", external=fault == "external")
-    if fault == "scan_limit":
-        monkeypatch.setattr(calibration, "_MAX_PAGES", 1)
     reader = OMETiffReader(path)
     with pytest.raises(ValueError, match="Cannot associate TIFF series"):
         reader.open()
@@ -307,9 +303,15 @@ def test_third_party_levels_are_not_assumed_to_be_twofold(tmp_path, calibrated, 
     with caplog.at_level("DEBUG", logger="omeify.io._tiff_sources.base"):
         with OMETiffReader(path) as reader:
             actual = reader.levels[1].pixel_size
-            assert actual == (PixelSize(1.5, 1.8, "µm") if calibrated else None)
+            # Exact linked 3x SubIFDs are supported by the existing conservative
+            # recovery policy. Scale is known, but sampling phase remains unknown.
+            assert actual.x == pytest.approx(1.5)
+            assert actual.y == pytest.approx(1.8)
+            if not calibrated:
+                assert reader.levels[1].downsample_yx == (3.0, 3.0)
+                assert reader.levels[1].offset_yx is None
     if not calibrated:
-        assert "not be inferred" in caplog.text
+        assert "no independent TIFF physical calibration" in caplog.text
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])

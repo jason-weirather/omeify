@@ -289,7 +289,9 @@ def test_real_tiff_writer_roundtrip_pyramid_and_values(source_file, tmp_path):
     with tifffile.TiffFile(out) as tiff:
         assert len(tiff.pages) == 1
         assert len(tiff.pages[0].pages) == 2
-        assert tiff.pages[0].compression.name == "ADOBE_DEFLATE"
+        # The writer selects TIFF tag 32946 (Deflate), not the alternate
+        # Adobe Deflate tag 8. Both use lossless Deflate compression.
+        assert int(tiff.pages[0].compression) == int(tifffile.COMPRESSION.DEFLATE)
         np.testing.assert_array_equal(tiff.asarray(), expected)
 
 

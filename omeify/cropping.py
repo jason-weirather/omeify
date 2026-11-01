@@ -222,6 +222,16 @@ def crop(
     if labels and channel_name_field is not None:
         raise ValueError("channel_name_field is only valid for qptiff_fusion input")
     with reader:
+        # Record the actual selected plane, including implicit singleton indices.
+        # Group is the caller's selected Zarr context; the series identifies its
+        # declared image within that group. Other source types have no group.
+        selection = {
+            "source_group": group if input_type == "ome_zarr" else None,
+            "source_z": (reader.plane_selection.z if input_type in {"ome_tiff", "ome_zarr"}
+                         else None),
+            "source_t": (reader.plane_selection.t if input_type in {"ome_tiff", "ome_zarr"}
+                         else None),
+        }
         indices, output_names, channel_mapping = _resolved_channels(
             reader.channel_names, requests, renames, rename_by,
         )
@@ -353,6 +363,7 @@ def crop(
                             "coordinate_system": "level0_pixels",
                             "shatter": shatter,
                             "source_series": series, "source_size": [width, height],
+                            **selection,
                             "crop_mode": ("bounding_rectangle" if mask_background == "keep"
                                           else "polygon_mask"),
                             "mask_background": mask_background, "fill_value": fill_value,
@@ -362,7 +373,7 @@ def crop(
                         write_report = writer.write(entries, provenance=provenance)
                     results.append({"path": str(writer.path), "regions": roi_records,
                                     "write_report": write_report})
-    report = {"input_path": str(source_path), "source_series": series,
+    report = {"input_path": str(source_path), "source_series": series, **selection,
             "output_path": str(output_path), "shatter": shatter, "clip": clip,
             "crop_mode": ("bounding_rectangle" if mask_background == "keep"
                           else "polygon_mask"),

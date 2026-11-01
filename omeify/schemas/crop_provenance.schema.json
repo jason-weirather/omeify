@@ -36,6 +36,17 @@
       "type": "integer",
       "minimum": 0
     },
+    "source_group": {
+      "type": ["string", "null"]
+    },
+    "source_z": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "source_t": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
     "source_size": {
       "type": "array",
       "items": {

@@ -11,12 +11,13 @@ import copy
 import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
 
 from ..image_metadata import ImageLevel, ImageMetadata, integer
+from ..dataset_metadata import AxisInfo, DatasetLevel
 from ..pixel_size import PixelSize
 
 READ_VERSIONS = ("0.4", "0.5", "0.6")
@@ -185,11 +186,14 @@ class ParsedImage:
     metadata: ImageMetadata
     intrinsic: str | None
     additional_spatial_context: bool
+    dataset_levels: tuple[DatasetLevel, ...]
+    level_indices: tuple[int, ...]
 
 
 def parse_image(attributes: Mapping[str, Any], zarr_format: int, arrays: Sequence[ArrayInfo], *,
                 series: int = 0, z: int | None = None, t: int | None = None,
-                image_type: str | None = None, intrinsic_only: bool = False) -> ParsedImage:
+                image_type: str | None = None, intrinsic_only: bool = False,
+                allow_default_selection: bool = False) -> ParsedImage:
     version, ome = ome_attributes(attributes, zarr_format)
     multiscales = ome.get("multiscales")
     if not isinstance(multiscales, list) or not multiscales:
@@ -222,7 +226,7 @@ def parse_image(attributes: Mapping[str, Any], zarr_format: int, arrays: Sequenc
             continue
         pos = native.index(axis)
         if index is None:
-            if shape[pos] != 1:
+            if shape[pos] != 1 and not allow_default_selection:
                 raise ValueError(f"Non-singleton {axis}={shape[pos]} requires an explicit {axis} index")
             index = 0
         if index >= shape[pos]:
@@ -292,6 +296,8 @@ def parse_image(attributes: Mapping[str, Any], zarr_format: int, arrays: Sequenc
         transforms.append((scale, translation))
     base_scale, base_shift = transforms[0]
     levels = []
+    compatible = []
+    source_axes = []
     for level, (info, (scale, translation)) in enumerate(zip(arrays, transforms)):
         if (len(info.shape) != len(native) or np.dtype(info.dtype).newbyteorder("=") != dtype
                 or info.zarr_format != zarr_format):
@@ -299,9 +305,29 @@ def parse_image(attributes: Mapping[str, Any], zarr_format: int, arrays: Sequenc
         if version == "0.5" and info.dimension_names != native:
             raise ValueError("Zarr v3 dimension_names must match the NGFF axes")
         for i, axis in enumerate(native):
-            if axis not in "xy" and (info.shape[i] != shape[i] or scale[i] != base_scale[i]
+            if axis in "ct" and (info.shape[i] != shape[i] or scale[i] != base_scale[i]
                                      or translation[i] != base_shift[i]):
-                raise NotImplementedError("Selected-plane pyramids must retain channel, Z and T sampling")
+                raise NotImplementedError("Pyramids must retain channel and T sampling")
+        preserves = all(info.shape[i] == shape[i] and scale[i] == base_scale[i]
+                        and translation[i] == base_shift[i]
+                        for i, axis in enumerate(native) if axis in "zt")
+        if preserves:
+            compatible.append(level)
+        axis_infos = []
+        for i, axis in enumerate(native):
+            unit = axes[i].get("unit")
+            factor = 1.
+            if axis in "zyx" and unit is not None:
+                if unit not in UNIT_TO_UM:
+                    raise NotImplementedError(f"Unsupported NGFF spatial unit {unit!r}")
+                factor, unit = UNIT_TO_UM[unit], "µm"
+            elif axis == "t" and unit is not None:
+                from ..dataset_metadata import time_unit_seconds
+                factor, unit = time_unit_seconds(unit), "s"
+            axis_infos.append(AxisInfo(axis.upper(), int(info.shape[i]),
+                "time" if axis == "t" else "channel" if axis == "c" else "space",
+                unit, float(scale[i] * factor), float(translation[i] * factor)))
+        source_axes.append(tuple(axis_infos))
         height, width = (int(info.shape[i]) for i in spatial_axes)
         normalized_shape = ((height, width, 3) if canonical == "YXS" else
                             (c, height, width) if canonical == "CYX" else (height, width))
@@ -319,12 +345,19 @@ def parse_image(attributes: Mapping[str, Any], zarr_format: int, arrays: Sequenc
                                  ratios, offsets, origin))
     metadata = ImageMetadata(
         axes=canonical, shape=levels[0].shape, dtype=dtype, image_type=kind,
-        channel_names=names, pixel_size=levels[0].pixel_size, levels=tuple(levels),
+        channel_names=names, pixel_size=levels[0].pixel_size,
+        levels=tuple(replace(levels[j], index=i) for i, j in enumerate(compatible)),
         channel_metadata=records, icc_profile=icc,
         background_label=extension.get("background_label", 0),
         unrepresented_geometry=extra_context and not intrinsic_only,
     )
-    return ParsedImage(version, paths, native, tuple(selection), metadata, intrinsic, extra_context)
+    dataset_levels = []
+    for i, descriptor in enumerate(levels):
+        base = replace(descriptor, index=0, downsample_yx=(1., 1.), offset_yx=(0., 0.))
+        plane = replace(metadata, shape=base.shape, pixel_size=base.pixel_size, levels=(base,))
+        dataset_levels.append(DatasetLevel(i, source_axes[i], plane, i in compatible))
+    return ParsedImage(version, paths, native, tuple(selection), metadata, intrinsic, extra_context,
+                       tuple(dataset_levels), tuple(compatible))
 
 
 def output_attributes(metadata: ImageMetadata, levels: Sequence[ImageLevel], *,
@@ -384,7 +417,13 @@ def profile_errors(attributes: Mapping[str, Any]) -> tuple[str, ...]:
         return (f"Metadata must be finite JSON: {type(exc).__name__}",)
     if len(encoded) > MAX_METADATA_BYTES - 4096:
         return ("Generated node metadata exceeds its 8 MiB budget",)
-    errors = report_validator("ome_zarr_profile.schema.json").iter_errors(attributes)
+    try:
+        axes = attributes["ome"]["multiscales"][0]["axes"]
+        stack = any(a.get("name") in ("t", "z") for a in axes)
+    except (KeyError, IndexError, TypeError, AttributeError):
+        stack = False
+    schema = "ome_zarr_dataset_profile.schema.json" if stack else "ome_zarr_profile.schema.json"
+    errors = report_validator(schema).iter_errors(attributes)
     findings = tuple(f"{'/'.join(map(str, e.path)) or '$'}: failed {e.validator}" for e in errors)
     if findings:
         return findings

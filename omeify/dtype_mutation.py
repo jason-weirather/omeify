@@ -154,6 +154,7 @@ def _scan_plane(
     channel_name: str,
     sample_pixels: int,
     progress_label: str | None = None,
+    sample_layout: str = "spatial",
 ) -> _PlaneScan:
     if int(reader.samples_per_pixel) != 1:
         raise ValueError("dtype mutation requires planar grayscale channel pages")
@@ -163,7 +164,10 @@ def _scan_plane(
     height = int(reader.height)
     width = int(reader.width)
     total_pixels = height * width
-    stride = max(1, int(math.ceil(math.sqrt(total_pixels / sample_pixels))))
+    if sample_layout not in {"spatial", "linear"}:
+        raise ValueError("Unknown private scan sampling layout")
+    stride = max(1, int(math.ceil(total_pixels / sample_pixels if sample_layout == "linear"
+                                  else math.sqrt(total_pixels / sample_pixels))))
     finite_pixels = 0
     nan_pixels = 0
     positive_infinity_pixels = 0
@@ -230,9 +234,16 @@ def _scan_plane(
                             float(np.max(unit_residual)),
                         )
 
-                sample_y0 = (-y0) % stride
-                sample_x0 = (-x0) % stride
-                sample_block = block[sample_y0::stride, sample_x0::stride]
+                if sample_layout == "linear":
+                    # Stack scans use a bounded global linear sample even when
+                    # the private concatenated raster is extremely tall/narrow.
+                    rows = [block[row, (-((y0+row)*width+x0)) % stride::stride]
+                            for row in range(y1-y0)]
+                    sample_block = np.concatenate(rows)
+                else:
+                    sample_y0 = (-y0) % stride
+                    sample_x0 = (-x0) % stride
+                    sample_block = block[sample_y0::stride, sample_x0::stride]
                 finite_sample = sample_block[np.isfinite(sample_block)]
                 if finite_sample.size:
                     sampled.append(finite_sample.astype(np.float64, copy=False).reshape(-1))

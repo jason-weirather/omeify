@@ -245,6 +245,12 @@ def _normalized_record(
     if "PhysicalSizeZUnit" in pixels.attrib:
         record["physical_size_z_unit"] = pixels.get("PhysicalSizeZUnit") or ""
 
+    if "TimeIncrement" in pixels.attrib:
+        value = _parse_float(pixels.get("TimeIncrement"), "Pixels TimeIncrement", local_errors)
+        if value is not None:
+            record["time_increment"] = value
+        record["time_increment_unit"] = pixels.get("TimeIncrementUnit") or ""
+
     channels: list[dict[str, Any]] = []
     tiff_data: list[dict[str, Any]] = []
     for child_index, element in enumerate(pixels):
@@ -408,6 +414,8 @@ _ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
         "PhysicalSizeYUnit",
         "PhysicalSizeZ",
         "PhysicalSizeZUnit",
+        "TimeIncrement",
+        "TimeIncrementUnit",
         "SignificantBits",
         "SizeC",
         "SizeT",

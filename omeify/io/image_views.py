@@ -32,6 +32,11 @@ class BorrowedSource(ImageSource):
         )
 
     @property
+    def plane_selection(self):
+        selections = tuple(image.plane_selection for image in self._parents)
+        return selections[0] if selections and all(s == selections[0] for s in selections) else None
+
+    @property
     def backing_paths(self) -> tuple[Path, ...]:
         return tuple(dict.fromkeys(path for image in self._parents for path in image.backing_paths))
 

@@ -46,15 +46,41 @@ def source_options(function):
     for option in reversed((
         click.option("--group", default="", help="OME-Zarr image group within the store."),
         click.option("--z-index", "z", type=click.IntRange(min=0), default=None,
-                     help="Explicit OME-Zarr Z plane; required when Z is non-singleton."),
+                     help="Explicit OME-TIFF/OME-Zarr Z plane; required when Z is non-singleton."),
         click.option("--t-index", "t", type=click.IntRange(min=0), default=None,
-                     help="Explicit OME-Zarr time point; required when T is non-singleton."),
+                     help="Explicit OME-TIFF/OME-Zarr time point; required when T is non-singleton."),
         click.option("--image-type", type=click.Choice(["multichannel", "rgb", "label"]),
                      default=None, help="Explicit pixel interpretation; three channels never imply RGB."),
         click.option("--intrinsic-only", is_flag=True,
                      help="Explicitly export the selected OME-Zarr intrinsic raster, not extra spatial relationships."),
     )):
         function = option(function)
+    return function
+
+
+def stack_options(function):
+    """Explicit volume scope, without changing the ordinary selected-plane path."""
+    for option in reversed((
+        click.option("--all-planes", is_flag=True,
+                     help="Explicitly export all Z/T planes; exclusive with indices and ranges."),
+        click.option("--z-range", nargs=2, type=click.IntRange(min=0), default=None,
+                     help="Half-open Z range START STOP; select T explicitly when non-singleton."),
+        click.option("--t-range", nargs=2, type=click.IntRange(min=0), default=None,
+                     help="Half-open time range START STOP; select Z explicitly when non-singleton."),
+        click.option("--z-spacing-um", type=click.FloatRange(min=0, min_open=True), default=None,
+                     help="Explicit regular stack Z-spacing override in micrometers."),
+        click.option("--time-increment-s", type=click.FloatRange(min=0, min_open=True), default=None,
+                     help="Explicit regular stack time-interval override in seconds."),
+        click.option("--pyramid-axes", type=click.Choice(["xy", "xyz", "auto"]), default="xy",
+                     help="Stack pyramid: XY only, Zarr XYZ, or calibrated anisotropy-aware auto."),
+        click.option("--pyramid-step", "pyramid_factors", nargs=3, multiple=True,
+                     type=click.IntRange(min=1,max=2), help="Explicit Z Y X reduction step; repeat per level."),
+        click.option("--chunk-z", type=click.IntRange(min=1), default=1,
+                     help="Zarr stack chunk depth; default 1. Not an XYZ reduction factor."),
+        click.option("--max-block-mib", type=click.IntRange(min=1), default=64,
+                     help="Zarr stack writer working-block estimate limit, excluding codec scratch."),
+    )):
+        function=option(function)
     return function
 
 
@@ -330,6 +356,7 @@ def concat_command(
 
 @main.command("convert", context_settings=_CONTEXT_SETTINGS)
 @source_options
+@stack_options
 @output_options
 @click.argument(
     "input_path",
@@ -441,6 +468,8 @@ def concat_command(
           "-vvv: also print the complete report unless --output-json is supplied."),
 )
 def convert_command(
+    all_planes: bool, z_range, t_range, z_spacing_um, time_increment_s,
+    pyramid_axes: str, pyramid_factors, chunk_z: int, max_block_mib: int,
     group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
     output_format: str,
     input_path: Path,
@@ -499,6 +528,10 @@ def convert_command(
             input_type=input_type,  # type: ignore[arg-type]
             output_format=output_format, group=group, z=z, t=t, image_type=image_type,
             intrinsic_only=intrinsic_only,
+            all_planes=all_planes, z_range=z_range, t_range=t_range,
+            z_spacing_um=z_spacing_um, time_increment_s=time_increment_s,
+            pyramid_axes=pyramid_axes, pyramid_factors=pyramid_factors or None,
+            chunk_z=chunk_z, max_block_bytes=max_block_mib*1024*1024,
             series=series,
             channel_name_field=channel_name_field,  # type: ignore[arg-type]
             rename_channels=rename_channels,
@@ -528,6 +561,7 @@ def convert_command(
 
 @main.command("mutate", context_settings=_CONTEXT_SETTINGS)
 @source_options
+@stack_options
 @output_options
 @click.argument(
     "input_path",
@@ -673,6 +707,8 @@ def convert_command(
           "-vvv: also print the complete report unless --output-json is supplied."),
 )
 def mutate_command(
+    all_planes: bool, z_range, t_range, z_spacing_um, time_increment_s,
+    pyramid_axes: str, pyramid_factors, chunk_z: int, max_block_mib: int,
     group: str, z: int | None, t: int | None, image_type: str | None, intrinsic_only: bool,
     output_format: str,
     input_path: Path,
@@ -740,6 +776,10 @@ def mutate_command(
             input_type=input_type,  # type: ignore[arg-type]
             output_format=output_format, group=group, z=z, t=t, image_type=image_type,
             intrinsic_only=intrinsic_only,
+            all_planes=all_planes, z_range=z_range, t_range=t_range,
+            z_spacing_um=z_spacing_um, time_increment_s=time_increment_s,
+            pyramid_axes=pyramid_axes, pyramid_factors=pyramid_factors or None,
+            chunk_z=chunk_z, max_block_bytes=max_block_mib*1024*1024,
             channel_name_field=channel_name_field,  # type: ignore[arg-type]
             rename_channels=rename_channels,
             rename_channels_by=rename_mode,

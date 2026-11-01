@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jason-weirather/omeify/schemas/stack_geometry.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema"],
+  "anyOf": [{"required": ["z_origin_um"]}, {"required": ["time_origin_s"]}],
+  "properties": {
+    "schema": {"const": "omeify.stack_geometry/1"},
+    "z_origin_um": {"type": "number"},
+    "time_origin_s": {"type": "number"}
+  }
+}

@@ -43,6 +43,10 @@ def convert(
     series: int = 0,
     output_format: OutputFormat = "ome_tiff",
     group: str = "", z: int | None = None, t: int | None = None,
+    all_planes: bool = False, z_range=None, t_range=None,
+    z_spacing_um: float | None = None, time_increment_s: float | None = None,
+    pyramid_axes: str = "xy", pyramid_factors=None, chunk_z: int = 1,
+    max_block_bytes: int = 64 * 1024 * 1024,
     image_type: str | None = None, intrinsic_only: bool = False,
     storage_options: dict | None = None,
     channel_name_field: Literal["name", "biomarker", "auto"] | None = None,
@@ -81,6 +85,25 @@ def convert(
     and zero-based integers in ``index`` mode. The CLI converts JSON string keys
     into those same semantic values before calling this function.
     """
+
+    from .dataset_workflow import process_dataset, stack_requested
+    if stack_requested(all_planes=all_planes, z_range=z_range, t_range=t_range):
+        if channel_name_field is not None:
+            raise ValueError("channel_name_field does not apply to OME stack workflows")
+        return process_dataset(input_path, output_path, operation='convert',
+            input_type=input_type, output_format=output_format, series=series, group=group,
+            z=z, t=t, all_planes=all_planes, z_range=z_range, t_range=t_range,
+            image_type=image_type, intrinsic_only=intrinsic_only, storage_options=storage_options,
+            rename_channels=rename_channels, rename_channels_by=rename_channels_by,
+            pixel_size=pixel_size, z_spacing_um=z_spacing_um, time_increment_s=time_increment_s,
+            pyramid_axes=pyramid_axes, pyramid_factors=pyramid_factors, chunk_z=chunk_z,
+            max_block_bytes=max_block_bytes, compression=compression, tile_size=tile_size,
+            pyramid_levels=pyramid_levels, downsample=downsample, max_workers=max_workers,
+            display_uuid=display_uuid, software=software, overwrite=overwrite,
+            cache_directory=cache_directory, jpeg_quality=jpeg_quality, jpeg_subsampling=jpeg_subsampling)
+    if (z_spacing_um is not None or time_increment_s is not None or pyramid_axes != "xy"
+            or pyramid_factors is not None or chunk_z != 1 or max_block_bytes != 64*1024*1024):
+        raise ValueError("Stack calibration/pyramid options require all_planes or explicit Z/T ranges")
 
     input_file, output_file = validate_image_paths(
         input_path,
@@ -191,6 +214,8 @@ def convert(
         )
 
         input_report = build_input_report(reader, input_file, source_pixel_size)
+        if input_type in {"ome_tiff", "ome_zarr"}:
+            selected_z, selected_t = reader.plane_selection.z, reader.plane_selection.t
 
     output_size = write_report["output_file"]["size_bytes"]
     output_report = dict(write_report["output_file"])
@@ -209,8 +234,10 @@ def convert(
     )
 
 
+    if input_type in {"ome_tiff", "ome_zarr"}:
+        options.update(z=selected_z, t=selected_t)
     if input_type == "ome_zarr":
-        options.update(group=group, z=z, t=t, image_type=image_type, intrinsic_only=intrinsic_only)
+        options.update(group=group, image_type=image_type, intrinsic_only=intrinsic_only)
     stop_epoch = time.time()
     report: dict[str, object] = {
         "ome": write_report["ome"],

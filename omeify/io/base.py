@@ -45,6 +45,12 @@ class Image:
         return self._source.metadata
 
     @property
+    def plane_selection(self):
+        """Optional immutable source-plane selection; never a mutable navigation cursor."""
+        self._ensure_open()
+        return getattr(self._source, "plane_selection", None)
+
+    @property
     def axes(self) -> str:
         return self._metadata.axes
 
